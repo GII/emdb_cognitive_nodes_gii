@@ -1,0 +1,4 @@
+Perception point
+float32 confidence
+---
+bool added
