@@ -4,7 +4,8 @@ from rclpy.node import Node
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient
 from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward
-from cognitive_node_interfaces.srv import GetIteration, ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
+from cognitive_node_interfaces.srv import GetIteration
+from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 
 from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
 from math import isclose
@@ -206,7 +207,7 @@ class Goal(CognitiveNode):
         :return: The iteration of the experiment
         :rtype: int
         """
-        service_name = self.sim_service + '/get_iteration'
+        service_name = self.robot_service + '/get_iteration'
         iteration_client = ServiceClient(GetIteration, service_name)
         iteration = iteration_client.send_request()
         iteration_client.destroy_node()
@@ -237,7 +238,7 @@ class Goal(CognitiveNode):
         :return: Value that indicates if the objet is too far or not
         :rtype: bool
         """
-        service_name = self.sim_service + '/object_too_far'
+        service_name = self.robot_service + '/object_too_far'
         too_far_client = ServiceClient(ObjectTooFar, service_name)
         too_far = too_far_client.send_request(distance = distance, angle = angle)
         too_far_client.destroy_node()
@@ -252,7 +253,7 @@ class Goal(CognitiveNode):
         :return: The closest distance and angle
         :rtype: float, float
         """
-        service_name = self.sim_service + '/calculate_closest_position'
+        service_name = self.robot_service + '/calculate_closest_position'
         closest_position_client = ServiceClient(CalculateClosestPosition, service_name)
         dist_near, ang_near = closest_position_client.send_request(angle = angle)
         closest_position_client.destroy_node()
@@ -265,7 +266,7 @@ class Goal(CognitiveNode):
         :return: A value that indicates if the object is pickable or not
         :rtype: bool
         """
-        service_name = self.sim_service + '/object_pickable_with_two_hands'
+        service_name = self.robot_service + '/object_pickable_with_two_hands'
         pickable_client = ServiceClient(ObjectPickableWithTwoHands, service_name)
         perception = perception_dict_to_msg(self.perception)
         pickable = pickable_client.send_request(perception=perception)

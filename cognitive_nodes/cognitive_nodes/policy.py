@@ -9,13 +9,13 @@ from core.service_client import ServiceClient
 from cognitive_node_interfaces.srv import SetActivation, Execute
 from cognitive_node_interfaces.srv import GetActivation
 
-from core.utils import perception_dict_to_msg
+from core.utils import perception_dict_to_msg, class_from_classname
 
 class Policy(CognitiveNode):
     """
     Policy class.
     """
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher = None, **params):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher_msg = None, publisher_topic = None, **params):
         """
         Constructor for the Policy class.
 
@@ -26,12 +26,13 @@ class Policy(CognitiveNode):
         :type name: str
         :param class_name: The name of the Policy class
         :type class_name: str
-        :param publisher: The publisher to publicate the execution of the policy
-        :type publisher: rclpy.Node.publisher
+        :param publisher_msg: The publisher message to publicate the execution of the policy
+        :type publisher: str
+        :param publisher_topic: The publisher topic to publicate the execution of the policy
+        :type publisher: str
         """
         
         super().__init__(name, 'cognitive_nodes.policy.Policy', **params)
-        self.publisher = publisher
         self.register_in_LTM({})
 
         self.set_activation_service = self.create_service(
@@ -44,7 +45,9 @@ class Policy(CognitiveNode):
             Execute,
             'policy/' + str(name) + '/execute',
             self.execute_callback
-        )         
+        )
+
+        self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)         
 
     def calculate_activation(self, perception):
         """

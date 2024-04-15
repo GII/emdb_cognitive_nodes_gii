@@ -24,6 +24,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Execute.srv"
   "srv/GetActivation.srv"
   "srv/GetInformation.srv"
+  "srv/GetIteration.srv"
   "srv/GetReward.srv"
   "srv/GetSuccessRate.srv"
   "srv/IsCompatible.srv"
