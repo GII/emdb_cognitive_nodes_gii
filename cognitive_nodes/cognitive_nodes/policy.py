@@ -47,6 +47,7 @@ class Policy(CognitiveNode):
             self.execute_callback
         )
 
+        self.publisher_msg = publisher_msg
         self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)         
 
     def calculate_activation(self, perception):
@@ -92,7 +93,9 @@ class Policy(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
-        self.publisher.publish(self.name)
+        msg = class_from_classname(self.publisher_msg)()
+        msg.data = self.name
+        self.publisher.publish(msg)
         response.policy = self.name
         return response
     
