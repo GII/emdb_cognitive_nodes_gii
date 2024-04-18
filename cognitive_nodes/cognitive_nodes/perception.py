@@ -3,7 +3,7 @@ from rclpy.node import Node
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
-from cognitive_node_interfaces.msg import Value
+from cognitive_node_interfaces.msg import Perception as Percept
 from core.utils import class_from_classname, perception_dict_to_msg
 
 import random
@@ -35,7 +35,7 @@ class Perception(CognitiveNode):
         self.activation = 1.0
 
         #N: Value topic
-        self.perception_publisher = self.create_publisher(Value, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
+        self.perception_publisher = self.create_publisher(Percept, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
