@@ -5,6 +5,7 @@ from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient
 from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward
 from cognitive_node_interfaces.srv import GetIteration
+from core_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 
 from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
@@ -44,6 +45,7 @@ class Goal(CognitiveNode):
         self.period = None
         self.robot_service = robot_service
         self.old_perception = []
+        self.iteration=0
 
         if data:
             self.new_from_configuration_file(data)
@@ -74,6 +76,8 @@ class Goal(CognitiveNode):
             'goal/' + str(name) + '/get_reward',
             self.get_reward_callback
         )
+
+        self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
 
     def new_from_configuration_file(self, data):
         """
@@ -158,7 +162,7 @@ class Goal(CognitiveNode):
         :return: The activation of the goal
         :rtype: float
         """
-        iteration = self.get_iteration()
+        iteration=self.iteration
         if self.end:
             if(iteration % self.period >= self.start) and (
                 iteration % self.period <= self.end
@@ -200,25 +204,19 @@ class Goal(CognitiveNode):
                         self.reward = reward
         return self.reward
     
-    def get_iteration(self):
+    def get_iteration_callback(self, msg:ControlMsg):
         """
         Get the iteration of the experiment, if necessary
 
         :return: The iteration of the experiment
         :rtype: int
         """
-        service_name = 'main_loop/get_iteration'
-        self.get_logger().info("Voy a obtener la iteracion")
-        iteration_client = ServiceClient(GetIteration, service_name)
-        iteration = iteration_client.send_request()
-        self.get_logger().info(f"Ya la obtuve: {iteration.iteration}")
-        iteration_client.destroy_node()
-        return iteration.iteration
+        self.iteration=msg.iteration
     
     def sensorial_changes(self):
         """Return false if all perceptions have the same value as the previous step. True otherwise."""
         for sensor in self.perception:
-            for perception, perception_old in zip(self.perception[sensor], self.per[sensor]):
+            for perception, perception_old in zip(self.perception[sensor], self.old_perception[sensor]):
                 if isinstance(perception, dict):
                     for attribute in perception:
                         difference = abs(perception[attribute] - perception_old[attribute])
@@ -753,7 +751,7 @@ class GoalObjectInBoxStandalone(Goal):
         # This is not coherent at all. I need to change it...
         # Or self.activation is not a list any longer...
         # or perceptions should be flattened
-        for activation in self.activation:
+        for activation in [self.activation]: #Ugly HACK: support activations as list
             if (self.sensorial_changes()) and isclose(activation, 1.0):
                 if self.object_in_close_box() or self.object_in_far_box():
                     self.reward = 1.0
