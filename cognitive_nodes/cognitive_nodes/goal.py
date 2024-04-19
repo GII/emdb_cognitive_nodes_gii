@@ -207,11 +207,13 @@ class Goal(CognitiveNode):
         :return: The iteration of the experiment
         :rtype: int
         """
-        service_name = self.robot_service + '/get_iteration'
+        service_name = 'main_loop/get_iteration'
+        self.get_logger().info("Voy a obtener la iteracion")
         iteration_client = ServiceClient(GetIteration, service_name)
         iteration = iteration_client.send_request()
+        self.get_logger().info(f"Ya la obtuve: {iteration.iteration}")
         iteration_client.destroy_node()
-        return iteration
+        return iteration.iteration
     
     def sensorial_changes(self):
         """Return false if all perceptions have the same value as the previous step. True otherwise."""
