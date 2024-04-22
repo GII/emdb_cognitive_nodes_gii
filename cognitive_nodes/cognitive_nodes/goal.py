@@ -17,7 +17,7 @@ class Goal(CognitiveNode):
     """
     Goal class
     """
-    def __init__(self, name='goal', data = None, class_name = 'cognitive_nodes.goal.Goal', space_class = None, space = None, robot_service = 'simulator/', **params):
+    def __init__(self, name='goal', data = None, class_name = 'cognitive_nodes.goal.Goal', space_class = None, space = None, robot_service = 'simulator', **params):
         """
         Constructor of the Goal class
 
@@ -44,7 +44,7 @@ class Goal(CognitiveNode):
         self.end = None
         self.period = None
         self.robot_service = robot_service
-        self.old_perception = []
+        self.old_perception = {}
         self.iteration=0
 
         if data:
@@ -215,17 +215,20 @@ class Goal(CognitiveNode):
     
     def sensorial_changes(self):
         """Return false if all perceptions have the same value as the previous step. True otherwise."""
-        for sensor in self.perception:
-            for perception, perception_old in zip(self.perception[sensor], self.old_perception[sensor]):
-                if isinstance(perception, dict):
-                    for attribute in perception:
-                        difference = abs(perception[attribute] - perception_old[attribute])
-                        if difference > 0.01:
+        if not self.old_perception and self.perception:
+            return True
+        else:
+            for sensor in self.perception:
+                for perception, perception_old in zip(self.perception[sensor], self.old_perception[sensor]):
+                    if isinstance(perception, dict):
+                        for attribute in perception:
+                            difference = abs(perception[attribute] - perception_old[attribute])
+                            if difference > 0.01:
+                                return True
+                    else:
+                        if abs(perception[0] - perception_old[0]) > 0.01:
                             return True
-                else:
-                    if abs(perception[0] - perception_old[0]) > 0.01:
-                        return True
-        return False
+            return False
     
     def object_too_far(self, distance, angle):
         """
@@ -242,7 +245,7 @@ class Goal(CognitiveNode):
         too_far_client = ServiceClient(ObjectTooFar, service_name)
         too_far = too_far_client.send_request(distance = distance, angle = angle)
         too_far_client.destroy_node()
-        return too_far
+        return too_far.too_far
     
     def calculate_closest_position(self, angle):
         """
@@ -255,11 +258,11 @@ class Goal(CognitiveNode):
         """
         service_name = self.robot_service + '/calculate_closest_position'
         closest_position_client = ServiceClient(CalculateClosestPosition, service_name)
-        dist_near, ang_near = closest_position_client.send_request(angle = angle)
+        response = closest_position_client.send_request(angle = angle)
         closest_position_client.destroy_node()
-        return dist_near, ang_near
+        return response.dist_near, response.ang_near
     
-    def object_pickable_with_two_hands_request(self):
+    def object_pickable_with_two_hands_request(self, distance, angle):
         """
         Check of an obkect is pickable with the two hands of the robot
 
@@ -268,10 +271,9 @@ class Goal(CognitiveNode):
         """
         service_name = self.robot_service + '/object_pickable_with_two_hands'
         pickable_client = ServiceClient(ObjectPickableWithTwoHands, service_name)
-        perception = perception_dict_to_msg(self.perception)
-        pickable = pickable_client.send_request(perception=perception)
+        pickable = pickable_client.send_request(distance = distance, angle = angle)
         pickable_client.destroy_node()
-        return pickable
+        return pickable.pickable
     
     def object_in_close_box(self):
         """
@@ -293,7 +295,7 @@ class Goal(CognitiveNode):
                         break
         return inside
     
-    def object_in_far_box(self, perceptions):
+    def object_in_far_box(self):
         """
         Check if there is an object inside of a box.
 
@@ -323,7 +325,7 @@ class Goal(CognitiveNode):
         :rtype: bool
         """
         together = False
-        if not Goal.object_held():
+        if not self.object_held():
             for cylinder in self.perception["cylinders"]:
                 dist_near, ang_near = self.calculate_closest_position(cylinder["angle"])
                 together = (abs(cylinder["distance"] - dist_near) < 0.05) and (
@@ -355,8 +357,7 @@ class Goal(CognitiveNode):
         """
         return self.perception['ball_in_right_hand'][0]['data']
 
-    @classmethod
-    def object_held(cls):
+    def object_held(self):
         """
         Check if an object is held with one hand.
 
@@ -365,7 +366,7 @@ class Goal(CognitiveNode):
         :return: A value that indicates if the object is held or not
         :rtype: bool
         """
-        return cls.object_held_with_left_hand() or cls.object_held_with_right_hand()
+        return self.object_held_with_left_hand() or self.object_held_with_right_hand()
 
     def object_held_before(self):
         """
@@ -376,10 +377,13 @@ class Goal(CognitiveNode):
         :return: A value that indicates if the object was held or not
         :rtype: bool
         """
-        return (
-            self.old_perception['ball_in_left_hand'][0]['data']
-            or self.old_perception['ball_in_right_hand'][0]['data']
-        )
+        if self.old_perception:
+            return (
+                self.old_perception['ball_in_left_hand'][0]['data']
+                or self.old_perception['ball_in_right_hand'][0]['data']
+            )
+        else:
+            return False
 
     def object_held_with_two_hands(self):
         """
@@ -424,9 +428,7 @@ class Goal(CognitiveNode):
         """
         pickable = False
         for cylinder in self.perception["cylinders"]:
-            pickable = (not Goal.object_held()) and self.object_pickable_with_two_hands_request(
-                cylinder["distance"], cylinder["angle"]
-            )
+            pickable = self.object_pickable_with_two_hands_request(cylinder["distance"], cylinder["angle"]) and not self.object_held()
             if pickable:
                 break
         return pickable
