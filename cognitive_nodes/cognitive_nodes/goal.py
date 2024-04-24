@@ -443,15 +443,18 @@ class Goal(CognitiveNode):
         :rtype: bool
         """
         approximated = False
-        for old, cur in zip(
-            self.old_perception["cylinders"], self.perception["cylinders"]
-        ):
-            approximated = not self.object_too_far(
-                cur["distance"],
-                cur["angle"],
-            ) and self.object_too_far(old["distance"], old["angle"])
-            if approximated:
-                break
+        if self.old_perception:
+            for old, cur in zip(
+                self.old_perception["cylinders"], self.perception["cylinders"]
+            ):
+                approximated = not self.object_too_far(
+                    cur["distance"],
+                    cur["angle"],
+                ) and self.object_too_far(old["distance"], old["angle"])
+                if approximated:
+                    break
+        else:
+            approximated = False
         return approximated
 
     def hand_was_changed(self):

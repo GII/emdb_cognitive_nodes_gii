@@ -24,8 +24,8 @@ class PNode(CognitiveNode):
         :type space: cognitive_nodes.space
         """
         super().__init__(name, class_name, **params)
-        self.spaces = [space if space else class_from_classname(space_class)(name + " space")]
         self.register_in_LTM({})
+        self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback)
 
 
@@ -58,12 +58,14 @@ class PNode(CognitiveNode):
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
-        space = self.get_space(point)
-        if not space:
-            space = self.spaces[0].__class__()
-            self.spaces.append(space)
-        added_point_pos = space.add_point(point, confidence)
-        
+        points = separate_perceptions(point)
+        for point in points:
+            space = self.get_space(point)
+            if not space:
+                space = self.spaces[0].__class__()
+                self.spaces.append(space)
+            added_point_pos = space.add_point(point, confidence)
+            
     def calculate_activation(self, perception=None):
         """
         Calculate the new activation value for a given perception

@@ -185,10 +185,10 @@ class PointBasedSpace(Space):
             candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
             # Check if the perception is compatible with this space
             if self.members.dtype != candidate_point.dtype:
-                Node.get_logger().error(
-                    "Trying to add a perception to a NOT compatible space!!!"
-                    "Please, take into account that, at the present time, sensor order in perception matters!!!"
-                    )
+                # Node.get_logger().error(
+                #     "Trying to add a perception to a NOT compatible space!!!"
+                #     "Please, take into account that, at the present time, sensor order in perception matters!!!"
+                #     )
                 raise RuntimeError("LTM operation cannot continue :-(")
             else:
                 # Copy the new perception on the structured array
@@ -202,7 +202,7 @@ class PointBasedSpace(Space):
                 else:
                     # Points should be replaced when the P-node is full (may be some metric based on number of times
                     # involved in get_probability)
-                    Node.get_logger().debug(self.ident + " full!")
+                    # Node().get_logger().debug(self.ident + " full!")
                     raise RuntimeError("LTM operation cannot continue :-(")
         return added_point_pos
 
