@@ -23,7 +23,6 @@ class CNode(CognitiveNode):
         :type str
         """
         super().__init__(name, class_name, **params)
-        self.register_in_LTM({})
 
     def calculate_activation(self, perception=None):
         """

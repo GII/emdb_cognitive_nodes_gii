@@ -29,8 +29,7 @@ class Perception(CognitiveNode):
         :param normalize_data: Values in order to normalize values
         :type normalize_data: dict
         """
-        super().__init__(name, class_name, **params)
-        self.register_in_LTM({})        
+        super().__init__(name, class_name, **params)       
         # We set 1.0 as the default activation value
         self.activation = 1.0
 

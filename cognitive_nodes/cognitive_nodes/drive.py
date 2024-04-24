@@ -23,7 +23,6 @@ class Drive(CognitiveNode):
         :type class_name: str
         """
         super().__init__(name, class_name, **params)
-        self.register_in_LTM({})
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(

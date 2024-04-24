@@ -24,8 +24,7 @@ class PNode(CognitiveNode):
         :type space: cognitive_nodes.space
         """
         super().__init__(name, class_name, **params)
-        self.register_in_LTM({})
-        self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
+        self.spaces = [space if space else class_from_classname(space_class)(name + " space")]
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback)
 
 

@@ -37,7 +37,6 @@ class Goal(CognitiveNode):
         :type robot_service: str
         """
         super().__init__(name, class_name, **params)
-        self.register_in_LTM({})
         self.reward = 0.0
         self.embedded = set()
         self.start = None

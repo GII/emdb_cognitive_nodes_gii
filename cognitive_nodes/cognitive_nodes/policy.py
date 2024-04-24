@@ -33,7 +33,6 @@ class Policy(CognitiveNode):
         """
         
         super().__init__(name, 'cognitive_nodes.policy.Policy', **params)
-        self.register_in_LTM({})
 
         self.set_activation_service = self.create_service(
             SetActivation,
