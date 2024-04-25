@@ -65,7 +65,7 @@ class Policy(CognitiveNode):
             for cnode in cnodes:
                 service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
                 activation_client = ServiceClient(GetActivation, service_name)
-                perception = perception_dict_to_msg(perception = None)
+                perception = perception_dict_to_msg(perception)
                 activation = activation_client.send_request(perception = perception)
                 activation_client.destroy_node()
                 cnode_activations.append(activation)
