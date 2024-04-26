@@ -78,7 +78,7 @@ class PNode(CognitiveNode):
             activations = []
             perceptions = separate_perceptions(perception)
             for perception_line in perceptions:
-                space = self.get_space(perception)
+                space = self.get_space(perception_line)
                 if space:
                     activation_value = space.get_probability(perception_line)
                 else:

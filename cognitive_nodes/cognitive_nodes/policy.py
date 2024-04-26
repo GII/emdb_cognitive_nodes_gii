@@ -5,7 +5,7 @@ import random
 import numpy
 
 from std_msgs.msg import Int64
-from core.service_client import ServiceClient
+from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, Execute
 from cognitive_node_interfaces.srv import GetActivation
 
@@ -37,19 +37,21 @@ class Policy(CognitiveNode):
         self.set_activation_service = self.create_service(
             SetActivation,
             'policy/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            self.set_activation_callback,
+            callback_group=self.cbgroup_server
         )
 
         self.execute_service = self.create_service(
             Execute,
             'policy/' + str(name) + '/execute',
-            self.execute_callback
+            self.execute_callback,
+            callback_group=self.cbgroup_server
         )
 
         self.publisher_msg = publisher_msg
         self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)         
 
-    def calculate_activation(self, perception):
+    async def calculate_activation(self, perception):
         """
         Calculate the activation level of the policy by obtaining that of its neighboring CNodes
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
@@ -64,11 +66,10 @@ class Policy(CognitiveNode):
             cnode_activations = []
             for cnode in cnodes:
                 service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
-                activation_client = ServiceClient(GetActivation, service_name)
+                activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
                 perception = perception_dict_to_msg(perception)
-                activation = activation_client.send_request(perception = perception)
-                activation_client.destroy_node()
-                cnode_activations.append(activation)
+                activation = await activation_client.send_request_async(perception = perception)
+                cnode_activations.append(activation.activation)
                 self.activation = numpy.max(cnode_activations)
         else:
             self.activation = 0.0

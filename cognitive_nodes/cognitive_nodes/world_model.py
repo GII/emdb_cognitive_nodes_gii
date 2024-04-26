@@ -51,6 +51,9 @@ class WorldModel(CognitiveNode):
             self.is_compatible_callback
         )
 
+        #TODO: Set activation from main_loop
+        self.activation = 1.0
+
     def set_activation_callback(self, request, response):
         """
         Some processes can modify the activation of a World Model

@@ -1,7 +1,7 @@
 import numpy
 import rclpy
 from core.cognitive_node import CognitiveNode
-from core.service_client import ServiceClient
+from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import GetActivation
 from core.utils import perception_dict_to_msg
 
@@ -24,7 +24,7 @@ class CNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
 
-    def calculate_activation(self, perception=None):
+    async def calculate_activation(self, perception=None):
         """
         Calculate the new activation value by multiplying the activation values of its previous neighbors.
         By default, with percerception = None, it will multiply the last activations of its neighbots, but 
@@ -40,11 +40,11 @@ class CNode(CognitiveNode):
         neighbors_name = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"]
         for name in neighbors_name:
             service_name = 'cognitive_node/' + str(name) + '/get_activation'
-            activation_client = ServiceClient(GetActivation, service_name)
-            perception = perception_dict_to_msg(perception)
-            activation = activation_client.send_request(perception = perception)
-            activation_client.destroy_node()
-            node_activations.append(activation)
+            activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
+            perception_msg = perception_dict_to_msg(perception)
+            activation = await activation_client.send_request_async(perception = perception_msg)
+            node_activations.append(activation.activation)
+        
 
         activation_list = numpy.prod(node_activations)
         self.activation = numpy.max(activation_list)
@@ -55,3 +55,17 @@ class CNode(CognitiveNode):
             self.publish_activation(self.activation)
             
         return self.activation
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    cnode = CNode()
+
+    rclpy.spin(cnode)
+
+    cnode.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

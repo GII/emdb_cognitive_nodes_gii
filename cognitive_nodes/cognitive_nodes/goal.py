@@ -135,7 +135,7 @@ class Goal(CognitiveNode):
             response.reached = False
         return response
     
-    def get_reward_callback(self, request, response):
+    async def get_reward_callback(self, request, response):
         """
         Callback method to calculate the reward obtained 
 
@@ -150,7 +150,7 @@ class Goal(CognitiveNode):
         if perception:
             self.old_perception = self.perception
             self.perception = perception
-        self.get_reward()
+        await self.get_reward()
         response.reward = self.reward
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(self.reward))
         return response
