@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 
 from core.cognitive_node import CognitiveNode
-from core.service_client import ServiceClient
+from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward
 from cognitive_node_interfaces.srv import GetIteration
 from core_interfaces.msg import ControlMsg
@@ -59,21 +59,24 @@ class Goal(CognitiveNode):
         self.set_activation_service = self.create_service(
             SetActivation,
             'goal/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            self.set_activation_callback, 
+            callback_group=self.cbgroup_server
         )
 
         # N: Is Reached Service
         self.is_reached_service = self.create_service(
             IsReached,
             'goal/' + str(name) + '/is_reached',
-            self.is_reached_callback
+            self.is_reached_callback,
+            callback_group=self.cbgroup_server
         )
 
         # N: Get Reward Service
         self.get_reward_service = self.create_service(
             GetReward,
             'goal/' + str(name) + '/get_reward',
-            self.get_reward_callback
+            self.get_reward_callback,
+            callback_group=self.cbgroup_server
         )
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
@@ -109,7 +112,7 @@ class Goal(CognitiveNode):
         response.set = True
         return response
     
-    def is_reached_callback(self, request, response):
+    async def is_reached_callback(self, request, response):
         """
         Check if the goal has been reached
 
@@ -125,7 +128,7 @@ class Goal(CognitiveNode):
         if perception:
             self.old_perception = self.perception
             self.perception = perception
-        self.get_reward()
+        await self.get_reward()
         if isclose(self.reward, 1.0):
             response.reached = True
         else:
@@ -241,10 +244,9 @@ class Goal(CognitiveNode):
         :rtype: bool
         """
         service_name = self.robot_service + '/object_too_far'
-        too_far_client = ServiceClient(ObjectTooFar, service_name)
-        too_far = too_far_client.send_request(distance = distance, angle = angle)
-        too_far_client.destroy_node()
-        return too_far.too_far
+        too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name, self.cbgroup_client)
+        too_far = too_far_client.send_request_async(distance = distance, angle = angle)
+        return too_far
     
     def calculate_closest_position(self, angle):
         """
@@ -269,12 +271,11 @@ class Goal(CognitiveNode):
         :rtype: bool
         """
         service_name = self.robot_service + '/object_pickable_with_two_hands'
-        pickable_client = ServiceClient(ObjectPickableWithTwoHands, service_name)
-        pickable = pickable_client.send_request(distance = distance, angle = angle)
-        pickable_client.destroy_node()
-        return pickable.pickable
+        pickable_client = ServiceClientAsync(self, ObjectPickableWithTwoHands, service_name, self.cbgroup_client)
+        pickable = pickable_client.send_request_async(distance = distance, angle = angle)
+        return pickable
     
-    def object_in_close_box(self):
+    async def object_in_close_box(self):
         """
         Check if there is an object inside of a box.
 
@@ -285,7 +286,7 @@ class Goal(CognitiveNode):
         """
         inside = False
         for box in self.perception["boxes"]:
-            if not self.object_too_far(box["distance"], box["angle"]):
+            if not (await self.object_too_far(box["distance"], box["angle"])).too_far:
                 for cylinder in self.perception["cylinders"]:
                     inside = (abs(box["distance"] - cylinder["distance"]) < 0.05) and (
                         abs(box["angle"] - cylinder["angle"]) < 0.05
@@ -294,7 +295,7 @@ class Goal(CognitiveNode):
                         break
         return inside
     
-    def object_in_far_box(self):
+    async def object_in_far_box(self):
         """
         Check if there is an object inside of a box.
 
@@ -305,7 +306,7 @@ class Goal(CognitiveNode):
         """
         inside = False
         for box in self.perception["boxes"]:
-            if not self.object_too_far(box["distance"], box["angle"]):
+            if not (await self.object_too_far(box["distance"], box["angle"])).too_far:
                 for cylinder in self.perception["cylinders"]:
                     inside = (abs(box["distance"] - cylinder["distance"]) < 0.05) and (
                         abs(box["angle"] - cylinder["angle"]) < 0.05
@@ -416,7 +417,7 @@ class Goal(CognitiveNode):
                 break
         return same_side
 
-    def object_pickable_with_two_hands(self):
+    async def object_pickable_with_two_hands(self):
         """
         Check if an object can be hold with two hands.
 
@@ -427,12 +428,12 @@ class Goal(CognitiveNode):
         """
         pickable = False
         for cylinder in self.perception["cylinders"]:
-            pickable = self.object_pickable_with_two_hands_request(cylinder["distance"], cylinder["angle"]) and not self.object_held()
+            pickable = (await self.object_pickable_with_two_hands_request(cylinder["distance"], cylinder["angle"])).pickable and not self.object_held()
             if pickable:
                 break
         return pickable
 
-    def object_was_approximated(self):
+    async def object_was_approximated(self):
         """
         Check if an object was moved towards the robot's reachable area.
 
@@ -446,10 +447,10 @@ class Goal(CognitiveNode):
             for old, cur in zip(
                 self.old_perception["cylinders"], self.perception["cylinders"]
             ):
-                approximated = not self.object_too_far(
+                approximated = not (await self.object_too_far(
                     cur["distance"],
                     cur["angle"],
-                ) and self.object_too_far(old["distance"], old["angle"])
+                )).too_far and (await self.object_too_far(old["distance"], old["angle"])).too_far
                 if approximated:
                     break
         else:
@@ -744,7 +745,7 @@ class GoalVegetablesInSkillet(Goal):
 class GoalObjectInBoxStandalone(Goal):
     """Goal representing the desire of putting an object in a box."""
 
-    def get_reward(self):
+    async def get_reward(self):
         """
         Calculate the reward for the current sensor values.
 
@@ -757,7 +758,7 @@ class GoalObjectInBoxStandalone(Goal):
         # or perceptions should be flattened
         for activation in [self.activation]: #Ugly HACK: support activations as list
             if (self.sensorial_changes()) and isclose(activation, 1.0):
-                if self.object_in_close_box() or self.object_in_far_box():
+                if (await self.object_in_close_box()) or (await self.object_in_far_box()):
                     self.reward = 1.0
                 elif self.object_held():
                     if self.object_held_with_two_hands():
@@ -767,9 +768,9 @@ class GoalObjectInBoxStandalone(Goal):
                     elif not self.object_held_before():
                         self.reward = 0.3
                 elif not self.object_held_before():
-                    if self.object_pickable_with_two_hands():
+                    if (await self.object_pickable_with_two_hands()):
                         self.reward = 0.3
-                    elif self.object_was_approximated():
+                    elif (await self.object_was_approximated()):
                         self.reward = 0.2
         return self.reward
     
