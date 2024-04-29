@@ -81,6 +81,13 @@ class Goal(CognitiveNode):
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
 
+        #Service clients
+        service_name_pickable = robot_service + '/object_pickable_with_two_hands'
+        self.pickable_client = ServiceClientAsync(self, ObjectPickableWithTwoHands, service_name_pickable, self.cbgroup_client)
+
+        service_name_too_far = self.robot_service + '/object_too_far'
+        self.too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name_too_far, self.cbgroup_client)
+
     def new_from_configuration_file(self, data):
         """
         Create attributes from the data configuration dictionary
@@ -243,9 +250,7 @@ class Goal(CognitiveNode):
         :return: Value that indicates if the objet is too far or not
         :rtype: bool
         """
-        service_name = self.robot_service + '/object_too_far'
-        too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name, self.cbgroup_client)
-        too_far = too_far_client.send_request_async(distance = distance, angle = angle)
+        too_far = self.too_far_client.send_request_async(distance = distance, angle = angle)
         return too_far
     
     def calculate_closest_position(self, angle):
@@ -270,9 +275,7 @@ class Goal(CognitiveNode):
         :return: A value that indicates if the object is pickable or not
         :rtype: bool
         """
-        service_name = self.robot_service + '/object_pickable_with_two_hands'
-        pickable_client = ServiceClientAsync(self, ObjectPickableWithTwoHands, service_name, self.cbgroup_client)
-        pickable = pickable_client.send_request_async(distance = distance, angle = angle)
+        pickable = self.pickable_client.send_request_async(distance = distance, angle = angle)
         return pickable
     
     async def object_in_close_box(self):
