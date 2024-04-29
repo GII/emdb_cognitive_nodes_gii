@@ -43,6 +43,7 @@ class CNode(CognitiveNode):
             activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
             perception_msg = perception_dict_to_msg(perception)
             activation = await activation_client.send_request_async(perception = perception_msg)
+            activation_client.cli.destroy()
             node_activations.append(activation.activation)
         
 

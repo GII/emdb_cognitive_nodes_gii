@@ -69,6 +69,7 @@ class Policy(CognitiveNode):
                 activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
                 perception = perception_dict_to_msg(perception)
                 activation = await activation_client.send_request_async(perception = perception)
+                activation_client.cli.destroy()
                 cnode_activations.append(activation.activation)
                 self.activation = numpy.max(cnode_activations)
         else:
