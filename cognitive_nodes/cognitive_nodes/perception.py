@@ -40,14 +40,16 @@ class Perception(CognitiveNode):
         self.set_activation_service = self.create_service(
             SetActivation,
             'perception/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            self.set_activation_callback,
+            callback_group=self.cbgroup_server
         )
 
         # N: Set Inputs Service
         self.set_inputs_service = self.create_service(
             SetInputs,
             'perception/' + str(name) + '/set_inputs',
-            self.set_inputs_callback
+            self.set_inputs_callback,
+            callback_group=self.cbgroup_server
         )
 
         self.normalize_values = normalize_data

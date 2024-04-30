@@ -65,11 +65,11 @@ class Policy(CognitiveNode):
         if cnodes:
             cnode_activations = []
             for cnode in cnodes:
+                perception_msg = perception_dict_to_msg(perception)
                 service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
-                activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
-                perception = perception_dict_to_msg(perception)
-                activation = await activation_client.send_request_async(perception = perception)
-                activation_client.cli.destroy()
+                if not service_name in self.node_clients:
+                    self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
+                activation = await self.node_clients[service_name].send_request_async(perception = perception_msg)
                 cnode_activations.append(activation.activation)
                 self.activation = numpy.max(cnode_activations)
         else:

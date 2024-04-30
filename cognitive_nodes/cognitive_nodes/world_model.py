@@ -27,28 +27,32 @@ class WorldModel(CognitiveNode):
         self.set_activation_service = self.create_service(
             SetActivation,
             'world_model/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            self.set_activation_callback,
+            callback_group=self.cbgroup_server
         )
 
         # N: Predict Service
         self.predict_service = self.create_service(
             Predict,
             'world_model/' + str(name) + '/predict',
-            self.predict_callback
+            self.predict_callback,
+            callback_group=self.cbgroup_server
         )
 
         # N: Get Success Rate Service
         self.get_success_rate_service = self.create_service(
             GetSuccessRate,
             'world_model/' + str(name) + '/get_success_rate',
-            self.get_success_rate_callback
+            self.get_success_rate_callback,
+            callback_group=self.cbgroup_server
         )
 
         # N: Is Compatible Service
         self.is_compatible_service = self.create_service(
             IsCompatible,
             'world_model/' + str(name) + '/is_compatible',
-            self.is_compatible_callback
+            self.is_compatible_callback,
+            callback_group=self.cbgroup_server
         )
 
         #TODO: Set activation from main_loop

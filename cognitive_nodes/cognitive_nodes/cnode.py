@@ -39,14 +39,12 @@ class CNode(CognitiveNode):
         node_activations = []
         neighbors_name = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"]
         for name in neighbors_name:
-            service_name = 'cognitive_node/' + str(name) + '/get_activation'
-            activation_client = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
             perception_msg = perception_dict_to_msg(perception)
-            activation = await activation_client.send_request_async(perception = perception_msg)
-            activation_client.cli.destroy()
+            service_name = 'cognitive_node/' + str(name) + '/get_activation'
+            if not service_name in self.node_clients:
+                self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
+            activation = await self.node_clients[service_name].send_request_async(perception = perception_msg)
             node_activations.append(activation.activation)
-        
-
         activation_list = numpy.prod(node_activations)
         self.activation = numpy.max(activation_list)
         #TODO: Selection of the perception that have the max CNode or PNode activation (if it exists), as in the old MDB

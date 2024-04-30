@@ -25,7 +25,7 @@ class PNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
-        self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback)
+        self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
 
 
     def add_point_callback(self, request, response):
