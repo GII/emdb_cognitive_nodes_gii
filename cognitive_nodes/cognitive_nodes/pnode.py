@@ -86,7 +86,7 @@ class PNode(CognitiveNode):
 
                 activations.append(activation_value) 
             
-            self.activation == activations[0] if len(activations) == 1 else activations
+            self.activation = activations[0] if len(activations) == 1 else float(activations)
         
         if self.activation_topic:
             self.publish_activation(self.activation)
