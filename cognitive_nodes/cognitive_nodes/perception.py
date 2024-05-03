@@ -115,7 +115,7 @@ class Perception(CognitiveNode):
         :param reading: The sensor values
         :type reading: ROS msg
         """
-        self.get_logger().info("Receiving " + self.name + " = " + str(reading))
+        self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
         self.reading = reading
         self.process_and_send_reading()
 
@@ -155,6 +155,7 @@ class Perception(CognitiveNode):
             value.append(dict(data=self.reading.data))
 
         sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
         sensor_msg = perception_dict_to_msg(sensor)
         self.perception_publisher.publish(sensor_msg)
 

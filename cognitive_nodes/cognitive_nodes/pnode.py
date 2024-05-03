@@ -81,6 +81,7 @@ class PNode(CognitiveNode):
                 space = self.get_space(perception_line)
                 if space:
                     activation_value = space.get_probability(perception_line)
+                    self.get_logger().debug(f'PNODE DEBUG: Space provided activation: {activation_value}')
                 else:
                     activation_value = 0.0
 
