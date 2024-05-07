@@ -51,7 +51,7 @@ class CNode(CognitiveNode):
         self.activation = numpy.max(activation_list)
         #TODO: Selection of the perception that have the max CNode or PNode activation (if it exists), as in the old MDB
 
-        self.get_logger().info(self.node_type + " activation for " + self.name + " = " + str(self.activation))
+        self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
         if self.activation_topic:
             self.publish_activation(self.activation)
             

@@ -75,7 +75,7 @@ class Policy(CognitiveNode):
         else:
             self.activation = 0.0
         
-        self.get_logger().info(self.node_type + " activation for " + self.name + " = " + str(self.activation))
+        self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
         if self.activation_topic:
             self.publish_activation(self.activation)
         return self.activation

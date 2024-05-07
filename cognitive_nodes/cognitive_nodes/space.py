@@ -188,7 +188,7 @@ class PointBasedSpace(Space):
                 # Node.get_logger().error(
                 #     "Trying to add a perception to a NOT compatible space!!!"
                 #     "Please, take into account that, at the present time, sensor order in perception matters!!!"
-                #     )
+                #     ) #TODO: Pass pnode logger to space
                 raise RuntimeError("LTM operation cannot continue :-(")
             else:
                 # Copy the new perception on the structured array
@@ -488,16 +488,16 @@ class SVMSpace(PointBasedSpace):
         memberships[memberships <= 0] = 0
         self.model.fit(members, memberships)
         score = self.model.score(members, memberships)
-        Node.get_logger().logdebug(
-            "SVM: iterations "
-            + str(self.model.n_iter_)
-            + " support vectors "
-            + str(len(self.model.support_vectors_))
-            + " score "
-            + str(score)
-            + " points "
-            + str(len(members))
-        )
+        # Node.get_logger().logdebug(
+        #     "SVM: iterations "
+        #     + str(self.model.n_iter_)
+        #     + " support vectors "
+        #     + str(len(self.model.support_vectors_))
+        #     + " score "
+        #     + str(score)
+        #     + " points "
+        #     + str(len(members))
+        # ) #TODO: Pass pnode logger to space
         return score
 
     def remove_close_points(self):
@@ -525,9 +525,9 @@ class SVMSpace(PointBasedSpace):
                 self.memberships[self.size] = memberships[previous_size - 1]
                 self.size += 1
                 score = self.fit_and_score()
-        Node.get_logger.logdebug(
-            self.ident + ": throwing away " + str(previous_size - self.size) + " points."
-        )
+        # Node.get_logger.logdebug(
+        #     self.ident + ": throwing away " + str(previous_size - self.size) + " points."
+        # ) #TODO: Pass pnode logger to space
 
     def add_point(self, perception, confidence):
         """
@@ -648,7 +648,7 @@ class ANNSpace(PointBasedSpace):
                 self.first_data = self.size - self.max_data
         
             if (((confidence <= 0 and prediction == 1.0) or (confidence >= 0 and prediction == 0.0))):
-                Node.get_logger().logdebug(f"Training... {self.ident}")
+                #Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
                 X = members[self.first_data : self.size]
                 Y = memberships[self.first_data : self.size]
                 n_0 = int(len(Y[Y == 0.0]))

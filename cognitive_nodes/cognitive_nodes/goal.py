@@ -17,7 +17,7 @@ class Goal(CognitiveNode):
     """
     Goal class
     """
-    def __init__(self, name='goal', data = None, class_name = 'cognitive_nodes.goal.Goal', space_class = None, space = None, robot_service = 'simulator', **params):
+    def __init__(self, name='goal', data = None, class_name = 'cognitive_nodes.goal.Goal', space_class = None, space = None, robot_service = 'simulator', normalize_data=None, **params):
         """
         Constructor of the Goal class
 
@@ -87,6 +87,8 @@ class Goal(CognitiveNode):
 
         service_name_too_far = self.robot_service + '/object_too_far'
         self.too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name_too_far, self.cbgroup_client)
+
+        self.normalize_values=normalize_data
 
     def new_from_configuration_file(self, data):
         """
@@ -250,7 +252,7 @@ class Goal(CognitiveNode):
         :return: Value that indicates if the objet is too far or not
         :rtype: bool
         """
-        too_far = self.too_far_client.send_request_async(distance = distance, angle = angle)
+        too_far = self.too_far_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
         return too_far
     
     def calculate_closest_position(self, angle):
@@ -275,7 +277,7 @@ class Goal(CognitiveNode):
         :return: A value that indicates if the object is pickable or not
         :rtype: bool
         """
-        pickable = self.pickable_client.send_request_async(distance = distance, angle = angle)
+        pickable = self.pickable_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
         return pickable
     
     async def object_in_close_box(self):
@@ -514,6 +516,35 @@ class Goal(CognitiveNode):
                         elif cylinder["color"] == "cabbage":
                             cabbage_inside = True
         return carrot_inside and eggplant_inside and cabbage_inside
+    
+
+    def denormalize(self, type, value):
+        raw=0
+        norm_max=0
+        norm_min=0
+
+        if not self.normalize_values:
+            raise Exception('Normalization values not defined')
+
+        if type=='distance':
+            norm_max=self.normalize_values["distance_max"]
+            norm_min=self.normalize_values["distance_min"]
+
+        elif type=='angle':
+            norm_max=self.normalize_values["angle_max"]
+            norm_min=self.normalize_values["angle_min"]
+
+        elif type=='diameter':
+            norm_max=self.normalize_values["diameter_max"]
+            norm_min=self.normalize_values["diameter_min"]
+
+        else:
+            raise ValueError
+        
+        raw= value*(norm_max-norm_min)+norm_min
+            
+
+        return raw
 
 
 class GoalObjectHeldLeftHand(Goal):
