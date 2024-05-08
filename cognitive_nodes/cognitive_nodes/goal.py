@@ -234,10 +234,10 @@ class Goal(CognitiveNode):
                     if isinstance(perception, dict):
                         for attribute in perception:
                             difference = abs(perception[attribute] - perception_old[attribute])
-                            if difference > 0.01:
+                            if difference > 0.007:
                                 return True
                     else:
-                        if abs(perception[0] - perception_old[0]) > 0.01:
+                        if abs(perception[0] - perception_old[0]) > 0.007:
                             return True
             return False
     
@@ -293,8 +293,8 @@ class Goal(CognitiveNode):
         for box in self.perception["boxes"]:
             if not (await self.object_too_far(box["distance"], box["angle"])).too_far:
                 for cylinder in self.perception["cylinders"]:
-                    inside = (abs(box["distance"] - cylinder["distance"]) < 0.05) and (
-                        abs(box["angle"] - cylinder["angle"]) < 0.05
+                    inside = (abs(box["distance"] - cylinder["distance"]) < 0.03) and (
+                        abs(box["angle"] - cylinder["angle"]) < 0.02
                     )
                     if inside:
                         break
@@ -311,10 +311,10 @@ class Goal(CognitiveNode):
         """
         inside = False
         for box in self.perception["boxes"]:
-            if not (await self.object_too_far(box["distance"], box["angle"])).too_far:
+            if (await self.object_too_far(box["distance"], box["angle"])).too_far:
                 for cylinder in self.perception["cylinders"]:
-                    inside = (abs(box["distance"] - cylinder["distance"]) < 0.05) and (
-                        abs(box["angle"] - cylinder["angle"]) < 0.05
+                    inside = (abs(box["distance"] - cylinder["distance"]) < 0.03) and (
+                        abs(box["angle"] - cylinder["angle"]) < 0.02
                     )
                     if inside:
                         break
@@ -333,8 +333,8 @@ class Goal(CognitiveNode):
         if not self.object_held():
             for cylinder in self.perception["cylinders"]:
                 dist_near, ang_near = self.calculate_closest_position(cylinder["angle"])
-                together = (abs(cylinder["distance"] - dist_near) < 0.05) and (
-                    abs(cylinder["angle"] - ang_near) < 0.05
+                together = (abs(cylinder["distance"] - dist_near) < 0.03) and (
+                    abs(cylinder["angle"] - ang_near) < 0.02
                 )
                 if together:
                     break
@@ -415,8 +415,8 @@ class Goal(CognitiveNode):
         """
         same_side = False
         for box in self.perception["boxes"]:
-            same_side = (self.perception['ball_in_left_hand'][0]['data'] and box['angle'] > 0) or (
-                self.perception['ball_in_right_hand'][0]['data'] and not (box['angle'] > 0)
+            same_side = (self.perception['ball_in_left_hand'][0]['data'] and box['angle'] > 0.5) or (
+                self.perception['ball_in_right_hand'][0]['data'] and not (box['angle'] > 0.5)
             )
             if same_side:
                 break
