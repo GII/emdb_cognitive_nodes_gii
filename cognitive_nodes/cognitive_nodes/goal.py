@@ -43,7 +43,6 @@ class Goal(CognitiveNode):
         self.end = None
         self.period = None
         self.robot_service = robot_service
-        self.old_perception = {}
         self.iteration=0
 
         if data:
@@ -133,10 +132,8 @@ class Goal(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.IsReached_Response
         """
         self.get_logger().info('Checking if is reached..')
-        perception = perception_msg_to_dict(request.perception)
-        if perception:
-            self.old_perception = self.perception
-            self.perception = perception
+        self.old_perception = perception_msg_to_dict(request.old_perception)
+        self.perception = perception_msg_to_dict(request.perception)
         await self.get_reward()
         if isclose(self.reward, 1.0):
             response.reached = True
@@ -155,10 +152,8 @@ class Goal(CognitiveNode):
         :return: Response that contais the reward
         :rtype: cognitive_node_interfaces.srv.GetReward_Response
         """
-        perception = perception_msg_to_dict(request.perception)
-        if perception:
-            self.old_perception = self.perception
-            self.perception = perception
+        self.old_perception = perception_msg_to_dict(request.old_perception)
+        self.perception = perception_msg_to_dict(request.perception)
         await self.get_reward()
         response.reward = self.reward
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(self.reward))
@@ -223,6 +218,8 @@ class Goal(CognitiveNode):
         :rtype: int
         """
         self.iteration=msg.iteration
+        # if msg.command == "reset_world":
+        #     self.perception = {}
     
     def sensorial_changes(self):
         """Return false if all perceptions have the same value as the previous step. True otherwise."""
