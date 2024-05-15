@@ -17,7 +17,7 @@ class Goal(CognitiveNode):
     """
     Goal class
     """
-    def __init__(self, name='goal', data = None, class_name = 'cognitive_nodes.goal.Goal', space_class = None, space = None, robot_service = 'simulator', normalize_data=None, **params):
+    def __init__(self, name='goal', class_name = 'cognitive_nodes.goal.Goal', **params):
         """
         Constructor of the Goal class
 
@@ -42,17 +42,7 @@ class Goal(CognitiveNode):
         self.start = None
         self.end = None
         self.period = None
-        self.robot_service = robot_service
         self.iteration=0
-
-        if data:
-            self.new_from_configuration_file(data)
-        else:
-            self.space = (
-                space
-                if space
-                else class_from_classname(space_class)(ident=self.name + " space")
-            )
         
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
@@ -79,29 +69,6 @@ class Goal(CognitiveNode):
         )
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
-
-        #Service clients
-        service_name_pickable = robot_service + '/object_pickable_with_two_hands'
-        self.pickable_client = ServiceClientAsync(self, ObjectPickableWithTwoHands, service_name_pickable, self.cbgroup_client)
-
-        service_name_too_far = self.robot_service + '/object_too_far'
-        self.too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name_too_far, self.cbgroup_client)
-
-        self.normalize_values=normalize_data
-
-    def new_from_configuration_file(self, data):
-        """
-        Create attributes from the data configuration dictionary
-
-        :param data: The configuration file
-        :type data: dict
-        """
-        self.space = class_from_classname(data.get("space"))(ident=self.name + " space")
-        self.start = data.get("start")
-        self.end = data.get("end")
-        self.period = data.get("period")
-        for point in data.get("points", []):
-            self.space.add_point(point, 1.0)
 
     def set_activation_callback(self, request, response):
         """
@@ -159,85 +126,59 @@ class Goal(CognitiveNode):
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(self.reward))
         return response
 
-    def calculate_activation(self, perception = None):
-        """
-        Returns the the activation value of the goal
-
-        :param perception: Perception does not influence the activation 
-        :type perception: dict
-        :return: The activation of the goal
-        :rtype: float
-        """
-        iteration=self.iteration
-        if self.end:
-            if(iteration % self.period >= self.start) and (
-                iteration % self.period <= self.end
-            ):
-                self.activation = 1.0
-            else:
-                self.activation = 0.0
-
-        if self.activation_topic:
-            self.publish_activation(self.activation)
-        return self.activation
-
-    def update_embedded(self):
-        """
-        Recalculate the list of P-nodes that embed this goal.
-
-        :raises NotImplementedError: This method is not implemented yet
-        """
-        #TODO: Implement logic
-        raise NotImplementedError
-
-    def get_reward(self):
+    async def get_reward(self):
         """
         Calculate the reward for the current sensor values.
 
-        Currently, this method is not used, as points are only used to check if a goal is inside
-        a P-node, and rules are used to check reward. Using points to check reward is very
-        problematic. We probably should use sensor ranges.
+        This is a placeholder for the get reward method that must be implemented according
+        to the required experiment/application. It is a asyncio corrutine so that service
+        calls can be awaited.  
 
         :return: The reward obtained
         :rtype: float
         """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for perception, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    reward = activation * self.space.get_probability(perception)
-                    if reward > self.reward:
-                        self.reward = reward
-        return self.reward
-    
-    def get_iteration_callback(self, msg:ControlMsg):
-        """
-        Get the iteration of the experiment, if necessary
+        raise NotImplementedError
 
-        :return: The iteration of the experiment
-        :rtype: int
-        """
-        self.iteration=msg.iteration
-        # if msg.command == "reset_world":
-        #     self.perception = {}
-    
-    def sensorial_changes(self):
-        """Return false if all perceptions have the same value as the previous step. True otherwise."""
-        if not self.old_perception and self.perception:
-            return True
+
+class GoalObjectInBoxStandalone(Goal):
+    """Goal representing the desire of putting an object in a box."""
+
+    def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, robot_service='simulator', normalize_data=None, **params):
+        super().__init__(name, class_name, **params)
+        self.robot_service = robot_service
+
+        #Service clients
+        service_name_pickable = robot_service + '/object_pickable_with_two_hands'
+        self.pickable_client = ServiceClientAsync(self, ObjectPickableWithTwoHands, service_name_pickable, self.cbgroup_client)
+
+        service_name_too_far = self.robot_service + '/object_too_far'
+        self.too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name_too_far, self.cbgroup_client)
+
+        self.normalize_values=normalize_data
+
+        if data:
+            self.new_from_configuration_file(data)
         else:
-            for sensor in self.perception:
-                for perception, perception_old in zip(self.perception[sensor], self.old_perception[sensor]):
-                    if isinstance(perception, dict):
-                        for attribute in perception:
-                            difference = abs(perception[attribute] - perception_old[attribute])
-                            if difference > 0.007:
-                                return True
-                    else:
-                        if abs(perception[0] - perception_old[0]) > 0.007:
-                            return True
-            return False
-    
+            self.space = (
+                space
+                if space
+                else class_from_classname(space_class)(ident=self.name + " space")
+            )
+
+    def new_from_configuration_file(self, data):
+        """
+        Create attributes from the data configuration dictionary
+
+        :param data: The configuration file
+        :type data: dict
+        """
+        self.space = class_from_classname(data.get("space"))(ident=self.name + " space")
+        self.start = data.get("start")
+        self.end = data.get("end")
+        self.period = data.get("period")
+        for point in data.get("points", []):
+            self.space.add_point(point, 1.0)
+
     def object_too_far(self, distance, angle):
         """
         Check is an object is too far
@@ -487,294 +428,56 @@ class Goal(CognitiveNode):
                 and (not self.old_perception['ball_in_right_hand'][0]['data'])
             )
         )
-
-    @staticmethod
-    def food_in_skillet(perceptions):
-        """
-        Check if all the needed food is inside the skillet.
-
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the food is inside the skillet or not
-        :rtype: bool
-        """
-        carrot_inside = eggplant_inside = cabbage_inside = False
-        for box in perceptions["boxes"]:
-            if box["color"] == "skillet":
-                for cylinder in perceptions["cylinders"]:
-                    inside = (abs(box["distance"] - cylinder["distance"]) < 0.05) and (
-                        abs(box["angle"] - cylinder["angle"]) < 0.05
-                    )
-                    if inside:
-                        if cylinder["color"] == "carrot":
-                            carrot_inside = True
-                        elif cylinder["color"] == "eggplant":
-                            eggplant_inside = True
-                        elif cylinder["color"] == "cabbage":
-                            cabbage_inside = True
-        return carrot_inside and eggplant_inside and cabbage_inside
     
+    def get_iteration_callback(self, msg:ControlMsg):
+        """
+        Get the iteration of the experiment, if necessary
 
-    def denormalize(self, type, value):
-        raw=0
-        norm_max=0
-        norm_min=0
-
-        if not self.normalize_values:
-            raise Exception('Normalization values not defined')
-
-        if type=='distance':
-            norm_max=self.normalize_values["distance_max"]
-            norm_min=self.normalize_values["distance_min"]
-
-        elif type=='angle':
-            norm_max=self.normalize_values["angle_max"]
-            norm_min=self.normalize_values["angle_min"]
-
-        elif type=='diameter':
-            norm_max=self.normalize_values["diameter_max"]
-            norm_min=self.normalize_values["diameter_min"]
-
+        :return: The iteration of the experiment
+        :rtype: int
+        """
+        self.iteration=msg.iteration
+        # if msg.command == "reset_world":
+        #     self.perception = {}
+    
+    def sensorial_changes(self):
+        """Return false if all perceptions have the same value as the previous step. True otherwise."""
+        if not self.old_perception and self.perception:
+            return True
         else:
-            raise ValueError
+            for sensor in self.perception:
+                for perception, perception_old in zip(self.perception[sensor], self.old_perception[sensor]):
+                    if isinstance(perception, dict):
+                        for attribute in perception:
+                            difference = abs(perception[attribute] - perception_old[attribute])
+                            if difference > 0.007:
+                                return True
+                    else:
+                        if abs(perception[0] - perception_old[0]) > 0.007:
+                            return True
+            return False
         
-        raw= value*(norm_max-norm_min)+norm_min
-            
-
-        return raw
-
-
-class GoalObjectHeldLeftHand(Goal):
-    """Goal representing a grasped object with the left hand."""
-
-    def get_reward(self):
+    def calculate_activation(self, perception = None):
         """
-        Calculate the reward for the current sensor values.
+        Returns the the activation value of the goal
 
-        :return: The reward obtained
+        :param perception: Perception does not influence the activation 
+        :type perception: dict
+        :return: The activation of the goal
         :rtype: float
         """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_held_with_left_hand() and (
-                        not self.object_held_with_right_hand()
-                    ):
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalObjectHeldRightHand(Goal):
-    """Goal representing a grasped object with the right hand."""
+        iteration=self.iteration
+        if self.end:
+            if(iteration % self.period >= self.start) and (
+                iteration % self.period <= self.end
+            ):
+                self.activation = 1.0
+            else:
+                self.activation = 0.0
 
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if (
-                        not self.object_held_with_left_hand()
-                    ) and self.object_held_with_right_hand():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalObjectHeld(Goal):
-    """Goal representing a grasped object with one hand."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_held() and not self.object_held_with_two_hands():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-
-class GoalObjectHeldWithTwoHands(Goal):
-    """Goal representing a grasped object with two hands."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_held_with_two_hands():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-
-class GoalChangedHands(Goal):
-    """Goal representing a change of the hand that holds an object."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.hand_was_changed():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalFrontalObject(Goal):
-    """Goal representing an object in front of the robot."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if (
-                        self.object_pickable_with_two_hands()
-                        and (not self.object_in_close_box())
-                        and (not self.object_with_robot())
-                    ):
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalObjectInCloseBox(Goal):
-    """Goal representing an object inside a box (that was reachable)."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_in_close_box():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalObjectWithRobot(Goal):
-    """Goal representing an object as close to the robot as possible."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_with_robot():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalObjectInFarBox(Goal):
-    """Goal representing an object inside a box (that was out of reach)."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_in_far_box():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalApproximatedObject(Goal):
-    """Goal representing an reachable object (that was not reachable previously)."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.object_was_approximated():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-    
-class GoalVegetablesInSkillet(Goal):
-    """Goal representing three different vegetables in a skillet in front of the robot."""
-
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
-
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        if self.sensorial_changes():
-            for _, activation in zip(self.perception, self.activation):
-                if activation > self.threshold:
-                    if self.food_in_skillet():
-                        reward = activation
-                        if reward > self.reward:
-                            self.reward = reward
-        return self.reward
-
-
-class GoalObjectInBoxStandalone(Goal):
-    """Goal representing the desire of putting an object in a box."""
+        if self.activation_topic:
+            self.publish_activation(self.activation)
+        return self.activation
 
     async def get_reward(self):
         """
@@ -805,30 +508,35 @@ class GoalObjectInBoxStandalone(Goal):
                         self.reward = 0.2
         return self.reward
     
-class GoalObjectWithRobotStandalone(Goal):
-    """Goal representing the desire of bringing an object as close as possible to the robot."""
+    def denormalize(self, type, value):
+        raw=0
+        norm_max=0
+        norm_min=0
 
-    def get_reward(self):
-        """
-        Calculate the reward for the current sensor values.
+        if not self.normalize_values:
+            raise Exception('Normalization values not defined')
 
-        :return: The reward obtained
-        :rtype: float
-        """
-        self.reward = 0.0
-        for activation in self.activation:
-            if (self.sensorial_changes()) and isclose(activation, 1.0):
-                if self.object_with_robot():
-                    self.reward = 1.0
-                elif self.object_held():
-                    if not self.object_held_before():
-                        self.reward = 0.6
-                elif not self.object_held_before():
-                    if self.object_pickable_with_two_hands():
-                        self.reward = 0.3
-                    elif self.object_was_approximated():
-                        self.reward = 0.2
-        return self.reward
+        if type=='distance':
+            norm_max=self.normalize_values["distance_max"]
+            norm_min=self.normalize_values["distance_min"]
+
+        elif type=='angle':
+            norm_max=self.normalize_values["angle_max"]
+            norm_min=self.normalize_values["angle_min"]
+
+        elif type=='diameter':
+            norm_max=self.normalize_values["diameter_max"]
+            norm_min=self.normalize_values["diameter_min"]
+
+        else:
+            raise ValueError
+        
+        raw= value*(norm_max-norm_min)+norm_min
+            
+
+        return raw
+    
+
     
 #TODO Implement GoalMotiven
     
