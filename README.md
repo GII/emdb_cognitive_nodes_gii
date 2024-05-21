@@ -143,7 +143,7 @@ Connectors:
             data: Policy
             default_class: cognitive_nodes.policy.Policy
 ```
-The parameters of the cognitive nodes created during execution are indicated from their corresponding cognitive process.
+The parameters of the cognitive nodes created during execution are indicated by their corresponding cognitive process.
 
 ## Execution
 
