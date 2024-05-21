@@ -55,6 +55,7 @@ class Perception(CognitiveNode):
         self.normalize_values = normalize_data
 
         self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 10)
+        
     def calculate_activation(self, perception = None):
         """
         Returns the the activation value of the instance
@@ -123,6 +124,36 @@ class Perception(CognitiveNode):
         """
         Method that processes the sensor values received
         """
+        raise NotImplementedError
+
+   
+class DiscreteEventSimulatorPerception(Perception):
+    """
+    DiscreteEventSimulatorPerception class
+    """
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class
+
+        Initializes a Perception instance with the given name and registers it in the ltm.
+        
+        :param name: The name of the Perception instance
+        :type name: str
+        :param class_name: The name of the Perception class
+        :type class_name: str
+        :param default_msg: The msg of the default subscription
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+     
+    def process_and_send_reading(self):
+        """
+        Method that processes the sensor values received
+        """
         sensor = {}
         value = []
         if isinstance(self.reading.data, list):
@@ -158,7 +189,6 @@ class Perception(CognitiveNode):
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
         sensor_msg = perception_dict_to_msg(sensor)
         self.perception_publisher.publish(sensor_msg)
-
 
 def main(args=None):
     rclpy.init(args=args)
