@@ -37,7 +37,7 @@ To install this package, it's necessary to clone this repository in a ROS worksp
 colcon build --symlink-install
 ```
 This respository only constitutes the reference cognitive nodes of the e-MDB cognitive architecture. To get full functionality, it's required to add to the ROS workspace, at least, the [emdb_core](https://github.com/GII/emdb_core) repository, that constitutes the base of the architecture, and other packages that include the cognitive processes, the experiment configuration and the interface that connects the architecture with a real or a simulated environment. Therefore, to use the first version of the architecture implemented by GII, these repositories need to be cloned into the workspace:
-- [_emdb_core_]([https://github.com/GII/emdb_cognitive_nodes_gii](https://github.com/GII/emdb_core)). Core of the cognitive architecture.
+- [_emdb_core_](https://github.com/GII/emdb_core). Core of the cognitive architecture.
 - [_emdb_cognitive_processes_gii_](https://github.com/GII/emdb_cognitive_processes_gii). Reference implementation for the main cognitive processes.
 - [_emdb_discrete_event_simulator_gii_](https://github.com/GII/emdb_discrete_event_simulator_gii). Implementation of a discrete event simulator used in many experiments.
 - [_emdb_experiments_gii_](https://github.com/GII/emdb_experiments_gii). Configuration files for experiments.
