@@ -62,7 +62,7 @@ There is a general and basic implementation of each cognitive node, which consti
 
 Also, it's important to talk about Space class, contained in space.py. This class is used by PNodes and sometimes Goals to store perceptions and calculate their activation. In the example experiment, the Goal implemented doesn´t use the Space class, but PNodes have some implementations to try: it's possible to calculate their activation by using Artificial Neural Networks (ANNs), SVM or Point Based Rules.
 
-To configure all this stuff, it's necessary to edit the experiment configuration file, stored in the [_emdb_experiments_gii_](https://github.com/GII/emdb_experiments_gii) repository (experiments/default_experiment.yaml) or in an experiments package created by oneself.
+To configure all this stuff, it's necessary to edit the default experiment configuration file, stored in the [_emdb_experiments_gii_](https://github.com/GII/emdb_experiments_gii) repository (experiments/default_experiment.yaml), or one created by oneself.
 
 There we can indicate the nodes that have to be created when the experiment is launched. For instance, as has been said before, Policies are predefined in the example experiment, so we have to specify their parameters in the configuration file:
 ```
