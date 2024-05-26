@@ -6,11 +6,13 @@ from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRat
 
 import random
 
+
 class Drive(CognitiveNode):
     """
     Drive class
     """
-    def __init__(self, name='drive', class_name = 'cognitive_nodes.drive.Drive', **params):
+
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
         Constructor of the Drive class
 
@@ -26,23 +28,19 @@ class Drive(CognitiveNode):
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
-            SetActivation,
-            'drive/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            SetActivation, "drive/" + str(name) + "/set_activation", self.set_activation_callback
         )
 
         # N: Evaluate Service
         self.evaluate_service = self.create_service(
-            Evaluate,
-            'drive/' + str(name) + '/evaluate',
-            self.evaluate_callback
+            Evaluate, "drive/" + str(name) + "/evaluate", self.evaluate_callback
         )
 
         # N: Get Success Rate Service
         self.get_success_rate_service = self.create_service(
             GetSuccessRate,
-            'drive/' + str(name) + '/get_success_rate',
-            self.get_success_rate_callback
+            "drive/" + str(name) + "/get_success_rate",
+            self.get_success_rate_callback,
         )
 
     def set_activation_callback(self, request, response):
@@ -57,7 +55,7 @@ class Drive(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.SetActivation_Response
         """
         activation = request.activation
-        self.get_logger().info('Setting activation ' + str(activation) + '...')
+        self.get_logger().info("Setting activation " + str(activation) + "...")
         self.activation = activation
         response.set = True
         return response
@@ -71,7 +69,7 @@ class Drive(CognitiveNode):
         :raises NotImplementedError: Evaluate method has to be implemented in a child class
         """
         raise NotImplementedError
-    
+
     def evaluate_callback(self, request, response):
         """
         Callback for evaluate a perception
@@ -84,11 +82,11 @@ class Drive(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.Evaluate_Response
         """
         perception, weight = request.perception, request.weight
-        self.get_logger().info('Evaluating for perception ' + str(perception) + '...')
+        self.get_logger().info("Evaluating for perception " + str(perception) + "...")
         response.valuation = self.evaluate(perception, weight)
         return response
-    
-    def get_success_rate_callback(self, request, response): # TODO: implement
+
+    def get_success_rate_callback(self, request, response):  # TODO: implement
         """
         Get a prediction success rate based on a historic of previous predictions
 
@@ -99,13 +97,13 @@ class Drive(CognitiveNode):
         :return: The response that contains the predicted success rate
         :rtype: cognitive_node_interfaces.srv.GetSuccessRate_Response
         """
-        self.get_logger().info('Getting success rate..')
+        self.get_logger().info("Getting success rate..")
         # TODO: implement logic
         response.success_rate = 0.5
         return response
 
-    def calculate_activation(self, perception = None): #TODO: Implement logic
-        """"
+    def calculate_activation(self, perception=None):  # TODO: Implement logic
+        """ "
         Returns the the activation value of the Drive
 
         :param perception: The given perception
@@ -130,5 +128,5 @@ def main(args=None):
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
