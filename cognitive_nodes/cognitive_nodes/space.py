@@ -6,6 +6,7 @@ from sklearn import svm
 import tensorflow as tf
 from rclpy.node import Node
 
+
 class Space(object):
     """A n-dimensional state space."""
 
@@ -56,7 +57,9 @@ class PointBasedSpace(Space):
         """
         if getattr(perception, "dtype", None):
             if base_dtype:
-                types = [(name, float) for name in perception.dtype.names if name in base_dtype.names]
+                types = [
+                    (name, float) for name in perception.dtype.names if name in base_dtype.names
+                ]
             elif self.parent_space:
                 types = [
                     (name, float)
@@ -122,8 +125,8 @@ class PointBasedSpace(Space):
         :type memberships: numpy.ndarray
         :param foreigner: The given foreigner point in order to obtain the info
         :type foreigner: numpy.ndarray
-        :return: The position of in the members array the closest point and antipoins and 
-        their distance with the foreigner point
+        :return: The position of in the members array the closest point and antipoints and
+            their distance with the foreigner point
         :rtype: int (position), float (distance)
         """
         distances = numpy.linalg.norm(members - foreigner, axis=1)
@@ -163,8 +166,8 @@ class PointBasedSpace(Space):
 
         :param perception: A given perception to add
         :type perception: dict
-        :param confidence: The confidence of the added point that specifies if it is a point or an 
-        antipoint
+        :param confidence: The confidence of the added point that specifies if it is a point or an
+            antipoint
         :type confidence: float
         :raises RuntimeError: If LTM operation cannot continue
         :return: The position of the added point
@@ -261,7 +264,9 @@ class PointBasedSpace(Space):
         :param space: The given space
         :type space: cognitive_nodes.space
         """
-        common_sensors = [(name, float) for name in self.members.dtype.names if name in space.members.dtype.names]
+        common_sensors = [
+            (name, float) for name in self.members.dtype.names if name in space.members.dtype.names
+        ]
         self.members = require_fields(self.members, common_sensors)
 
     def aging(self):
@@ -303,7 +308,9 @@ class ClosestPointBasedSpace(PointBasedSpace):
         # Copy the new perception on the structured array
         self.copy_perception(candidate_point, 0, perception)
         # Create views on the structured arrays so they can be used in calculations
-        members = structured_to_unstructured(self.members[0 : self.size][list(candidate_point.dtype.names)])
+        members = structured_to_unstructured(
+            self.members[0 : self.size][list(candidate_point.dtype.names)]
+        )
         point = structured_to_unstructured(candidate_point)
         memberships = self.memberships[0 : self.size]
         # Calculate the activation value
@@ -313,7 +320,11 @@ class ClosestPointBasedSpace(PointBasedSpace):
             activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
         else:
             activation = -1
-        return min(activation, self.parent_space.get_probability(perception)) if self.parent_space else activation
+        return (
+            min(activation, self.parent_space.get_probability(perception))
+            if self.parent_space
+            else activation
+        )
 
 
 class CentroidPointBasedSpace(PointBasedSpace):
@@ -325,10 +336,10 @@ class CentroidPointBasedSpace(PointBasedSpace):
     - If the closest point has a positive membership, the membership of the new point is that divided by the distance
     between them.
     - Otherwise:
-        - Calculate the centroid of points with a positive membership.
-        - If the distance from the new point to the centroid is less than the distance from the closest point to the
-        centroid, then the activation is calculated as before but using the closest point with positive
-        membership. Otherwise the activation is -1.
+    * Calculate the centroid of points with a positive membership.
+    * If the distance from the new point to the centroid is less than the distance from the closest point to the
+    centroid, then the activation is calculated as before but using the closest point with positive
+    membership. Otherwise the activation is -1.
     """
 
     def get_probability(self, perception):
@@ -346,7 +357,9 @@ class CentroidPointBasedSpace(PointBasedSpace):
         self.copy_perception(candidate_point, 0, perception)
         # Create views on the structured arrays so they can be used in calculations
         # Be ware, if candidate_point.dtype is not equal to self.members.dtype, members is a new array!!!
-        members = structured_to_unstructured(self.members[0 : self.size][list(candidate_point.dtype.names)])
+        members = structured_to_unstructured(
+            self.members[0 : self.size][list(candidate_point.dtype.names)]
+        )
         point = structured_to_unstructured(candidate_point)
         memberships = self.memberships[0 : self.size]
         # Calculate the activation value
@@ -365,7 +378,11 @@ class CentroidPointBasedSpace(PointBasedSpace):
                 activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
             else:
                 activation = -1
-        return min(activation, self.parent_space.get_probability(perception)) if self.parent_space else activation
+        return (
+            min(activation, self.parent_space.get_probability(perception))
+            if self.parent_space
+            else activation
+        )
 
 
 class NormalCentroidPointBasedSpace(PointBasedSpace):
@@ -377,11 +394,11 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
     - If the closest point has a positive membership, the membership of the new point is that divided by the distance
     between them.
     - Otherwise:
-        - Calculate the centroid of points with a positive membership.
-        - If the distance from the new point to the centroid is less than the distance from the closest point to the
-        centroid, or the distance of the closest point to the line that goes from the new point to the centroid is high
-        (see source code), then the activation is calculated as before but using the closest point with positive
-        membership, otherwise the activation is -1.
+    * Calculate the centroid of points with a positive membership.
+    * If the distance from the new point to the centroid is less than the distance from the closest point to the
+    centroid, or the distance of the closest point to the line that goes from the new point to the centroid is high
+    (see source code), then the activation is calculated as before but using the closest point with positive
+    membership, otherwise the activation is -1.
     """
 
     def get_probability(self, perception):
@@ -399,7 +416,9 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
         self.copy_perception(candidate_point, 0, perception)
         # Create views on the structured arrays so they can be used in calculations
         # Be ware, if candidate_point.dtype is not equal to self.members.dtype, members is a new array!!!
-        members = structured_to_unstructured(self.members[0 : self.size][list(candidate_point.dtype.names)])
+        members = structured_to_unstructured(
+            self.members[0 : self.size][list(candidate_point.dtype.names)]
+        )
         point = structured_to_unstructured(candidate_point)
         memberships = self.memberships[0 : self.size]
         # Calculate the activation value
@@ -423,7 +442,8 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
                 )
             )
             if (dist_newpoint_centroid < dist_antipoint_centroid) or (
-                numpy.random.uniform() < dist_antipoint_centroid * separation / dist_newpoint_centroid
+                numpy.random.uniform()
+                < dist_antipoint_centroid * separation / dist_newpoint_centroid
             ):
                 distances = distances[memberships > 0.0]
                 pos_closest = numpy.argmin(distances)
@@ -431,7 +451,11 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
                 activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
             else:
                 activation = -1
-        return min(activation, self.parent_space.get_probability(perception)) if self.parent_space else activation
+        return (
+            min(activation, self.parent_space.get_probability(perception))
+            if self.parent_space
+            else activation
+        )
 
 
 class SVMSpace(PointBasedSpace):
@@ -535,8 +559,8 @@ class SVMSpace(PointBasedSpace):
 
         :param perception: A given perception to add
         :type perception: dict
-        :param confidence: The confidence of the added point that specifies if it is a point or an 
-        antipoint
+        :param confidence: The confidence of the added point that specifies if it is a point or an
+            antipoint
         :type confidence: float
         :return: The position of the added point
         :rtype: int
@@ -580,33 +604,36 @@ class ANNSpace(PointBasedSpace):
     """
     Use and train a Neural Network to calculate the activations
     """
+
     def __init__(self, **kwargs):
         """
         Init attributes when a new object is created.
         """
 
-        #Define train values
-        output_activation = 'sigmoid'
+        # Define train values
+        output_activation = "sigmoid"
         optimizer = tf.optimizers.Adam()
         loss = tf.losses.BinaryCrossentropy()
-        metrics=['accuracy']
+        metrics = ["accuracy"]
         # self.n_splits = 5
         self.batch_size = 50
         self.epochs = 50
         self.max_data = 400
         self.first_data = 0
-        #Define the Neural Network's model
-        self.model = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu', input_shape =(8,)),
-            tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dense(32, activation='relu'),
-            tf.keras.layers.Dense(1, activation=output_activation)
-        ])
+        # Define the Neural Network's model
+        self.model = tf.keras.Sequential(
+            [
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)),
+                tf.keras.layers.Dense(64, activation="relu"),
+                tf.keras.layers.Dense(32, activation="relu"),
+                tf.keras.layers.Dense(1, activation=output_activation),
+            ]
+        )
 
-        #Compile the model
+        # Compile the model
         self.model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
-        #Initialize variables
+        # Initialize variables
         self.there_are_points = False
         self.there_are_antipoints = False
         super().__init__(**kwargs)
@@ -617,8 +644,8 @@ class ANNSpace(PointBasedSpace):
 
         :param perception: A given perception to add
         :type perception: dict
-        :param confidence: The confidence of the added point that specifies if it is a point or an 
-        antipoint
+        :param confidence: The confidence of the added point that specifies if it is a point or an
+            antipoint
         :type confidence: float
         :return: The position of the added point
         :rtype: int
@@ -636,8 +663,10 @@ class ANNSpace(PointBasedSpace):
             point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
             prediction = self.model.call(point)[0][0]
             pos = super().add_point(perception, confidence)
-            
-            members = structured_to_unstructured(self.members[0 : self.size][list(self.members.dtype.names)])
+
+            members = structured_to_unstructured(
+                self.members[0 : self.size][list(self.members.dtype.names)]
+            )
             memberships = self.memberships[0 : self.size].copy()
             memberships[memberships > 0] = 1.0
             memberships[memberships <= 0] = 0.0
@@ -646,23 +675,34 @@ class ANNSpace(PointBasedSpace):
 
             if self.size >= self.max_data:
                 self.first_data = self.size - self.max_data
-        
-            if (((confidence <= 0 and prediction == 1.0) or (confidence >= 0 and prediction == 0.0))):
-                #Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
+
+            if (confidence <= 0 and prediction == 1.0) or (confidence >= 0 and prediction == 0.0):
+                # Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
                 X = members[self.first_data : self.size]
                 Y = memberships[self.first_data : self.size]
                 n_0 = int(len(Y[Y == 0.0]))
                 n_1 = int(len(Y[Y == 1.0]))
-                weight_for_0 = (1 / n_0) * ((self.size-self.first_data) / 2.0) if n_0 != 0 else 1.0
-                weight_for_1 = (1 / n_1) * ((self.size-self.first_data) / 2.0) if n_1 != 0 else 1.0
+                weight_for_0 = (
+                    (1 / n_0) * ((self.size - self.first_data) / 2.0) if n_0 != 0 else 1.0
+                )
+                weight_for_1 = (
+                    (1 / n_1) * ((self.size - self.first_data) / 2.0) if n_1 != 0 else 1.0
+                )
                 class_weight = {0: weight_for_0, 1: weight_for_1}
-                self.model.fit(x=X, y=Y, batch_size=self.batch_size, epochs=self.epochs, verbose = 0, class_weight=class_weight)
+                self.model.fit(
+                    x=X,
+                    y=Y,
+                    batch_size=self.batch_size,
+                    epochs=self.epochs,
+                    verbose=0,
+                    class_weight=class_weight,
+                )
 
         else:
             pos = super().add_point(perception, confidence)
-        
+
         return pos
-        
+
     def get_probability(self, perception):
         """
         Calculate the new activation value.
@@ -683,5 +723,4 @@ class ANNSpace(PointBasedSpace):
                 act = 1.0
         else:
             act = 0.0
-        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act   
-
+        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act

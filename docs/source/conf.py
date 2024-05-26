@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath("../../cognitive_nodes"))
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'e-MDB Cognitive Nodes implemente by the GII'
+project = "e-MDB Cognitive Nodes implemented by the GII"
 copyright = "2024, GII"
 author = "GII"
 release = "Apache-2.0"
@@ -24,13 +24,20 @@ extensions = [
     # "sphinx.ext.autosummary",
     "sphinx.ext.todo",
     "sphinx.ext.viewcode",
+    "myst_parser",
 ]
 
 templates_path = ["_templates"]
 exclude_patterns = []
 
-# If true, `todo` and `todoList` produce output, else they produce nothing.
-todo_include_todos = False
+autodoc_mock_imports = [
+    "rclpy",
+    "std_msgs",
+    "core",
+    "core_interfaces",
+    "cognitive_node_interfaces",
+    "simulators_interfaces",
+]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
