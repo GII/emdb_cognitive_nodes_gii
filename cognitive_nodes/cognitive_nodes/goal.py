@@ -1,5 +1,8 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+import threading
+import inspect
 
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
@@ -68,7 +71,7 @@ class Goal(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
-        self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
+        
 
     def set_activation_callback(self, request, response):
         """
@@ -101,7 +104,10 @@ class Goal(CognitiveNode):
         self.get_logger().info('Checking if is reached..')
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
-        await self.get_reward()
+        if inspect.iscoroutinefunction(self.get_reward):
+            await self.get_reward()
+        else:
+            self.get_reward()
         if isclose(self.reward, 1.0):
             response.reached = True
         else:
@@ -121,7 +127,10 @@ class Goal(CognitiveNode):
         """
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
-        await self.get_reward()
+        if inspect.iscoroutinefunction(self.get_reward):
+            await self.get_reward()
+        else:
+            self.get_reward()
         response.reward = self.reward
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(self.reward))
         return response
@@ -164,6 +173,8 @@ class GoalObjectInBoxStandalone(Goal):
                 if space
                 else class_from_classname(space_class)(ident=self.name + " space")
             )
+
+        self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
 
     def new_from_configuration_file(self, data):
         """
@@ -536,7 +547,57 @@ class GoalObjectInBoxStandalone(Goal):
 
         return raw
     
+class GoalReadPublishedReward(Goal):
+    def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', default_topic=None, default_msg=None, **params):
+        super().__init__(name, class_name, **params)
+        self.reward_cbg=MutuallyExclusiveCallbackGroup()
+        msg_type=class_from_classname(class_name=default_msg)
+        self.reward_subscription=self.create_subscription(msg_type, default_topic, self.reward_topic_callback, 1, callback_group=self.reward_cbg)
+        self.flag=threading.Event()
 
+        self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
+
+
+    def reward_topic_callback(self, msg):
+        self.reward=msg.data
+        self.flag.set()
+
+    def get_reward(self):
+        self.flag.wait()
+        reward=self.reward
+        self.flag.clear()
+        return reward
+    
+    def get_iteration_callback(self, msg:ControlMsg):
+        """
+        Get the iteration of the experiment, if necessary
+
+        :return: The iteration of the experiment
+        :rtype: int
+        """
+        self.iteration=msg.iteration
+    
+    def calculate_activation(self, perception = None):
+        """
+        Returns the the activation value of the goal
+
+        :param perception: Perception does not influence the activation 
+        :type perception: dict
+        :return: The activation of the goal
+        :rtype: float
+        """
+        iteration=self.iteration
+        if self.end:
+            if(iteration % self.period >= self.start) and (
+                iteration % self.period <= self.end
+            ):
+                self.activation = 1.0
+            else:
+                self.activation = 0.0
+
+        if self.activation_topic:
+            self.publish_activation(self.activation)
+        return self.activation
     
 #TODO Implement GoalMotiven
     
