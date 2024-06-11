@@ -557,6 +557,25 @@ class GoalReadPublishedReward(Goal):
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
 
+        if data:
+            self.new_from_configuration_file(data)
+        else:
+            self.get_logger().error(f'{self.name}: No configuration data passed to node!')
+
+
+    def new_from_configuration_file(self, data):
+        """
+        Create attributes from the data configuration dictionary
+
+        :param data: The configuration file
+        :type data: dict
+        """
+        self.start = data.get("start")
+        self.end = data.get("end")
+        self.period = data.get("period")
+        for point in data.get("points", []):
+            self.space.add_point(point, 1.0)
+
 
     def reward_topic_callback(self, msg):
         self.reward=msg.data
