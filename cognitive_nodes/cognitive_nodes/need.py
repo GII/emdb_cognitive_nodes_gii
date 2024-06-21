@@ -10,7 +10,7 @@ class Need(CognitiveNode):
     """"
     Need Class
     """
-    def __init__(self, name='need', class_name = 'cognitive_nodes.need.Need', **params):
+    def __init__(self, name='need', class_name = 'cognitive_nodes.need.Need', weight= 1.0, **params):
         """
         Constructor of the Need class
 
@@ -33,8 +33,8 @@ class Need(CognitiveNode):
         # N: Is Satisfied Service
         self.is_satisfied_service = self.create_service(
             IsSatisfied,
-            'need/' + str(name) + '/is_satisfied',
-            self.is_satisfied_callback
+            'need/' + str(name) + '/get_satisfaction',
+            self.get_satisfaction_callback
         )
 
         self.set_weight_service = self.create_service(
@@ -43,7 +43,7 @@ class Need(CognitiveNode):
             self.set_weight_service
         )
 
-        self.weight = 1.0
+        self.weight = weight
 
     def set_weight_callback(self, request, response):
         """
@@ -79,7 +79,7 @@ class Need(CognitiveNode):
         response.set = True
         return response
     
-    def is_satisfied_callback(self, request, response):
+    def get_satisfaction_callback(self, request, response):
         """
         Check if the need had been satisfied
 
@@ -90,11 +90,20 @@ class Need(CognitiveNode):
         :return: Response that indicates if the need is satisfied or not
         :rtype: cognitive_node_interfaces.srv.IsSatisfied_Response
         """
-        self.get_logger().info('Checking if is satisfied..')
-        # TODO: implement logic
-        response.satisfied = True
+        self.get_logger().info('Calculating satisfaction..')
+        response.satisfied = self.calculate_satisfaction()
         return response
 
+    def calculate_satisfaction(self):
+        """
+        Calculate whether the need is satisfied 
+
+        :param perception: The given normalized perception
+        :type perception: dict
+        :raises NotImplementedError: Evaluate method has to be implemented in a child class
+        """
+
+        raise NotImplementedError
 
     def calculate_activation(self, perception = None): #TODO: Implement logic
         """
@@ -109,6 +118,37 @@ class Need(CognitiveNode):
         if self.activation_topic:
             self.publish_activation(self.activation)
         return self.activation
+    
+class HeterostaticNeed(Need):
+    
+    def __init__(self, name='need', class_name='cognitive_nodes.need.HeterostaticNeed', weight=1.0, **params):
+        super.__init__(name, class_name, weight, **params)
+
+    def calculate_activation(self, perception=None):
+        """
+        Always returns an activation of 1.0
+
+        :param perception: The given perception
+        :type perception: dict
+        :return: Returns the activation of the Need. Always 1.0
+        :rtype: float
+        """
+        self.activation = 1.0 * self.weight
+        if self.activation_topic:
+            self.publish_activation(self.activation)
+        return self.activation
+    
+    def calculate_satisfaction(self, perception=None):
+        """
+        This type of need is never satisfied, therefore always returns 0.0.
+
+        :param perception: The given normalized perception
+        :type perception: dict
+        :return: False
+        :rtype: bool
+        """       
+
+        return 0.0
 
 def main(args=None):
     rclpy.init(args=args)

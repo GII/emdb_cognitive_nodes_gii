@@ -6,7 +6,7 @@ import inspect
 
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward
+from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate
 from cognitive_node_interfaces.srv import GetIteration
 from core_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
@@ -619,6 +619,29 @@ class GoalReadPublishedReward(Goal):
         return self.activation
     
 #TODO Implement GoalMotiven
+
+class GoalMotiven(Goal):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.DriveLinkedGoal', **params):
+        super().__init__(name, class_name, **params)
+
+    def configure_drives(self):
+        pass #Puts drives, evaluations(old, current) and corresponding Service Clients in a list
+        #FIX THIS
+        drive= [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"]=="Drive"]
+        if len(drive)!=1:
+            raise Exception(f'Drive must be linked to one need. Connected needs: {len(drive)}')
+        else:
+            self.cli_drive_activation=ServiceClientAsync(self, GetActivation, f'cognitive_node/{drive[0]}/get_activation', self.cbgroup_client)
+            self.cli_drive_evaluation=ServiceClientAsync(self, Evaluate, f'cognitive_node/{drive[0]}/get_activation', self.cbgroup_client)
+    
+
+    def calculate_activation(self, perception): #TODO
+        return super().calculate_activation(perception)
+    
+    def get_reward(self): #TODO
+        return super().get_reward()
+
+
     
 def main(args=None):
     rclpy.init(args=args)
