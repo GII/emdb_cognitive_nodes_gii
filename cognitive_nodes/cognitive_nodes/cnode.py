@@ -51,9 +51,9 @@ class CNode(CognitiveNode):
             activation = await self.node_clients[service_name].send_request_async(
                 perception=perception_msg
             )
-            self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}")
+            self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}.")
             node_activations.append(activation.activation)
-        self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}")
+        self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}.")
         activation_list = numpy.prod(node_activations)
         self.activation = numpy.max(activation_list)
         # TODO: Selection of the perception that have the max CNode or PNode activation (if it exists), as in the old MDB
