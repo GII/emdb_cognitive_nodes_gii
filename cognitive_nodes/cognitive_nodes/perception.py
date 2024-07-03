@@ -31,7 +31,7 @@ class Perception(CognitiveNode):
         """
         super().__init__(name, class_name, **params)       
         # We set 1.0 as the default activation value
-        self.activation = 1.0
+        self.activation.activation = 1.0
 
         #N: Value topic
         self.perception_publisher = self.create_publisher(Percept, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
@@ -56,7 +56,7 @@ class Perception(CognitiveNode):
 
         self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 10)
         
-    def calculate_activation(self, perception = None):
+    def calculate_activation(self, perception = None, activation_list=None):
         """
         Returns the the activation value of the instance
 
@@ -65,8 +65,7 @@ class Perception(CognitiveNode):
         :return: The activation of the instance
         :rtype: float
         """
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
     def set_activation_callback(self, request, response):
@@ -82,7 +81,8 @@ class Perception(CognitiveNode):
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
     

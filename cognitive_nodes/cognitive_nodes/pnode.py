@@ -2,6 +2,7 @@ import rclpy
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
 from cognitive_node_interfaces.srv import AddPoint
+from cognitive_node_interfaces.msg import Perception
 
 class PNode(CognitiveNode):
     """
@@ -26,7 +27,8 @@ class PNode(CognitiveNode):
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
-
+        self.activation_sources=['Perception']
+        self.configure_activation_inputs(self.neighbors)
 
     def add_point_callback(self, request, response):
         """
@@ -65,7 +67,7 @@ class PNode(CognitiveNode):
                 self.spaces.append(space)
             added_point_pos = space.add_point(point, confidence)
             
-    def calculate_activation(self, perception=None):
+    def calculate_activation(self, perception=None, activation_list=None):
         """
         Calculate the new activation value for a given perception
 
@@ -74,6 +76,12 @@ class PNode(CognitiveNode):
         :return: If there is space, returns the activation of the PNode. If not, returns 0
         :rtype: float
         """
+        if activation_list!=None:
+            perception={}
+            for sensor in activation_list:
+                activation_list[sensor]['updated']=False
+                perception[sensor]=activation_list[sensor]['data']
+
         if perception:
             activations = []
             perceptions = separate_perceptions(perception)
@@ -87,11 +95,8 @@ class PNode(CognitiveNode):
 
                 activations.append(activation_value) 
             
-            self.activation = activations[0] if len(activations) == 1 else float(activations)
-        
-        if self.activation_topic:
-            self.publish_activation(self.activation)
-            
+            self.activation.activation = activations[0] if len(activations) == 1 else float(activations)
+            self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
     def get_space(self, perception):
@@ -111,6 +116,30 @@ class PNode(CognitiveNode):
             if (not space.size) or space.same_sensors(temp_space):
                 return space
         return None
+    
+    def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
+        name=node['name']
+        node_type=node['node_type']
+        if node_type in self.activation_sources:
+            subscriber=self.create_subscription(Perception, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
+            data=Perception()
+            updated=False
+            new_input=dict(subscriber=subscriber, data=data, updated=updated)
+            self.activation_inputs[name]=new_input
+            self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
+        else:
+            self.get_logger().debug(f'{self.name} -- Node {name} of type {node_type} is not an activation source')
+
+
+    def read_activation_callback(self, msg: Perception):
+        perception_dict=perception_msg_to_dict(msg=msg)
+        if len(perception_dict)>1:
+            self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
+        node_name=list(perception_dict.keys())[0]
+        if node_name in self.activation_inputs:
+            self.activation_inputs[node_name]['data']=perception_dict[node_name]
+            self.activation_inputs[node_name]['updated']=True
+
 
 def main(args = None):
     rclpy.init(args=args)

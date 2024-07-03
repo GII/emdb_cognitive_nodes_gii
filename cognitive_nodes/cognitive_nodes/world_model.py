@@ -56,7 +56,7 @@ class WorldModel(CognitiveNode):
         )
 
         #TODO: Set activation from main_loop
-        self.activation = 1.0
+        self.activation.activation = 1.0
 
     def set_activation_callback(self, request, response):
         """
@@ -71,7 +71,8 @@ class WorldModel(CognitiveNode):
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
     
@@ -127,7 +128,7 @@ class WorldModel(CognitiveNode):
         response.compatible = True
         return response
 
-    def calculate_activation(self, perception = None):
+    def calculate_activation(self, perception = None, activation_list=None):
         """
         Returns the the activation value of the World Model
 
@@ -136,9 +137,7 @@ class WorldModel(CognitiveNode):
         :return: The activation of the instance
         :rtype: float
         """
-
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
 

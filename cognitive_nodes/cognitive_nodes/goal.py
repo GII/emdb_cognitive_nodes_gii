@@ -86,7 +86,8 @@ class Goal(CognitiveNode):
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
     
@@ -468,7 +469,7 @@ class GoalObjectInBoxStandalone(Goal):
                             return True
             return False
         
-    def calculate_activation(self, perception = None):
+    def calculate_activation(self, perception = None, activation_list = None):
         """
         Returns the the activation value of the goal
 
@@ -480,14 +481,12 @@ class GoalObjectInBoxStandalone(Goal):
         iteration=self.iteration
         if self.end:
             if(iteration % self.period >= self.start) and (
-                iteration % self.period <= self.end
+                iteration % self.period <= self.end 
             ):
-                self.activation = 1.0
+                self.activation.activation = 1.0
             else:
-                self.activation = 0.0
-
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+                self.activation.activation = 0.0
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
     async def get_reward(self):
@@ -501,7 +500,7 @@ class GoalObjectInBoxStandalone(Goal):
         # This is not coherent at all. I need to change it...
         # Or self.activation is not a list any longer...
         # or perceptions should be flattened
-        for activation in [self.activation]: #Ugly HACK: support activations as list
+        for activation in [self.activation.activation]: #Ugly HACK: support activations as list
             if (self.sensorial_changes()) and isclose(activation, 1.0):
                 if (await self.object_in_close_box()) or (await self.object_in_far_box()):
                     self.reward = 1.0
@@ -596,7 +595,7 @@ class GoalReadPublishedReward(Goal):
         """
         self.iteration=msg.iteration
     
-    def calculate_activation(self, perception = None):
+    def calculate_activation(self, perception = None, activation_list = None):
         """
         Returns the the activation value of the goal
 
@@ -608,14 +607,12 @@ class GoalReadPublishedReward(Goal):
         iteration=self.iteration
         if self.end:
             if(iteration % self.period >= self.start) and (
-                iteration % self.period <= self.end
+                iteration % self.period <= self.end 
             ):
-                self.activation = 1.0
+                self.activation.activation = 1.0
             else:
-                self.activation = 0.0
-
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+                self.activation.activation = 0.0
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
 #TODO Implement GoalMotiven

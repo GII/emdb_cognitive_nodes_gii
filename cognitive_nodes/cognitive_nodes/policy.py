@@ -49,9 +49,11 @@ class Policy(CognitiveNode):
         )
 
         self.publisher_msg = publisher_msg
-        self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)         
+        self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)        
+        self.activation_sources=['CNode']
+        self.configure_activation_inputs(self.neighbors) 
 
-    async def calculate_activation(self, perception):
+    async def calculate_activation(self, perception=None, activation_list=None):
         """
         Calculate the activation level of the policy by obtaining that of its neighboring CNodes
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
@@ -61,23 +63,25 @@ class Policy(CognitiveNode):
         :return: The activation of the Policy
         :rtype: float
         """
-        cnodes = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] == "CNode"]
-        if cnodes:
-            cnode_activations = []
-            for cnode in cnodes:
-                perception_msg = perception_dict_to_msg(perception)
-                service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
-                if not service_name in self.node_clients:
-                    self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
-                activation = await self.node_clients[service_name].send_request_async(perception = perception_msg)
-                cnode_activations.append(activation.activation)
-                self.activation = numpy.max(cnode_activations)
-        else:
-            self.activation = 0.0
+        if activation_list==None:
+            cnodes = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] == "CNode"]
+            if cnodes:
+                cnode_activations = []
+                for cnode in cnodes:
+                    perception_msg = perception_dict_to_msg(perception)
+                    service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
+                    if not service_name in self.node_clients:
+                        self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
+                    activation = await self.node_clients[service_name].send_request_async(perception = perception_msg)
+                    cnode_activations.append(activation.activation)
+                    self.activation.activation = float(numpy.max(cnode_activations))
+            else:
+                self.activation.activation = 0.0
+            self.activation.timestamp =self.get_clock().now().to_msg()
+            self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
         
-        self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        else:
+            self.calculate_activation_max(activation_list)
         return self.activation
     
     def execute_callback(self, request, response):
@@ -114,7 +118,8 @@ class Policy(CognitiveNode):
 
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
 
