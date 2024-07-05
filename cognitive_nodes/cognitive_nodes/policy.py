@@ -47,9 +47,7 @@ class Policy(CognitiveNode):
             self.execute_callback,
             callback_group=self.cbgroup_server
         )
-
-        self.publisher_msg = publisher_msg
-        self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)        
+    
         self.activation_sources=['CNode']
         self.configure_activation_inputs(self.neighbors) 
 
@@ -87,8 +85,7 @@ class Policy(CognitiveNode):
     def execute_callback(self, request, response):
 
         """
-        Mock method that pretends to execute the policy.
-        It logs the execution and returns the policy name in the response.
+        Placeholder for the execution of the policy.
 
         :param request: The request to execute the policy.
         :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
@@ -97,12 +94,7 @@ class Policy(CognitiveNode):
         :return: The response with the executed policy name.
         :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
         """
-        self.get_logger().info('Executing policy: ' + self.name + '...')
-        msg = class_from_classname(self.publisher_msg)()
-        msg.data = self.name
-        self.publisher.publish(msg)
-        response.policy = self.name
-        return response
+        raise NotImplementedError
     
     def set_activation_callback(self, request, response):
         """
@@ -122,7 +114,58 @@ class Policy(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
+    
 
+class PolicyAsync(Policy):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyAsync', publisher_msg=None, publisher_topic=None, **params):
+        super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
+        self.publisher_msg = publisher_msg
+        self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)    
+    
+    def execute_callback(self, request, response):
+
+        """
+        Mock method that pretends to execute the policy.
+        It logs the execution and returns the policy name in the response.
+
+        :param request: The request to execute the policy.
+        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :param response: The response indicating the executed policy.
+        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :return: The response with the executed policy name.
+        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        """
+        self.get_logger().info('Executing policy: ' + self.name + '...')
+        msg = class_from_classname(self.publisher_msg)()
+        msg.data = self.name
+        self.publisher.publish(msg)
+        response.policy = self.name
+        return response    
+
+class PolicyBlocking(Policy):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyBlocking', publisher_msg=None, publisher_topic=None, **params):
+        super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
+
+    def execute_callback(self, request, response):
+
+        """
+        Mock method that pretends to execute the policy.
+        It logs the execution and returns the policy name in the response.
+
+        :param request: The request to execute the policy.
+        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :param response: The response indicating the executed policy.
+        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :return: The response with the executed policy name.
+        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        """
+        self.get_logger().info('Executing policy: ' + self.name + '...')
+        msg = class_from_classname(self.publisher_msg)()
+        msg.data = self.name
+        self.publisher.publish(msg)
+        response.policy = self.name
+        return response
+    
 
 def main(args=None):
     rclpy.init(args=args)

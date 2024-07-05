@@ -618,7 +618,7 @@ class GoalReadPublishedReward(Goal):
 #TODO Implement GoalMotiven
 
 class GoalMotiven(Goal):
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.DriveLinkedGoal', **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.GoalMotiven', **params):
         super().__init__(name, class_name, **params)
 
     def configure_drives(self):
