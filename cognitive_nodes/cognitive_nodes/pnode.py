@@ -26,6 +26,7 @@ class PNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
+        self.added_point=False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
         self.activation_sources=['Perception']
         self.configure_activation_inputs(self.neighbors)
@@ -66,6 +67,7 @@ class PNode(CognitiveNode):
                 space = self.spaces[0].__class__()
                 self.spaces.append(space)
             added_point_pos = space.add_point(point, confidence)
+        self.added_point = True
             
     def calculate_activation(self, perception=None, activation_list=None):
         """
@@ -87,7 +89,7 @@ class PNode(CognitiveNode):
             perceptions = separate_perceptions(perception)
             for perception_line in perceptions:
                 space = self.get_space(perception_line)
-                if space:
+                if space and self.added_point:
                     activation_value = max(0.0, space.get_probability(perception_line))
                     self.get_logger().debug(f'PNODE DEBUG: Perception: {perception_line} Space provided activation: {activation_value}')
                 else:

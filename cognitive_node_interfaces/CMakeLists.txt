@@ -31,6 +31,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetSuccessRate.srv"
   "srv/IsCompatible.srv"
   "srv/IsReached.srv"
+  "srv/Policy.srv"
   "srv/Predict.srv"
   "srv/SetActivation.srv"
   "srv/SetActivationTopic.srv"

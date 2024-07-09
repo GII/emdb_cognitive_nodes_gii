@@ -143,14 +143,16 @@ class PolicyAsync(Policy):
         return response    
 
 class PolicyBlocking(Policy):
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyBlocking', publisher_msg=None, publisher_topic=None, **params):
-        super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyBlocking', service_msg=None, service_name=None, **params):
+        super().__init__(name, class_name, service_msg, service_name, **params)
+        self.service_msg=service_msg
+        self.service_name=service_name
+        self.policy_service=ServiceClientAsync(self, class_from_classname(service_msg), service_name, self.cbgroup_client)
 
-    def execute_callback(self, request, response):
+    async def execute_callback(self, request, response):
 
         """
-        Mock method that pretends to execute the policy.
-        It logs the execution and returns the policy name in the response.
+        Makes a service call to the server that handles the execution of the policy.
 
         :param request: The request to execute the policy.
         :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
@@ -160,9 +162,7 @@ class PolicyBlocking(Policy):
         :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
-        msg = class_from_classname(self.publisher_msg)()
-        msg.data = self.name
-        self.publisher.publish(msg)
+        await self.policy_service.send_request_async(policy=self.name)
         response.policy = self.name
         return response
     
