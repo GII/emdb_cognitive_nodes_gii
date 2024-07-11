@@ -119,12 +119,12 @@ class Drive(CognitiveNode):
             self.publish_activation(self.activation)
         return self.activation  
 
-class NeedLinkedDrive(Drive):
+class DriveMotiven(Drive):
     """
     Need Linked Drive class: Defines a drive that is connected to one and only one need.
     """
 
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.DriveLinkedNeed", **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.DriveMotiven", **params):
         super().__init__(name, class_name, **params)
 
         need= [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"]=="Need"]
@@ -145,7 +145,7 @@ class NeedLinkedDrive(Drive):
         """
         raise NotImplementedError
     
-class DriveLinear(NeedLinkedDrive):
+class DriveLinear(DriveMotiven):
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.DriveLinear", **params):
         super().__init__(name, class_name, **params)  
     
@@ -177,7 +177,7 @@ class DriveLinear(NeedLinkedDrive):
         """
         need_satisfaction= await self.cli_need_satisfied.send_request_async(perception)
         assert isinstance(need_satisfaction, GetSatisfaction.Response)
-        self.evaluation=need_satisfaction.weight*(1-need_satisfaction.satisfied)
+        self.evaluation=(1-need_satisfaction.satisfied)
         return self.evaluation
     
 

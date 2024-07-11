@@ -119,14 +119,14 @@ class Need(CognitiveNode):
             self.publish_activation(self.activation)
         return self.activation
     
-class HeterostaticNeed(Need):
+class NeedHeterostatic(Need):
     
-    def __init__(self, name='need', class_name='cognitive_nodes.need.HeterostaticNeed', weight=1.0, **params):
+    def __init__(self, name='need', class_name='cognitive_nodes.need.NeedHeterostatic', weight=1.0, **params):
         super.__init__(name, class_name, weight, **params)
 
     def calculate_activation(self, perception=None):
         """
-        Always returns an activation of 1.0
+        Always returns an activation of 1.0 * weight
 
         :param perception: The given perception
         :type perception: dict
