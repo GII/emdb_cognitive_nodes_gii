@@ -65,5 +65,4 @@ Spaces could be used in other cognitive nodes, such as Goals.
 
 ## Topics and services
 
-Cognitive nodes use several topics and services to interact with them. Some of them are common to all, while others are specific to each node.  The first ones can be found [here](), in the [emdb_core repository documentation](https://docs.pillar-robots.eu/projects/emdb_core/en/latest/). The latter can be found in the [API documentation](../cognitive_nodes/api_documentation.rst) of this repository, being specified on each implemented node.
-
+Cognitive nodes use several topics and services to interact with them. Some of them are common to all, while others are specific to each node.  The first ones can be found in the [emdb_core repository documentation](https://docs.pillar-robots.eu/projects/emdb_core/en/latest/). The latter can be found in the [API documentation](../cognitive_nodes/api_documentation.rst) of this repository, being specified on each implemented node.
