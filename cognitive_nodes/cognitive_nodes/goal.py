@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.time import Time
 import threading
 import inspect
 
@@ -8,11 +9,13 @@ from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate
 from cognitive_node_interfaces.srv import GetIteration
+from cognitive_node_interfaces.msg import Evaluation
 from core_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 
 from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
 from math import isclose
+import numpy
 
 import random
 
@@ -46,6 +49,8 @@ class Goal(CognitiveNode):
         self.end = None
         self.period = None
         self.iteration=0
+
+        self.cbgroup_reward=MutuallyExclusiveCallbackGroup()
         
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
@@ -68,10 +73,8 @@ class Goal(CognitiveNode):
             GetReward,
             'goal/' + str(name) + '/get_reward',
             self.get_reward_callback,
-            callback_group=self.cbgroup_server
+            callback_group=self.cbgroup_reward
         )
-
-        
 
     def set_activation_callback(self, request, response):
         """
@@ -618,28 +621,115 @@ class GoalReadPublishedReward(Goal):
 #TODO Implement GoalMotiven
 
 class GoalMotiven(Goal):
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.GoalMotiven', **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
         super().__init__(name, class_name, **params)
+        self.activation_sources = ['Drive']
+        self.drive_inputs = {}
+        self.configure_activation_inputs(self.neighbors)
+        self.configure_drive_inputs(self.neighbors)
+    
 
-    def configure_drives(self):
-        pass #Puts drives, evaluations(old, current) and corresponding Service Clients in a list
-        #FIX THIS
-        drive= [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"]=="Drive"]
-        if len(drive)!=1:
-            raise Exception(f'Drive must be linked to one need. Connected needs: {len(drive)}')
+    def configure_drive_inputs(self, neighbors):
+        drive_list = [node for node in neighbors if node['node_type']== 'Drive']
+        for drive in drive_list:
+            self.create_drive_input(drive)
+    
+    def create_drive_input(self, drive: dict):
+        name = drive['name']
+        node_type = drive['node_type']
+        if name not in self.drive_inputs:
+            if node_type == 'Drive':
+                subscriber = self.create_subscription(Evaluation, 'drive/' + str(name) + '/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_reward)
+                data = Evaluation()
+                updated = False
+                new_input = dict(subscriber=subscriber, data=data, updated=updated)
+                self.drive_inputs[name]=new_input
+                self.get_logger().debug(f'Created new Drive input: {name}')
+
+            else:
+                self.get_logger().debug(f'Node {name} of type {node_type} is not a Drive')
         else:
-            self.cli_drive_activation=ServiceClientAsync(self, GetActivation, f'cognitive_node/{drive[0]}/get_activation', self.cbgroup_client)
-            self.cli_drive_evaluation=ServiceClientAsync(self, Evaluate, f'cognitive_node/{drive[0]}/get_activation', self.cbgroup_client)
-    
+            self.get_logger().error(f'Tried to add {name} to drive inputs more than once')
 
-    def calculate_activation(self, perception): #TODO
-        return super().calculate_activation(perception)
-    
-    def get_reward(self): #TODO
-        return super().get_reward()
+    def delete_drive_input(self, drive: dict):
+        name = drive['name']
+        if name in self.drive_inputs:
+            self.destroy_subscription(self.drive_inputs[name]['subscription'])
+            self.activation_inputs.pop(name)
 
+    def add_neighbor_callback(self, request, response):
+        node_name = request.neighbor_name
+        node_type = request.neighbor_type
+        response = super().add_neighbor_callback(request, response)
+        if node_type == 'Drive':
+            drive = {'name':node_name, 'node_type':node_type}
+            self.create_drive_input(drive)
+            response.added = True
+        return response
 
+    def delete_neighbor_callback(self, request, response):
+        node_name = request.neighbor_name
+        node_type = request.neighbor_type
+        neighbor_to_delete = {'name':node_name, 'node_type':node_type}
+        response = super().delete_neighbor_callback(request, response)
+
+        if node_type == 'Drive':
+            drive_list = [node for node in self.neighbors if node['node_type']== 'Drive']
+            for drive in drive_list:
+                if drive == neighbor_to_delete:
+                    self.delete_drive_input(neighbor_to_delete)
+                    response.deleted = True
+
+                else:
+                    response.deleted = False
+
+        return response    
+
+    def read_evaluation_callback(self, msg: Evaluation):
+        drive_name = msg.drive_name
+        if drive_name in self.drive_inputs:
+            if Time.from_msg(msg.timestamp).nanoseconds>Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
+                self.old_drive_inputs[drive_name] = self.drive_inputs[drive_name]
+                self.drive_inputs[drive_name]['data']=msg
+                self.drive_inputs[drive_name]['updated']=True
+                self.calculate_reward(drive_name)
+            elif Time.from_msg(msg.timestamp).nanoseconds<Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
+                self.get_logger().warn(f'Detected jump back in time, evaluation of Drive: {drive_name}')
+            
+    async def publish_activation_callback(self): #Timed publish of the activation value
+        if self.activation_topic:
+            self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
+            updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
+            updated_evaluations= all((self.drive_inputs[node_name]['updated'] for node_name in self.drive_inputs))
+
+            if updated_activations and updated_evaluations:
+                self.calculate_activation(perception=None, activation_list=self.activation_inputs, evaluation_list = self.drive_inputs)
+                for node_name in self.activation_inputs:
+                    self.activation_inputs[node_name]['updated']=False
+                for node_name in self.drive_inputs:
+                    self.drive_inputs[node_name]['updated']=False
+            self.publish_activation(self.activation)
     
+    def calculate_activation(self, perception, activation_list, evaluation_list):
+        goal_activations = []
+        for node in activation_list.keys():
+            for drive in evaluation_list.keys():
+                if node == drive:
+                    goal_activation = activation_list[node]['data'].activation * evaluation_list[drive]['data'].evaluation
+                    goal_activations.append(goal_activation)
+        self.activation.activation = numpy.max(goal_activations)
+        self.activation.timestamp=self.get_clock().now().to_msg()
+
+    def calculate_reward(self, drive_name):
+        # Remember the case in which one drive reduces its evaluation and another increases
+        if self.drive_inputs[drive_name] < self.old_drive_inputs[drive_name]:
+            self.reward = 1.0
+
+    def get_reward(self):
+        reward = self.reward
+        self.reward = 0.0
+        return reward
+        
 def main(args=None):
     rclpy.init(args=args)
 
