@@ -1,0 +1,5 @@
+builtin_interfaces/Time timestamp
+---
+string need_type
+bool updated
+bool satisfied

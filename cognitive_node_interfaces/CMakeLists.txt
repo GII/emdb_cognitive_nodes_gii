@@ -14,6 +14,7 @@ find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Activation.msg"
+  "msg/Evaluation.msg"
   "msg/Value.msg"
   "msg/Perception.msg"
   "msg/PerceptionLayout.msg"
@@ -31,6 +32,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetSuccessRate.srv"
   "srv/IsCompatible.srv"
   "srv/IsReached.srv"
+  "srv/IsSatisfied.srv"
   "srv/Policy.srv"
   "srv/Predict.srv"
   "srv/SetActivation.srv"

@@ -1,16 +1,19 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.time import Time
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, IsSatisfied, SetWeight
+from cognitive_node_interfaces.msg import Evaluation
 
-import random
+from math import isclose
 
 class Need(CognitiveNode):
     """"
     Need Class
     """
-    def __init__(self, name='need', class_name = 'cognitive_nodes.need.Need', weight= 1.0, **params):
+    def __init__(self, name='need', class_name = 'cognitive_nodes.need.Need', weight = 1.0, drive_id = None, need_type= None, **params):
         """
         Constructor of the Need class
 
@@ -22,45 +25,42 @@ class Need(CognitiveNode):
         :type class_name: str
         """
         super().__init__(name, class_name, **params)
+
+        self.cbgroup_satisfaction = MutuallyExclusiveCallbackGroup()
         
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
             SetActivation,
             'need/' + str(name) + '/set_activation',
-            self.set_activation_callback
+            self.set_activation_callback,
+            callback_group= self.cbgroup_activation
         )
 
         # N: Is Satisfied Service
         self.is_satisfied_service = self.create_service(
             IsSatisfied,
             'need/' + str(name) + '/get_satisfaction',
-            self.get_satisfaction_callback
+            self.get_satisfaction_callback,
+            callback_group=self.cbgroup_satisfaction
         )
 
-        self.set_weight_service = self.create_service(
-            SetWeight,
-            'need/' + str(name) + '/set_weight',
-            self.set_weight_service
-        )
+        self.activation.activation = weight
 
-        self.weight = weight
+        self.drive_id = drive_id
+        self.drive_evaluation = Evaluation()
+        self.drive_subscriber = self.create_subscription(Evaluation, f'drive/{self.drive_id}/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_satisfaction)
 
-    def set_weight_callback(self, request, response):
-        """
-        Set the weight of the need
+        self.need_type = need_type # Need types: [Operational, Cognitive]
 
-        :param request: Request that contains the new weight of the need
-        :type request: cognitive_node_interfaces.srv.SetWeight_Request
-        :param response: The response indicating if the weight was set
-        :type response: cognitive_node_interfaces.srv.SetWeight_Response
-        :return: The response indicating if the weight was set
-        :rtype: cognitive_node_interfaces.srv.SetWeight_Response
-        """
-        weight_value = request.weight
-        self.weight = weight_value
-        self.get_logger().info('Setting weight value ' + str(weight_value) + '...')
-        response.set = True
-        return response
+    def read_evaluation_callback(self, msg:Evaluation):
+        drive_name = msg.drive_name
+        if drive_name == self.drive_id:
+            if Time.from_msg(msg.timestamp).nanoseconds>Time.from_msg(self.drive_evaluation.timestamp).nanoseconds:
+                self.drive_evaluation = msg
+            elif Time.from_msg(msg.timestamp).nanoseconds<Time.from_msg(self.drive_evaluation.timestamp).nanoseconds:
+                self.get_logger().warn(f'Detected jump back in time, activation of drive evaluation: {drive_name}')
+        else:
+            self.get_logger().error(f'Drive evaluation mismatch detected between need {self.name} and drive (expected: {self.drive_id}, recieved {drive_name})')
 
     def set_activation_callback(self, request, response):
         """
@@ -75,11 +75,12 @@ class Need(CognitiveNode):
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
     
-    def get_satisfaction_callback(self, request, response):
+    def get_satisfaction_callback(self, request:IsSatisfied.Request, response:IsSatisfied.Response):
         """
         Check if the need had been satisfied
 
@@ -92,6 +93,11 @@ class Need(CognitiveNode):
         """
         self.get_logger().info('Calculating satisfaction..')
         response.satisfied = self.calculate_satisfaction()
+        response.need_type = self.need_type
+        if Time.from_msg(self.drive_evaluation.timestamp).nanoseconds > Time.from_msg(request.timestamp).nanoseconds:
+            response.updated = True
+        else:
+            response.updated = False
         return response
 
     def calculate_satisfaction(self):
@@ -102,53 +108,23 @@ class Need(CognitiveNode):
         :type perception: dict
         :raises NotImplementedError: Evaluate method has to be implemented in a child class
         """
+        satisfied = isclose(0, self.drive_evaluation.evaluation)
 
-        raise NotImplementedError
+        return satisfied
 
-    def calculate_activation(self, perception = None): #TODO: Implement logic
+
+    def calculate_activation(self, perception = None, activation_list=None):
         """
-        Returns the the activation value of the need
+        Returns the the activation value of the World Model
 
-        :param perception: The given perception
+        :param perception: Perception does not influence the activation 
         :type perception: dict
-        :return: The activation of the need
+        :return: The activation of the instance
         :rtype: float
         """
-        self.activation = self.weight * random.random()
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
-class NeedHeterostatic(Need):
-    
-    def __init__(self, name='need', class_name='cognitive_nodes.need.NeedHeterostatic', weight=1.0, **params):
-        super.__init__(name, class_name, weight, **params)
-
-    def calculate_activation(self, perception=None):
-        """
-        Always returns an activation of 1.0 * weight
-
-        :param perception: The given perception
-        :type perception: dict
-        :return: Returns the activation of the Need. Always 1.0
-        :rtype: float
-        """
-        self.activation = 1.0 * self.weight
-        if self.activation_topic:
-            self.publish_activation(self.activation)
-        return self.activation
-    
-    def calculate_satisfaction(self, perception=None):
-        """
-        This type of need is never satisfied, therefore always returns 0.0.
-
-        :param perception: The given normalized perception
-        :type perception: dict
-        :return: False
-        :rtype: bool
-        """       
-
-        return 0.0
 
 def main(args=None):
     rclpy.init(args=args)

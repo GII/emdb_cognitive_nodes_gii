@@ -1,11 +1,14 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
+from core.utils import class_from_classname
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRate, GetSatisfaction, GetActivation
+from cognitive_node_interfaces.msg import Evaluation
 
-import random
+from math import exp, isclose
 
 
 class Drive(CognitiveNode):
@@ -13,7 +16,7 @@ class Drive(CognitiveNode):
     Drive class
     """
 
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input = None, input_msg=None, **params):
         """
         Constructor of the Drive class
 
@@ -27,14 +30,16 @@ class Drive(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
 
+        self.cbgroup_evaluation = MutuallyExclusiveCallbackGroup()
+
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
             SetActivation, "drive/" + str(name) + "/set_activation", self.set_activation_callback
         )
 
         # N: Evaluate Service
-        self.evaluate_service = self.create_service(
-            Evaluate, "drive/" + str(name) + "/evaluate", self.evaluate_callback
+        self.evaluation_publisher = self.create_publisher(
+            Evaluation, "drive/" + str(name) + "/evaluation", 0
         )
 
         # N: Get Success Rate Service
@@ -44,7 +49,17 @@ class Drive(CognitiveNode):
             self.get_success_rate_callback,
         )
 
-        self.evaluation=0.0
+        self.input_subscription = self.create_subscription(class_from_classname(input_msg), input, self.read_input_callback, 1)
+        self.input = 0.0
+        self.input_flag = False
+
+        self.evaluation_publisher_timer = self.create_timer(0.01, self.publish_evaluation_callback, callback_group = self.cbgroup_evaluation)
+
+        self.evaluation=Evaluation()
+        self.evaluation.drive_name=self.name
+
+        self.activation_sources = ['Need']
+        self.configure_activation_inputs(self.neighbors)
 
     def set_activation_callback(self, request, response):
         """
@@ -58,8 +73,9 @@ class Drive(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.SetActivation_Response
         """
         activation = request.activation
-        self.get_logger().info("Setting activation " + str(activation) + "...")
-        self.activation = activation
+        self.get_logger().info('Setting activation ' + str(activation) + '...')
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
 
@@ -73,21 +89,17 @@ class Drive(CognitiveNode):
         """
         raise NotImplementedError
 
-    def evaluate_callback(self, request, response):
+    def publish_evaluation_callback(self):
         """
-        Callback for evaluate a perception
+        Callback for publishing evaluation
 
-        :param request: The request that contains the perception
-        :type request: cognitive_node_interfaces.srv.Evaluate_Request
-        :param response: The response that contains tha valuation of the perception
-        :type response: cognitive_node_interfaces.srv.Evaluate_Response
-        :return: The response that contains the valuation of the perception
-        :rtype: cognitive_node_interfaces.srv.Evaluate_Response
         """
-        perception, weight = request.perception, request.weight
-        self.get_logger().info("Evaluating for perception " + str(perception) + "...")
-        response.valuation = self.evaluate(perception, weight)
-        return response
+        self.evaluate()
+        self.evaluation_publisher.publish(self.evaluation)
+
+    def read_input_callback(self, msg):
+        self.input = msg.data
+        self.input_flag = True
 
     def get_success_rate_callback(self, request, response):  # TODO: implement
         """
@@ -100,12 +112,13 @@ class Drive(CognitiveNode):
         :return: The response that contains the predicted success rate
         :rtype: cognitive_node_interfaces.srv.GetSuccessRate_Response
         """
+        raise NotImplementedError
         self.get_logger().info("Getting success rate..")
         # TODO: implement logic
         response.success_rate = 0.5
         return response
 
-    def calculate_activation(self, perception=None):  # TODO: Implement logic
+    def calculate_activation(self, perception=None, activation_list=None):
         """ "
         Returns the the activation value of the Drive
 
@@ -114,59 +127,17 @@ class Drive(CognitiveNode):
         :return: The activation of the instance
         :rtype: float
         """
-        self.activation = random.random()
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        self.calculate_activation_max(activation_list)
         return self.activation  
 
-class DriveMotiven(Drive):
-    """
-    Need Linked Drive class: Defines a drive that is connected to one and only one need.
-    """
-
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.DriveMotiven", **params):
-        super().__init__(name, class_name, **params)
-
-        need= [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"]=="Need"]
-        if len(need)!=1:
-            raise Exception(f'Drive must be linked to one and only one need. Connected needs: {len(need)}')
-        else:
-            self.cli_need_activation=ServiceClientAsync(self, GetActivation, f'cognitive_node/{need[0]}/get_activation', self.cbgroup_client)
-            self.cli_need_satisfied=ServiceClientAsync(self, GetSatisfaction, f'need/{need[0]}/get_satisfaction', self.cbgroup_client)
-        
-    def calculate_activation(self, perception=None):
-        """
-        Calculates the activation of the drive. Must be implemented in a child class
-
-        :param perception: The given normalized perception
-        :type perception: dict
-        :return: The valuation of the perception
-        :rtype: float
-        """
-        raise NotImplementedError
     
-class DriveLinear(DriveMotiven):
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.DriveLinear", **params):
+class DriveExponential(Drive):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", min_eval=0.0, **params):
         super().__init__(name, class_name, **params)  
-    
-    async def calculate_activation(self, perception=None):
-        """
-        Cascades the activation from the corresponding need
-
-        :param perception: The given normalized perception
-        :type perception: dict
-        :return: The valuation of the perception
-        :rtype: float
-        """
-        need_activation= await self.cli_need_activation.send_request_async(perception)
-        assert isinstance(need_activation, GetActivation.Response)
-        self.activation=need_activation
-        if self.activation_topic:
-            self.publish_activation(self.activation)
-        return self.activation
+        self.min_eval=min_eval
     
 
-    async def evaluate(self, perception=None):
+    def evaluate(self):
         """
         Evaluates the drive value according to the 
 
@@ -175,9 +146,18 @@ class DriveLinear(DriveMotiven):
         :return: The valuation of the perception
         :rtype: float
         """
-        need_satisfaction= await self.cli_need_satisfied.send_request_async(perception)
-        assert isinstance(need_satisfaction, GetSatisfaction.Response)
-        self.evaluation=(1-need_satisfaction.satisfied)
+        if self.input_flag:
+            if self.input>0:
+                a = 1-self.min_eval 
+                self.evaluation.evaluation = a*exp(-5*self.input)+self.min_eval
+                if isclose(self.input, 1.0, ):
+                    self.evaluation.evaluation = 0.0
+            else:
+                self.evaluation.evaluation = 1.0
+            
+            self.input_flag = False
+            self.evaluation.timestamp = self.get_clock().now().to_msg()
+
         return self.evaluation
     
 
