@@ -1,4 +1,5 @@
 import rclpy
+from copy import copy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.time import Time
@@ -625,6 +626,7 @@ class GoalMotiven(Goal):
         super().__init__(name, class_name, **params)
         self.activation_sources = ['Drive']
         self.drive_inputs = {}
+        self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)
         self.configure_drive_inputs(self.neighbors)
     
@@ -689,7 +691,7 @@ class GoalMotiven(Goal):
         drive_name = msg.drive_name
         if drive_name in self.drive_inputs:
             if Time.from_msg(msg.timestamp).nanoseconds>Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
-                self.old_drive_inputs[drive_name] = self.drive_inputs[drive_name]
+                self.old_drive_inputs[drive_name] = copy(self.drive_inputs[drive_name])
                 self.drive_inputs[drive_name]['data']=msg
                 self.drive_inputs[drive_name]['updated']=True
                 self.calculate_reward(drive_name)
@@ -722,7 +724,7 @@ class GoalMotiven(Goal):
 
     def calculate_reward(self, drive_name):
         # Remember the case in which one drive reduces its evaluation and another increases
-        if self.drive_inputs[drive_name] < self.old_drive_inputs[drive_name]:
+        if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation:
             self.reward = 1.0
 
     def get_reward(self):
