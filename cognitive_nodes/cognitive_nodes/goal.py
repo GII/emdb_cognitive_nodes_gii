@@ -136,7 +136,7 @@ class Goal(CognitiveNode):
             reward = await self.get_reward()
         else:
             reward = self.get_reward()
-        response.reward = self.reward
+        response.reward = reward
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
 
