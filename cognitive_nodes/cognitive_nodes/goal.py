@@ -110,10 +110,10 @@ class Goal(CognitiveNode):
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
-            await self.get_reward()
+            reward = await self.get_reward()
         else:
-            self.get_reward()
-        if isclose(self.reward, 1.0):
+            reward = self.get_reward()
+        if isclose(reward, 1.0):
             response.reached = True
         else:
             response.reached = False
@@ -133,11 +133,11 @@ class Goal(CognitiveNode):
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
-            await self.get_reward()
+            reward = await self.get_reward()
         else:
-            self.get_reward()
+            reward = self.get_reward()
         response.reward = self.reward
-        self.get_logger().info("Obtaining reward from " + self.name + " => " + str(self.reward))
+        self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
 
     async def get_reward(self):
