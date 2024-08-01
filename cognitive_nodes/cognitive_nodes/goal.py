@@ -11,7 +11,7 @@ from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate
 from cognitive_node_interfaces.srv import GetIteration
 from cognitive_node_interfaces.msg import Evaluation
-from core_interfaces.msg import ControlMsg
+from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 
 from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
