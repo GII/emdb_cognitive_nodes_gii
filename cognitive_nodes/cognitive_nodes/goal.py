@@ -724,7 +724,8 @@ class GoalMotiven(Goal):
 
     def calculate_reward(self, drive_name):
         # Remember the case in which one drive reduces its evaluation and another increases
-        if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation and not isclose(self.activation, 0.0):
+        if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation and not isclose(self.activation.activation, 0.0):
+            self.get_logger().info(f"DEBUG: REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 1.0
 
     def get_reward(self):

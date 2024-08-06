@@ -95,7 +95,8 @@ class Drive(CognitiveNode):
 
         """
         self.evaluate()
-        self.evaluation_publisher.publish(self.evaluation)
+        if self.evaluation.timestamp.nanosec > 0.0:
+            self.evaluation_publisher.publish(self.evaluation)
 
     def read_input_callback(self, msg):
         self.input = msg.data
@@ -153,7 +154,7 @@ class DriveExponential(Drive):
                 if isclose(self.input, 1.0, ):
                     self.evaluation.evaluation = 0.0
             else:
-                self.evaluation.evaluation = 1.0
+                self.evaluation.evaluation = 0.0
             
             self.input_flag = False
             self.evaluation.timestamp = self.get_clock().now().to_msg()
