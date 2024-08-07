@@ -148,13 +148,13 @@ class DriveExponential(Drive):
         :rtype: float
         """
         if self.input_flag:
-            if self.input>0:
+            if self.input>=0:
                 a = 1-self.min_eval 
                 self.evaluation.evaluation = a*exp(-5*self.input)+self.min_eval
                 if isclose(self.input, 1.0, ):
                     self.evaluation.evaluation = 0.0
             else:
-                self.evaluation.evaluation = 0.0
+                self.evaluation.evaluation = 1.0
             
             self.input_flag = False
             self.evaluation.timestamp = self.get_clock().now().to_msg()
