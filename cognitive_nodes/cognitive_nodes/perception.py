@@ -54,7 +54,7 @@ class Perception(CognitiveNode):
 
         self.normalize_values = normalize_data
 
-        self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 10)
+        self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 1)
         
     def calculate_activation(self, perception = None, activation_list=None):
         """
