@@ -48,10 +48,10 @@ class Drive(CognitiveNode):
             "drive/" + str(name) + "/get_success_rate",
             self.get_success_rate_callback,
         )
-
-        self.input_subscription = self.create_subscription(class_from_classname(input_msg), input, self.read_input_callback, 1)
-        self.input = 0.0
-        self.input_flag = False
+        if input:
+            self.input_subscription = self.create_subscription(class_from_classname(input_msg), input, self.read_input_callback, 1)
+            self.input = 0.0
+            self.input_flag = False
 
         self.evaluation_publisher_timer = self.create_timer(0.01, self.publish_evaluation_callback, callback_group = self.cbgroup_evaluation)
 
@@ -79,7 +79,7 @@ class Drive(CognitiveNode):
         response.set = True
         return response
 
-    def evaluate(self, perception):
+    def evaluate(self, perception=None):
         """
         Get expected valuation for a given perception
 
@@ -138,7 +138,7 @@ class DriveExponential(Drive):
         self.min_eval=min_eval
     
 
-    def evaluate(self):
+    def evaluate(self, perception=None):
         """
         Evaluates the drive value according to the 
 
