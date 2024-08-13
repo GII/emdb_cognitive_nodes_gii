@@ -137,10 +137,13 @@ class PNode(CognitiveNode):
         perception_dict=perception_msg_to_dict(msg=msg)
         if len(perception_dict)>1:
             self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
-        node_name=list(perception_dict.keys())[0]
-        if node_name in self.activation_inputs:
-            self.activation_inputs[node_name]['data']=perception_dict[node_name]
-            self.activation_inputs[node_name]['updated']=True
+        if len(perception_dict)==1:
+            node_name=list(perception_dict.keys())[0]
+            if node_name in self.activation_inputs:
+                self.activation_inputs[node_name]['data']=perception_dict[node_name]
+                self.activation_inputs[node_name]['updated']=True
+        else:
+            self.get_logger().warn("Empty perception recieved in PNode. No activation calculated")
 
 
 def main(args = None):

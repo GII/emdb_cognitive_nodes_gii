@@ -456,7 +456,10 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
             if self.parent_space
             else activation
         )
-
+    
+class ActivatedDummySpace(PointBasedSpace):
+    def get_probability(self, perception):
+        return 1.0
 
 class SVMSpace(PointBasedSpace):
     """
