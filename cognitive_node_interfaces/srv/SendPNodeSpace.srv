@@ -1,0 +1,4 @@
+---
+string[] labels
+float64[] data
+float64[] confidences

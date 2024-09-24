@@ -1,7 +1,7 @@
 import rclpy
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
-from cognitive_node_interfaces.srv import AddPoint
+from cognitive_node_interfaces.srv import AddPoint, SendPNodeSpace
 from cognitive_node_interfaces.msg import Perception
 
 class PNode(CognitiveNode):
@@ -28,8 +28,36 @@ class PNode(CognitiveNode):
         self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
         self.added_point=False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
+        self.send_pnode_space_service = self.create_service(SendPNodeSpace, 'pnode/' + str(name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
         self.activation_sources=['Perception']
         self.configure_activation_inputs(self.neighbors)
+        self.data_labels = []
+
+    def configure_labels(self):
+        self.point_msg:Perception
+        i = 0
+        for dim in self.point_msg.layout.dim:
+            sensor = dim.sensor[:-1]
+            for label in dim.labels:
+                data_label = str(i) + "_" + sensor + "_" + label
+                self.data_labels.append(data_label)
+            i = i+1            
+
+    def send_pnode_space_callback(self, request, response):
+        if not self.data_labels:
+            self.configure_labels()
+        response.labels = self.data_labels
+        
+        data = []
+        for perception in self.space.members[0:self.space.size]:
+            for value in perception:
+                data.append(value)
+        response.data = data
+
+        confidences = list(self.space.memberships[0:self.space.size])
+        response.confidences = confidences
+        
+        return response
 
     def add_point_callback(self, request, response):
         """
@@ -42,9 +70,9 @@ class PNode(CognitiveNode):
         :return: The response indicating if the point was added to the PNode.
         :rtype: cognitive_node_interfaces.srv.AddPoint_Response
         """
-        point_msg = request.point
+        self.point_msg = request.point
         confidence = request.confidence
-        point = perception_msg_to_dict(point_msg)
+        point = perception_msg_to_dict(self.point_msg)
         self.add_point(point,confidence)
         self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
         response.added = True
@@ -62,13 +90,14 @@ class PNode(CognitiveNode):
         """
         points = separate_perceptions(point)
         for point in points:
-            space = self.get_space(point)
-            if not space:
-                space = self.spaces[0].__class__()
-                self.spaces.append(space)
-            added_point_pos = space.add_point(point, confidence)
+            self.space = self.get_space(point)
+            if not self.space:
+                self.space = self.spaces[0].__class__()
+                self.spaces.append(self.space)
+            added_point_pos = self.space.add_point(point, confidence)
         self.added_point = True
-            
+
+
     def calculate_activation(self, perception=None, activation_list=None):
         """
         Calculate the new activation value for a given perception
