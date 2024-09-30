@@ -6,11 +6,12 @@ from collections import deque
 from cognitive_nodes.need import Need
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
-from cognitive_nodes.policy import PolicyBlocking
+from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
+from cognitive_node_interfaces.srv import Execute
 
 
 #Work In Progress
@@ -23,11 +24,13 @@ class DriveNovelty(Drive):
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
     
-class PolicyNovelty(PolicyBlocking):
-    def __init__(self, name='policy_novelty', service_msg=None, service_name=None, **params):
-        super().__init__(name, service_msg=service_msg, service_name=service_name, **params)
+class PolicyNovelty(Policy):
+    def __init__(self, name='policy_novelty', exclude_list=[], ltm_id=None, **params):
+        super().__init__(name, **params)
         self.policies = PolicyQueue()
-        self.LTM_id = "ltm_0"
+        self.LTM_id = ltm_id
+        self.exclude_list=exclude_list
+        self.exclude_list.append(self.name)
         self.setup()
         self.ltm_subscriber = self.create_subscription(String, "/state", self.ltm_change_callback, 1, callback_group=self.cbgroup_client)
         
@@ -59,13 +62,16 @@ class PolicyNovelty(PolicyBlocking):
         changes = self.policies.merge(policies)
         if changes:
             self.policies.shuffle(self.rng)
-        self.policies.remove(self.name)
+        for policy in self.exclude_list:
+            self.policies.remove(policy)
         self.get_logger().info(f"Configured policies: {self.policies.queue}")
 
     async def execute_callback(self, request, response):
         policy = self.policies.select_policy()
+        if policy not in self.node_clients:
+            self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
         self.get_logger().info('Executing policy: ' + policy + '...')
-        await self.policy_service.send_request_async(policy=policy)
+        await self.node_clients[policy].send_request_async()
         response.policy = policy
         return response
     

@@ -1,14 +1,15 @@
+from collections import deque
 import rclpy
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
 from cognitive_node_interfaces.srv import AddPoint, SendPNodeSpace
-from cognitive_node_interfaces.msg import Perception
+from cognitive_node_interfaces.msg import Perception, SuccessRate
 
 class PNode(CognitiveNode):
     """
     PNode class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=50, **params):
         """
         Constructor for the PNode class.
         
@@ -29,6 +30,11 @@ class PNode(CognitiveNode):
         self.added_point=False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendPNodeSpace, 'pnode/' + str(name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
+        self.history_size=history_size
+        self.history = deque([], history_size)
+        self.success_rate = 0.0
+        self.goal_linked = False
+        self.success_publisher = self.create_publisher(SuccessRate, f'pnode/{str(name)}/success_rate', 0)
         self.activation_sources=['Perception']
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
@@ -96,8 +102,9 @@ class PNode(CognitiveNode):
                 self.spaces.append(self.space)
             added_point_pos = self.space.add_point(point, confidence)
         self.added_point = True
-
-
+        self.update_history(confidence)
+        self.publish_success_rate()
+            
     def calculate_activation(self, perception=None, activation_list=None):
         """
         Calculate the new activation value for a given perception
@@ -173,6 +180,42 @@ class PNode(CognitiveNode):
                 self.activation_inputs[node_name]['updated']=True
         else:
             self.get_logger().warn("Empty perception recieved in PNode. No activation calculated")
+    
+    def add_neighbor_callback(self, request, response):
+        response = super().add_neighbor_callback(request, response)
+        self.process_neighbors()
+        self.publish_success_rate()
+        return response
+    
+    def delete_neighbor_callback(self, request, response):
+        response = super().delete_neighbor_callback(request, response)
+        self.process_neighbors()
+        self.publish_success_rate()
+        return response
+
+    def process_neighbors(self):
+        goals=[node["name"] for node in self.neighbors if node["node_type"] == "Goal"]
+        self.get_logger().debug(f"DEBUG: PNode {self.name} neighbors: {self.neighbors}")
+        if len(goals)>0:
+            self.goal_linked=True
+        else:
+            self.goal_linked=False
+
+    def publish_success_rate(self):
+        msg = SuccessRate()
+        msg.node_name=self.name
+        msg.node_type=self.node_type
+        msg.flag=self.goal_linked
+        msg.success_rate=self.success_rate
+        self.success_publisher.publish(msg)
+
+    def update_history(self, confidence):
+        if confidence>0:
+            self.history.appendleft(True)
+        else:
+            self.history.appendleft(False)
+        self.success_rate = sum(self.history)/self.history.maxlen
+    
 
 
 def main(args = None):

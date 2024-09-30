@@ -110,9 +110,9 @@ class Goal(CognitiveNode):
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
-            reward = await self.get_reward()
+            reward = await self.get_reward(self.old_perception, self.perception)
         else:
-            reward = self.get_reward()
+            reward = self.get_reward(self.old_perception, self.perception)
         if isclose(reward, 1.0):
             response.reached = True
         else:
@@ -133,14 +133,14 @@ class Goal(CognitiveNode):
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
-            reward = await self.get_reward()
+            reward = await self.get_reward(self.old_perception, self.perception)
         else:
-            reward = self.get_reward()
+            reward = self.get_reward(self.old_perception, self.perception)
         response.reward = reward
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
 
-    async def get_reward(self):
+    async def get_reward(self, old_perception=None, perception=None):
         """
         Calculate the reward for the current sensor values.
 
@@ -493,7 +493,7 @@ class GoalObjectInBoxStandalone(Goal):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    async def get_reward(self):
+    async def get_reward(self, old_perception=None, perception=None):
         """
         Calculate the reward for the current sensor values.
 
@@ -584,7 +584,7 @@ class GoalReadPublishedReward(Goal):
         self.reward=msg.data
         self.flag.set()
 
-    def get_reward(self):
+    def get_reward(self, old_perception=None, perception=None):
         self.flag.wait()
         reward=self.reward
         self.flag.clear()
@@ -728,7 +728,7 @@ class GoalMotiven(Goal):
             self.get_logger().info(f"DEBUG: REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 1.0
 
-    def get_reward(self):
+    def get_reward(self, old_perception=None, perception=None):
         reward = self.reward
         self.reward = 0.0
         return reward

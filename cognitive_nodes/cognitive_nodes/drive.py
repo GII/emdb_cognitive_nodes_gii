@@ -16,7 +16,7 @@ class Drive(CognitiveNode):
     Drive class
     """
 
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input = None, input_msg=None, **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic = None, input_msg=None, **params):
         """
         Constructor of the Drive class
 
@@ -48,10 +48,8 @@ class Drive(CognitiveNode):
             "drive/" + str(name) + "/get_success_rate",
             self.get_success_rate_callback,
         )
-        if input:
-            self.input_subscription = self.create_subscription(class_from_classname(input_msg), input, self.read_input_callback, 1)
-            self.input = 0.0
-            self.input_flag = False
+
+        
 
         self.evaluation_publisher_timer = self.create_timer(0.01, self.publish_evaluation_callback, callback_group = self.cbgroup_evaluation)
 
@@ -133,9 +131,13 @@ class Drive(CognitiveNode):
 
     
 class DriveExponential(Drive):
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", min_eval=0.0, **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic = None, input_msg=None, min_eval=0.0, **params):
         super().__init__(name, class_name, **params)  
         self.min_eval=min_eval
+        if input_topic:
+            self.input_subscription = self.create_subscription(class_from_classname(input_msg), input_topic, self.read_input_callback, 1)
+            self.input = 0.0
+            self.input_flag = False
     
 
     def evaluate(self, perception=None):
