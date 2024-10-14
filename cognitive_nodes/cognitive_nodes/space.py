@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn import svm
 import tensorflow as tf
 from rclpy.node import Node
+from rclpy.logging import get_logger
 
 
 class Space(object):
@@ -18,6 +19,8 @@ class Space(object):
         """
         self.ident = ident
         self.parent_space = None
+        self.logger = get_logger("space_" + str(ident))
+        self.logger.info(f"CREATING SPACE: {ident}")
 
 
 class PointBasedSpace(Space):
@@ -515,16 +518,16 @@ class SVMSpace(PointBasedSpace):
         memberships[memberships <= 0] = 0
         self.model.fit(members, memberships)
         score = self.model.score(members, memberships)
-        # Node.get_logger().logdebug(
-        #     "SVM: iterations "
-        #     + str(self.model.n_iter_)
-        #     + " support vectors "
-        #     + str(len(self.model.support_vectors_))
-        #     + " score "
-        #     + str(score)
-        #     + " points "
-        #     + str(len(members))
-        # ) #TODO: Pass pnode logger to space
+        self.logger.debug(
+            "SVM: iterations "
+            + str(self.model.n_iter_)
+            + " support vectors "
+            + str(len(self.model.support_vectors_))
+            + " score "
+            + str(score)
+            + " points "
+            + str(len(members))
+        ) #TODO: Pass pnode logger to space
         return score
 
     def remove_close_points(self):
@@ -720,8 +723,9 @@ class ANNSpace(PointBasedSpace):
         point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
         if self.there_are_points:
             if self.there_are_antipoints:
-                act = self.model.call(point)[0][0]
-                act = 1.0 if act >= 0.5 else 0.0
+                act = float(self.model.call(point)[0][0])
+                if act < 0.01:
+                    act=0.0
             else:
                 act = 1.0
         else:

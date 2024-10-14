@@ -96,7 +96,7 @@ class PNode(CognitiveNode):
         """
         points = separate_perceptions(point)
         for point in points:
-            self.space = self.get_space(point)
+            self.space = self.spaces[0]
             if not self.space:
                 self.space = self.spaces[0].__class__()
                 self.spaces.append(self.space)
@@ -124,7 +124,7 @@ class PNode(CognitiveNode):
             activations = []
             perceptions = separate_perceptions(perception)
             for perception_line in perceptions:
-                space = self.get_space(perception_line)
+                space = self.spaces[0]
                 if space and self.added_point:
                     activation_value = max(0.0, space.get_probability(perception_line))
                     self.get_logger().debug(f'PNODE DEBUG: Perception: {perception_line} Space provided activation: {activation_value}')

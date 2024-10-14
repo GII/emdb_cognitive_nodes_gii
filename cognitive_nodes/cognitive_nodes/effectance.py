@@ -45,16 +45,21 @@ class PNodeSuccess(LTMSubscription):
 class DriveEffectance(Drive, PNodeSuccess):
     #This class implements a simple effectance drive. It create goals to reach learned P-Nodes, in other words, reaching the effect of activaction of a P-Node.
     #The name might change when other types of effectances are implemented (One class might create each type or all might be included here, TBD)
-    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, **params):
+    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.8, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
+        self.min_confidence=min_confidence
         self.configure_pnode_success(self.LTM_id)
 
     def evaluate(self):
-        self.evaluation.evaluation = max(self.pnode_evaluation.values(), default=0.0)
+        max_pnode= max(self.pnode_evaluation.values(), default=0.0)
+        if max_pnode>=self.min_confidence:
+            self.evaluation.evaluation = max_pnode
+        else:
+            self.evaluation.evaluation = 0.0
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
 

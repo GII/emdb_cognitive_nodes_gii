@@ -32,6 +32,7 @@ class PolicyNovelty(Policy):
         self.exclude_list=exclude_list
         self.exclude_list.append(self.name)
         self.setup()
+        self.counter=0
         self.ltm_subscriber = self.create_subscription(String, "/state", self.ltm_change_callback, 1, callback_group=self.cbgroup_client)
         
 
@@ -62,12 +63,24 @@ class PolicyNovelty(Policy):
         changes = self.policies.merge(policies)
         if changes:
             self.policies.shuffle(self.rng)
+            self.counter=0
         for policy in self.exclude_list:
             self.policies.remove(policy)
         self.get_logger().info(f"Configured policies: {self.policies.queue}")
 
+    def select_policy(self):
+        policy=self.policies.select_policy()
+        self.counter+=1
+
+        if self.counter%len(self.policies) == 0:
+            self.get_logger().info(f"DEBUG: Shuffling Policies (Counter: {self.counter} Policies: {len(self.policies)})")
+            self.policies.shuffle(self.rng)
+            self.counter=0
+
+        return policy
+
     async def execute_callback(self, request, response):
-        policy = self.policies.select_policy()
+        policy = self.select_policy()
         if policy not in self.node_clients:
             self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
         self.get_logger().info('Executing policy: ' + policy + '...')
