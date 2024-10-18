@@ -16,7 +16,7 @@ class Drive(CognitiveNode):
     Drive class
     """
 
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic = None, input_msg=None, **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
         Constructor of the Drive class
 
@@ -127,19 +127,34 @@ class Drive(CognitiveNode):
         :rtype: float
         """
         self.calculate_activation_max(activation_list)
+        self.activation.activation=self.activation.activation*self.evaluation.evaluation
         return self.activation  
-
     
-class DriveExponential(Drive):
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic = None, input_msg=None, min_eval=0.0, **params):
-        super().__init__(name, class_name, **params)  
+
+class DriveTopicInput(Drive):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic=None, input_msg=None, min_eval=0.0, **params):
+        super().__init__(name, class_name, **params)
         self.min_eval=min_eval
         if input_topic:
             self.input_subscription = self.create_subscription(class_from_classname(input_msg), input_topic, self.read_input_callback, 1)
             self.input = 0.0
             self.input_flag = False
-    
 
+    async def publish_activation_callback(self): #Timed publish of the activation value
+        if self.activation_topic:
+            self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
+            updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
+            updated_evaluations= self.input_flag
+
+            if updated_activations and updated_evaluations:
+                self.evaluate()
+                self.calculate_activation(perception=None, activation_list=self.activation_inputs)
+                for node_name in self.activation_inputs:
+                    self.activation_inputs[node_name]['updated']=False
+            self.publish_activation(self.activation)
+
+    
+class DriveExponential(DriveTopicInput):
     def evaluate(self, perception=None):
         """
         Evaluates the drive value according to the 

@@ -624,7 +624,7 @@ class GoalReadPublishedReward(Goal):
 class GoalMotiven(Goal):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
         super().__init__(name, class_name, **params)
-        self.activation_sources = ['Drive']
+        self.activation_sources = ['Drive', 'Goal']
         self.drive_inputs = {}
         self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)
@@ -697,28 +697,31 @@ class GoalMotiven(Goal):
                 self.calculate_reward(drive_name)
             elif Time.from_msg(msg.timestamp).nanoseconds<Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
                 self.get_logger().warn(f'Detected jump back in time, evaluation of Drive: {drive_name}')
-            
-    async def publish_activation_callback(self): #Timed publish of the activation value
-        if self.activation_topic:
-            self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
-            updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
-            updated_evaluations= all((self.drive_inputs[node_name]['updated'] for node_name in self.drive_inputs))
 
-            if updated_activations and updated_evaluations:
-                self.calculate_activation(perception=None, activation_list=self.activation_inputs, evaluation_list = self.drive_inputs)
-                for node_name in self.activation_inputs:
-                    self.activation_inputs[node_name]['updated']=False
-                for node_name in self.drive_inputs:
-                    self.drive_inputs[node_name]['updated']=False
-            self.publish_activation(self.activation)
+       
+    # async def publish_activation_callback(self): #Timed publish of the activation value
+    #     if self.activation_topic:
+    #         self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
+    #         updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
+    #         updated_evaluations= all((self.drive_inputs[node_name]['updated'] for node_name in self.drive_inputs))
+
+    #         if updated_activations and updated_evaluations:
+    #             self.calculate_activation(perception=None, activation_list=self.activation_inputs, evaluation_list = self.drive_inputs)
+    #             for node_name in self.activation_inputs:
+    #                 self.activation_inputs[node_name]['updated']=False
+    #             for node_name in self.drive_inputs:
+    #                 self.drive_inputs[node_name]['updated']=False
+    #         self.publish_activation(self.activation)
     
-    def calculate_activation(self, perception, activation_list, evaluation_list):
+    def calculate_activation(self, perception, activation_list):
         goal_activations = []
         for node in activation_list.keys():
-            for drive in evaluation_list.keys():
-                if node == drive:
-                    goal_activation = activation_list[node]['data'].activation * evaluation_list[drive]['data'].evaluation
-                    goal_activations.append(goal_activation)
+            if activation_list[node]['data'].node_type == "Drive":
+                partial_activation = activation_list[node]['data'].activation
+                goal_activations.append(partial_activation)
+            if activation_list[node]['data'].node_type == "Goal":
+                partial_activation = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that consequent subgoals have progressively less activation
+                goal_activations.append(partial_activation)
         self.activation.activation = numpy.max(goal_activations)
         self.activation.timestamp=self.get_clock().now().to_msg()
 

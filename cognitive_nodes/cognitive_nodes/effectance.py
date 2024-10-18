@@ -23,6 +23,9 @@ class LTMSubscription:
         self.get_logger().info("Processing change from LTM...")
         ltm_dump = yaml.safe_load(msg.data)
         self.read_ltm(ltm_dump=ltm_dump)
+
+    def read_ltm(self, ltm_dump):
+        raise NotImplementedError
     
 class PNodeSuccess(LTMSubscription):
     def configure_pnode_success(self, ltm):
@@ -84,7 +87,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
         self.goal_class=goal_class
         self.index=0
         self.configure_pnode_success(self.LTM_id)
-        self.pnode_drives_dict={}
+        self.pnode_goals_dict={}
 
     async def process_effectance(self):
         pnode=self.select_pnode()
@@ -115,9 +118,24 @@ class PolicyEffectance(Policy, PNodeSuccess):
             goal_neighbors = ltm_dump["Goal"][goal]["neighbors"]
             drives[pnode] = [node["name"] for node in goal_neighbors if node["node_type"] == "Drive"]
         return drives
+    
+    def find_goals(self, ltm_dump):
+        pnodes = ltm_dump["PNode"]
+        cnodes = {}
+        goals = {}
+        for pnode in pnodes:
+            pnode_neighbors = pnodes[pnode]["neighbors"]
+            cnode = next((node["name"] for node in pnode_neighbors if node["node_type"] == "CNode"), None)
+            if cnode is not None:
+                cnodes[pnode] = cnode
+        for pnode, cnode in cnodes.items(): 
+            cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
+            goals[pnode] = next((node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"))
+        self.get_logger().info(f"DEBUG: {goals}")
+        return goals
         
     def changes_in_pnodes(self, ltm_dump):
-        current_pnodes = set(self.pnode_drives_dict.keys())
+        current_pnodes = set(self.pnode_goals_dict.keys())
         new_pnodes = set(ltm_dump["PNode"].keys())
         if current_pnodes == new_pnodes:
             return False
@@ -126,19 +144,19 @@ class PolicyEffectance(Policy, PNodeSuccess):
             deleted = current_pnodes - new_pnodes
             if deleted:
                 for node in deleted:
-                    del self.pnode_drives_dict[node]          
+                    del self.pnode_goals_dict[node]          
             return True
         
     async def create_goal(self, pnode_name):
         self.get_logger().info(f"Creating goal linked to P-Node: {pnode_name}...")
         goal_name = f"reach_pnode_{self.index}"
         self.index+=1
-        drives = self.pnode_drives_dict[pnode_name]
-        self.get_logger().info(f"DEBUG: Drive Dict: {drives}")
+        goals = self.pnode_goals_dict[pnode_name]
+        self.get_logger().info(f"DEBUG: Goals Dict: {goals}")
 
         neighbor_dict = {pnode_name: "PNode"} 
-        for drive in drives:
-            neighbor_dict[drive]="Drive"
+        for goal in goals:
+            neighbor_dict[goal]="Goal"
 
         neighbors = {
             "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
@@ -180,7 +198,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
         super().read_ltm(ltm_dump)
         changes = self.changes_in_pnodes(ltm_dump)
         if changes:
-            self.pnode_drives_dict = self.find_drives(ltm_dump)
+            self.pnode_goals_dict = self.find_goals(ltm_dump)
     
     async def execute_callback(self, request, response):
         self.get_logger().info('Executing policy: ' + self.name + '...')

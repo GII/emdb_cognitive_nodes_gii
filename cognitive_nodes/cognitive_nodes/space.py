@@ -667,7 +667,7 @@ class ANNSpace(PointBasedSpace):
             candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
             self.copy_perception(candidate_point, 0, perception)
             point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
-            prediction = self.model.call(point)[0][0]
+            prediction = (self.model.call(point)[0][0]*2)-1 #Pass from [0,1] to [-1, 1]
             pos = super().add_point(perception, confidence)
 
             members = structured_to_unstructured(
@@ -682,7 +682,7 @@ class ANNSpace(PointBasedSpace):
             if self.size >= self.max_data:
                 self.first_data = self.size - self.max_data
 
-            if (confidence <= 0 and prediction == 1.0) or (confidence >= 0 and prediction == 0.0):
+            if abs(confidence - prediction)>0.4: #HACK: Select a proper training threshold
                 # Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
                 X = members[self.first_data : self.size]
                 Y = memberships[self.first_data : self.size]
