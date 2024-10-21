@@ -48,7 +48,7 @@ class PNodeSuccess(LTMSubscription):
 class DriveEffectance(Drive, PNodeSuccess):
     #This class implements a simple effectance drive. It create goals to reach learned P-Nodes, in other words, reaching the effect of activaction of a P-Node.
     #The name might change when other types of effectances are implemented (One class might create each type or all might be included here, TBD)
-    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.8, **params):
+    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.1, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
@@ -60,7 +60,7 @@ class DriveEffectance(Drive, PNodeSuccess):
     def evaluate(self):
         max_pnode= max(self.pnode_evaluation.values(), default=0.0)
         if max_pnode>=self.min_confidence:
-            self.evaluation.evaluation = max_pnode
+            self.evaluation.evaluation = 1.0
         else:
             self.evaluation.evaluation = 0.0
         self.evaluation.timestamp = self.get_clock().now().to_msg()
@@ -130,7 +130,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
                 cnodes[pnode] = cnode
         for pnode, cnode in cnodes.items(): 
             cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
-            goals[pnode] = next((node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"))
+            goals[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"]
         self.get_logger().info(f"DEBUG: {goals}")
         return goals
         
@@ -163,7 +163,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
         }
         limits= {"threshold_high": self.threshold_high, "threshold_low": self.threshold_low}
         params={**neighbors, **limits}
-
+        self.get_logger().info(f"DEBUG: Neighbor list: {neighbors}")
         goal = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
 
         if not goal.created:
