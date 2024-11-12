@@ -13,6 +13,7 @@ from cognitive_node_interfaces.srv import GetIteration
 from cognitive_node_interfaces.msg import Evaluation
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
+from builtin_interfaces.msg import Time as TimeMsg
 
 from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
 from math import isclose
@@ -133,10 +134,14 @@ class Goal(CognitiveNode):
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
-            reward = await self.get_reward(self.old_perception, self.perception)
+            reward, timestamp = await self.get_reward(self.old_perception, self.perception)
         else:
-            reward = self.get_reward(self.old_perception, self.perception)
+            reward, timestamp = self.get_reward(self.old_perception, self.perception)
         response.reward = reward
+        if Time.from_msg(timestamp).nanoseconds > Time.from_msg(request.timestamp).nanoseconds:
+            response.updated = True
+        else:
+            response.updated = False
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
 
@@ -629,6 +634,7 @@ class GoalMotiven(Goal):
         self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)
         self.configure_drive_inputs(self.neighbors)
+        self.reward_timestamp=TimeMsg()
     
 
     def configure_drive_inputs(self, neighbors):
@@ -695,6 +701,7 @@ class GoalMotiven(Goal):
                 self.drive_inputs[drive_name]['data']=msg
                 self.drive_inputs[drive_name]['updated']=True
                 self.calculate_reward(drive_name)
+                self.reward_timestamp=msg.timestamp
             elif Time.from_msg(msg.timestamp).nanoseconds<Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
                 self.get_logger().warn(f'Detected jump back in time, evaluation of Drive: {drive_name}')
 
@@ -714,27 +721,42 @@ class GoalMotiven(Goal):
     #         self.publish_activation(self.activation)
     
     def calculate_activation(self, perception, activation_list):
-        goal_activations = []
+        goal_activations = {}
+        goal_timestamps = {}
         for node in activation_list.keys():
             if activation_list[node]['data'].node_type == "Drive":
-                partial_activation = activation_list[node]['data'].activation
-                goal_activations.append(partial_activation)
+                goal_activations[node] = activation_list[node]['data'].activation
+                goal_timestamps[node] = activation_list[node]['data'].timestamp
             if activation_list[node]['data'].node_type == "Goal":
-                partial_activation = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that consequent subgoals have progressively less activation
-                goal_activations.append(partial_activation)
-        self.activation.activation = numpy.max(goal_activations)
-        self.activation.timestamp=self.get_clock().now().to_msg()
+                goal_activations[node] = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that consequent subgoals have progressively less activation
+                goal_timestamps[node] = activation_list[node]['data'].timestamp
+
+
+        #THIS IS A HACK TO MAKE THE PROPAGATION OF GOAL ACTIVATION WORK. Will need to implement some sort of direction of neighbors so that downstream goals don't affect the activation of upstream goals
+        if getattr(self, "act_node", None) is None:
+            activation=max(zip(goal_activations.values(), goal_activations.keys()))
+            timestamp=goal_timestamps[activation[1]]
+            self.activation.activation = activation[0]
+            self.activation.timestamp=timestamp
+            self.act_node=activation[1]
+        else:
+            self.activation.activation = goal_activations[self.act_node]
+            self.activation.timestamp=goal_timestamps[self.act_node]
 
     def calculate_reward(self, drive_name):
         # Remember the case in which one drive reduces its evaluation and another increases
-        if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation and not isclose(self.activation.activation, 0.0):
+        if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation:
             self.get_logger().info(f"DEBUG: REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 1.0
+        elif self.drive_inputs[drive_name]['data'].evaluation > self.old_drive_inputs[drive_name]['data'].evaluation:
+            self.get_logger().info(f"DEBUG: RESETTING REWARD. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
+            self.reward = 0.0
 
     def get_reward(self, old_perception=None, perception=None):
+        self.get_logger().info(f"Calculating reward: {self.reward}, Drives: {self.drive_inputs}")
         reward = self.reward
         self.reward = 0.0
-        return reward
+        return reward, self.reward_timestamp
         
 def main(args=None):
     rclpy.init(args=args)

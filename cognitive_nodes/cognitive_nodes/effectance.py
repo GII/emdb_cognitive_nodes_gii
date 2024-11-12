@@ -72,7 +72,7 @@ class GoalEffectance(GoalMotiven):
     
     def calculate_reward(self, drive_name): #No reward is provided
         self.reward = 0.0
-        return self.reward
+        return self.reward, self.get_clock().now().to_msg()
 
 class PolicyEffectance(Policy, PNodeSuccess):
     def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, activation_high=0.5, activation_low=0.2, **params):
@@ -229,6 +229,6 @@ class GoalActivatePNode(GoalMotiven):
             self.reward = 1.0
         else:
             self.reward = 0.0
-        return self.reward 
+        return self.reward, self.get_clock().now().to_msg() 
 
 

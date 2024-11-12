@@ -3,7 +3,7 @@ from rclpy.node import Node
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
-from cognitive_node_interfaces.msg import Perception as Percept
+from cognitive_node_interfaces.msg import PerceptionStamped
 from core.utils import class_from_classname, perception_dict_to_msg
 
 import random
@@ -34,7 +34,7 @@ class Perception(CognitiveNode):
         self.activation.activation = 1.0
 
         #N: Value topic
-        self.perception_publisher = self.create_publisher(Percept, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
+        self.perception_publisher = self.create_publisher(PerceptionStamped, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
@@ -51,6 +51,8 @@ class Perception(CognitiveNode):
             self.set_inputs_callback,
             callback_group=self.cbgroup_server
         )
+
+        self.publish_msg = PerceptionStamped()
 
         self.normalize_values = normalize_data
 
@@ -188,7 +190,9 @@ class DiscreteEventSimulatorPerception(Perception):
         sensor[self.name] = value
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
         sensor_msg = perception_dict_to_msg(sensor)
-        self.perception_publisher.publish(sensor_msg)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
 
 def main(args=None):
     rclpy.init(args=args)

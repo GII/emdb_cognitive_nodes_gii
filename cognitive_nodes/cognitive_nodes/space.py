@@ -26,7 +26,7 @@ class Space(object):
 class PointBasedSpace(Space):
     """A state space based on points."""
 
-    def __init__(self, size=5000, **kwargs):
+    def __init__(self, size=15000, **kwargs):
         """
         Init attributes when a new object is created
 

@@ -1,9 +1,10 @@
 from collections import deque
 import rclpy
+from rclpy.time import Time
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
 from cognitive_node_interfaces.srv import AddPoint, SendPNodeSpace
-from cognitive_node_interfaces.msg import Perception, SuccessRate
+from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
 
 class PNode(CognitiveNode):
     """
@@ -159,18 +160,19 @@ class PNode(CognitiveNode):
         name=node['name']
         node_type=node['node_type']
         if node_type in self.activation_sources:
-            subscriber=self.create_subscription(Perception, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
+            subscriber=self.create_subscription(PerceptionStamped, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
             data=Perception()
             updated=False
-            new_input=dict(subscriber=subscriber, data=data, updated=updated)
+            timestamp=Time()
+            new_input=dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
             self.activation_inputs[name]=new_input
             self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
         else:
             self.get_logger().debug(f'{self.name} -- Node {name} of type {node_type} is not an activation source')
 
 
-    def read_activation_callback(self, msg: Perception):
-        perception_dict=perception_msg_to_dict(msg=msg)
+    def read_activation_callback(self, msg: PerceptionStamped):
+        perception_dict=perception_msg_to_dict(msg=msg.perception)
         if len(perception_dict)>1:
             self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
         if len(perception_dict)==1:
@@ -178,6 +180,7 @@ class PNode(CognitiveNode):
             if node_name in self.activation_inputs:
                 self.activation_inputs[node_name]['data']=perception_dict[node_name]
                 self.activation_inputs[node_name]['updated']=True
+                self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
         else:
             self.get_logger().warn("Empty perception recieved in PNode. No activation calculated")
     

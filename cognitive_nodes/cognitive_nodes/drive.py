@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.time import Time
 
 from core.utils import class_from_classname
 from core.cognitive_node import CognitiveNode
@@ -96,10 +97,6 @@ class Drive(CognitiveNode):
         if self.evaluation.timestamp.nanosec > 0.0:
             self.evaluation_publisher.publish(self.evaluation)
 
-    def read_input_callback(self, msg):
-        self.input = msg.data
-        self.input_flag = True
-
     def get_success_rate_callback(self, request, response):  # TODO: implement
         """
         Get a prediction success rate based on a historic of previous predictions
@@ -128,6 +125,10 @@ class Drive(CognitiveNode):
         """
         self.calculate_activation_max(activation_list)
         self.activation.activation=self.activation.activation*self.evaluation.evaluation
+        timestamp_activation = Time.from_msg(self.activation.timestamp).nanoseconds
+        timestamp_evaluation = Time.from_msg(self.activation.timestamp).nanoseconds
+        if timestamp_evaluation<timestamp_activation:
+            self.activation.timestamp = self.evaluation.timestamp
         return self.activation  
     
 
@@ -139,6 +140,11 @@ class DriveTopicInput(Drive):
             self.input_subscription = self.create_subscription(class_from_classname(input_msg), input_topic, self.read_input_callback, 1)
             self.input = 0.0
             self.input_flag = False
+    
+    def read_input_callback(self, msg):
+        self.input = msg.data
+        self.evaluate()
+        self.input_flag = True
 
     async def publish_activation_callback(self): #Timed publish of the activation value
         if self.activation_topic:
@@ -147,10 +153,10 @@ class DriveTopicInput(Drive):
             updated_evaluations= self.input_flag
 
             if updated_activations and updated_evaluations:
-                self.evaluate()
                 self.calculate_activation(perception=None, activation_list=self.activation_inputs)
                 for node_name in self.activation_inputs:
                     self.activation_inputs[node_name]['updated']=False
+                self.input_flag=False
             self.publish_activation(self.activation)
 
     
@@ -164,17 +170,14 @@ class DriveExponential(DriveTopicInput):
         :return: The valuation of the perception
         :rtype: float
         """
-        if self.input_flag:
-            if self.input>=0:
-                a = 1-self.min_eval 
-                self.evaluation.evaluation = a*exp(-5*self.input)+self.min_eval
-                if isclose(self.input, 1.0, ):
-                    self.evaluation.evaluation = 0.0
-            else:
-                self.evaluation.evaluation = 1.0
-            
-            self.input_flag = False
-            self.evaluation.timestamp = self.get_clock().now().to_msg()
+        if self.input>=0:
+            a = 1-self.min_eval 
+            self.evaluation.evaluation = a*exp(-5*self.input)+self.min_eval
+            if isclose(self.input, 1.0, ):
+                self.evaluation.evaluation = 0.0
+        else:
+            self.evaluation.evaluation = 1.0
+        self.evaluation.timestamp = self.get_clock().now().to_msg()
 
         return self.evaluation
     
