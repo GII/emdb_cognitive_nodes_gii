@@ -677,7 +677,6 @@ class ANNSpace(PointBasedSpace):
             memberships[memberships > 0] = 1.0
             memberships[memberships <= 0] = 0.0
 
-            prediction = 1.0 if prediction >= 0.5 else 0.0
 
             if self.size >= self.max_data:
                 self.first_data = self.size - self.max_data

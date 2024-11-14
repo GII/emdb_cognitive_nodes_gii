@@ -75,15 +75,14 @@ class GoalEffectance(GoalMotiven):
         return self.reward, self.get_clock().now().to_msg()
 
 class PolicyEffectance(Policy, PNodeSuccess):
-    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, activation_high=0.5, activation_low=0.2, **params):
+    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
         self.confidence=confidence
-        self.threshold_high=activation_high
-        self.threshold_low=activation_low
+        self.threshold_delta=threshold_delta
         self.goal_class=goal_class
         self.index=0
         self.configure_pnode_success(self.LTM_id)
@@ -161,7 +160,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
         neighbors = {
             "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
         }
-        limits= {"threshold_high": self.threshold_high, "threshold_low": self.threshold_low}
+        limits= {"threshold_delta": self.threshold_delta}
         params={**neighbors, **limits}
         self.get_logger().info(f"DEBUG: Neighbor list: {neighbors}")
         goal = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
@@ -207,10 +206,9 @@ class PolicyEffectance(Policy, PNodeSuccess):
         return response
 
 class GoalActivatePNode(GoalMotiven):
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_high=0.5, threshold_low=0.2, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
-        self.threshold_high=threshold_high
-        self.threshold_low=threshold_low
+        self.threshold_delta=threshold_delta
         self.setup_pnode()
     
     def setup_pnode(self):
@@ -225,7 +223,7 @@ class GoalActivatePNode(GoalMotiven):
         perception_msg=perception_dict_to_msg(perception)
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation
-        if old_activation<self.threshold_low and activation>self.threshold_high:
+        if activation-old_activation>self.threshold_delta:
             self.reward = 1.0
         else:
             self.reward = 0.0
