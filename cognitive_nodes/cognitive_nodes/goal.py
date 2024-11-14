@@ -704,21 +704,6 @@ class GoalMotiven(Goal):
                 self.reward_timestamp=msg.timestamp
             elif Time.from_msg(msg.timestamp).nanoseconds<Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
                 self.get_logger().warn(f'Detected jump back in time, evaluation of Drive: {drive_name}')
-
-       
-    # async def publish_activation_callback(self): #Timed publish of the activation value
-    #     if self.activation_topic:
-    #         self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
-    #         updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
-    #         updated_evaluations= all((self.drive_inputs[node_name]['updated'] for node_name in self.drive_inputs))
-
-    #         if updated_activations and updated_evaluations:
-    #             self.calculate_activation(perception=None, activation_list=self.activation_inputs, evaluation_list = self.drive_inputs)
-    #             for node_name in self.activation_inputs:
-    #                 self.activation_inputs[node_name]['updated']=False
-    #             for node_name in self.drive_inputs:
-    #                 self.drive_inputs[node_name]['updated']=False
-    #         self.publish_activation(self.activation)
     
     def calculate_activation(self, perception, activation_list):
         goal_activations = {}
