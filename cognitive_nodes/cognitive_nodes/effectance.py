@@ -23,6 +23,9 @@ class LTMSubscription:
         self.get_logger().info("Processing change from LTM...")
         ltm_dump = yaml.safe_load(msg.data)
         self.read_ltm(ltm_dump=ltm_dump)
+
+    def read_ltm(self, ltm_dump):
+        raise NotImplementedError
     
 class PNodeSuccess(LTMSubscription):
     def configure_pnode_success(self, ltm):
@@ -45,7 +48,7 @@ class PNodeSuccess(LTMSubscription):
 class DriveEffectance(Drive, PNodeSuccess):
     #This class implements a simple effectance drive. It create goals to reach learned P-Nodes, in other words, reaching the effect of activaction of a P-Node.
     #The name might change when other types of effectances are implemented (One class might create each type or all might be included here, TBD)
-    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.8, **params):
+    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.1, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
@@ -57,7 +60,7 @@ class DriveEffectance(Drive, PNodeSuccess):
     def evaluate(self):
         max_pnode= max(self.pnode_evaluation.values(), default=0.0)
         if max_pnode>=self.min_confidence:
-            self.evaluation.evaluation = max_pnode
+            self.evaluation.evaluation = 1.0
         else:
             self.evaluation.evaluation = 0.0
         self.evaluation.timestamp = self.get_clock().now().to_msg()
@@ -69,22 +72,21 @@ class GoalEffectance(GoalMotiven):
     
     def calculate_reward(self, drive_name): #No reward is provided
         self.reward = 0.0
-        return self.reward
+        return self.reward, self.get_clock().now().to_msg()
 
 class PolicyEffectance(Policy, PNodeSuccess):
-    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, activation_high=0.5, activation_low=0.2, **params):
+    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
         self.confidence=confidence
-        self.threshold_high=activation_high
-        self.threshold_low=activation_low
+        self.threshold_delta=threshold_delta
         self.goal_class=goal_class
         self.index=0
         self.configure_pnode_success(self.LTM_id)
-        self.pnode_drives_dict={}
+        self.pnode_goals_dict={}
 
     async def process_effectance(self):
         pnode=self.select_pnode()
@@ -115,9 +117,24 @@ class PolicyEffectance(Policy, PNodeSuccess):
             goal_neighbors = ltm_dump["Goal"][goal]["neighbors"]
             drives[pnode] = [node["name"] for node in goal_neighbors if node["node_type"] == "Drive"]
         return drives
+    
+    def find_goals(self, ltm_dump):
+        pnodes = ltm_dump["PNode"]
+        cnodes = {}
+        goals = {}
+        for pnode in pnodes:
+            pnode_neighbors = pnodes[pnode]["neighbors"]
+            cnode = next((node["name"] for node in pnode_neighbors if node["node_type"] == "CNode"), None)
+            if cnode is not None:
+                cnodes[pnode] = cnode
+        for pnode, cnode in cnodes.items(): 
+            cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
+            goals[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"]
+        self.get_logger().info(f"DEBUG: {goals}")
+        return goals
         
     def changes_in_pnodes(self, ltm_dump):
-        current_pnodes = set(self.pnode_drives_dict.keys())
+        current_pnodes = set(self.pnode_goals_dict.keys())
         new_pnodes = set(ltm_dump["PNode"].keys())
         if current_pnodes == new_pnodes:
             return False
@@ -126,26 +143,26 @@ class PolicyEffectance(Policy, PNodeSuccess):
             deleted = current_pnodes - new_pnodes
             if deleted:
                 for node in deleted:
-                    del self.pnode_drives_dict[node]          
+                    del self.pnode_goals_dict[node]          
             return True
         
     async def create_goal(self, pnode_name):
         self.get_logger().info(f"Creating goal linked to P-Node: {pnode_name}...")
         goal_name = f"reach_pnode_{self.index}"
         self.index+=1
-        drives = self.pnode_drives_dict[pnode_name]
-        self.get_logger().info(f"DEBUG: Drive Dict: {drives}")
+        goals = self.pnode_goals_dict[pnode_name]
+        self.get_logger().info(f"DEBUG: Goals Dict: {goals}")
 
         neighbor_dict = {pnode_name: "PNode"} 
-        for drive in drives:
-            neighbor_dict[drive]="Drive"
+        for goal in goals:
+            neighbor_dict[goal]="Goal"
 
         neighbors = {
             "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
         }
-        limits= {"threshold_high": self.threshold_high, "threshold_low": self.threshold_low}
+        limits= {"threshold_delta": self.threshold_delta}
         params={**neighbors, **limits}
-
+        self.get_logger().info(f"DEBUG: Neighbor list: {neighbors}")
         goal = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
 
         if not goal.created:
@@ -180,7 +197,7 @@ class PolicyEffectance(Policy, PNodeSuccess):
         super().read_ltm(ltm_dump)
         changes = self.changes_in_pnodes(ltm_dump)
         if changes:
-            self.pnode_drives_dict = self.find_drives(ltm_dump)
+            self.pnode_goals_dict = self.find_goals(ltm_dump)
     
     async def execute_callback(self, request, response):
         self.get_logger().info('Executing policy: ' + self.name + '...')
@@ -189,10 +206,9 @@ class PolicyEffectance(Policy, PNodeSuccess):
         return response
 
 class GoalActivatePNode(GoalMotiven):
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_high=0.5, threshold_low=0.2, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
-        self.threshold_high=threshold_high
-        self.threshold_low=threshold_low
+        self.threshold_delta=threshold_delta
         self.setup_pnode()
     
     def setup_pnode(self):
@@ -207,10 +223,10 @@ class GoalActivatePNode(GoalMotiven):
         perception_msg=perception_dict_to_msg(perception)
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation
-        if old_activation<self.threshold_low and activation>self.threshold_high:
+        if activation-old_activation>self.threshold_delta:
             self.reward = 1.0
         else:
             self.reward = 0.0
-        return self.reward 
+        return self.reward, self.get_clock().now().to_msg() 
 
 

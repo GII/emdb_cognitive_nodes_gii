@@ -1,4 +1,6 @@
+builtin_interfaces/Time timestamp
 Perception old_perception
 Perception perception
 ---
 float32 reward
+bool updated

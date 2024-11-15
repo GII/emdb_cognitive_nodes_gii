@@ -79,7 +79,11 @@ class Policy(CognitiveNode):
             self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
         
         else:
-            self.calculate_activation_max(activation_list)
+            if activation_list:
+                self.calculate_activation_max(activation_list)
+            else:
+                self.activation.activation=0.0
+                self.activation.timestamp=self.get_clock().now().to_msg()
         return self.activation
     
     def execute_callback(self, request, response):
