@@ -44,7 +44,7 @@ class PNode(CognitiveNode):
         self.point_msg:Perception
         i = 0
         for dim in self.point_msg.layout.dim:
-            sensor = dim.sensor[:-1]
+            sensor = dim.object[:-1]
             for label in dim.labels:
                 data_label = str(i) + "_" + sensor + "_" + label
                 self.data_labels.append(data_label)

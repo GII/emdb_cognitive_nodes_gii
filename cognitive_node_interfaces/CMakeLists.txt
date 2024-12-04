@@ -16,13 +16,15 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Activation.msg"
+  "msg/Actuation.msg"
   "msg/Evaluation.msg"
+  "msg/ObjectLayout.msg"
+  "msg/ObjectParameters.msg"
   "msg/Perception.msg"
-  "msg/PerceptionLayout.msg"
-  "msg/PerceptionParameters.msg"
   "msg/PerceptionStamped.msg"
   "msg/SuccessRate.msg"
   "msg/Value.msg"
+  "srv/Action.srv"
   "srv/AddPoint.srv"
   "srv/AddNeighbor.srv"
   "srv/DeleteNeighbor.srv"
