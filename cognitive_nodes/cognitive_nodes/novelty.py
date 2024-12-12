@@ -14,10 +14,9 @@ from core.utils import actuation_dict_to_msg
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
-from cognitive_node_interfaces.srv import Execute
+from cognitive_node_interfaces.srv import Execute, Predict
 
 
-#Work In Progress
 class DriveNovelty(Drive):
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         super().__init__(name, class_name, **params)
@@ -156,7 +155,10 @@ class PolicyRandomAction(PolicyBlocking):
         self.actuation={} #All fields are normalized 0 to 1
         self.setup()
 
+    
+
     def setup(self):
+        self.world_model_client=ServiceClientAsync(self, Predict, "/world_model/GRIPPER_AND_LOW_FRICTION/predict", self.cbgroup_client)
         random_seed = getattr(self, 'random_seed', None)
         self.rng = np.random.default_rng(random_seed)
         for actuator in self.actuation_config:
@@ -170,12 +172,8 @@ class PolicyRandomAction(PolicyBlocking):
                     raise TypeError("Type assigned to actuator not recognized")
     
     def randomize_actuation(self):
-
         for actuator in self.actuation:
             for param in self.actuation[actuator][0]:
-                self.get_logger().info(f"DEBUG: {actuator}, {param} : {self.actuation[actuator][0][param]}")
-
-                #self.get_logger().info(f"DEBUG: {actuator}, {param} : {self.actuation_config[actuator][param]["type"]}")
                 if self.actuation_config[actuator][param]["type"]=="float":
                     self.actuation[actuator][0][param]=self.rng.uniform()
                 elif self.actuation_config[actuator][param]["type"]=="bool":
@@ -183,6 +181,7 @@ class PolicyRandomAction(PolicyBlocking):
                 else:
                     self.get_logger().info(f"DEBUG: {actuator}, {param} {self.actuation[actuator][0][param]} type: {type(self.actuation[actuator][0][param])}")
                     raise TypeError("Actuation parameter is of unknown type")
+                self.get_logger().info(f"DEBUG: {actuator}, {param} : {self.actuation[actuator][0][param]}")
 
     
     def denormalize_actuation(self, actuation, actuation_config):
@@ -209,6 +208,8 @@ class PolicyRandomAction(PolicyBlocking):
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
         self.randomize_actuation()
+        actuation_msg=actuation_dict_to_msg(self.actuation)
+        await self.world_model_client.send_request_async(perception=request.perception, actuation=actuation_msg)
         actuation_msg=actuation_dict_to_msg(self.denormalize_actuation(self.actuation, self.actuation_config))
         await self.policy_service.send_request_async(action=actuation_msg)
         response.policy=self.name

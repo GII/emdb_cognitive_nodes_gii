@@ -237,12 +237,27 @@ class Sim2DPerception(Perception):
                     self.normalize_values["y_max"]
                     - self.normalize_values["y_min"]
                 )
-                value.append(
+                if self.normalize_values.get("angle_max") and self.normalize_values.get("angle_min"):
+                    angle=(
+                    perception.angle - self.normalize_values["angle_min"]
+                    ) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    value.append(
                     dict(
                         x=x,
                         y=y,
+                        angle=angle
                     )
-                )
+                    )
+                else:
+                    value.append(
+                        dict(
+                            x=x,
+                            y=y,
+                        )
+                    )
         else:
             value.append(dict(data=self.reading.data))
 
