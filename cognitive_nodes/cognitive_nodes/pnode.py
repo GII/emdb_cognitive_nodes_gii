@@ -36,7 +36,6 @@ class PNode(CognitiveNode):
         self.success_rate = 0.0
         self.goal_linked = False
         self.success_publisher = self.create_publisher(SuccessRate, f'pnode/{str(name)}/success_rate', 0)
-        self.activation_sources=['Perception']
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
 
@@ -159,7 +158,7 @@ class PNode(CognitiveNode):
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
         name=node['name']
         node_type=node['node_type']
-        if node_type in self.activation_sources:
+        if node_type == "Perception":
             subscriber=self.create_subscription(PerceptionStamped, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
             data=Perception()
             updated=False
@@ -167,8 +166,6 @@ class PNode(CognitiveNode):
             new_input=dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
             self.activation_inputs[name]=new_input
             self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
-        else:
-            self.get_logger().debug(f'{self.name} -- Node {name} of type {node_type} is not an activation source')
 
 
     def read_activation_callback(self, msg: PerceptionStamped):

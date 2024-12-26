@@ -56,8 +56,6 @@ class Drive(CognitiveNode):
 
         self.evaluation=Evaluation()
         self.evaluation.drive_name=self.name
-
-        self.activation_sources = ['Need']
         self.configure_activation_inputs(self.neighbors)
 
     def set_activation_callback(self, request, response):

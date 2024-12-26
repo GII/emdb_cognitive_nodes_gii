@@ -629,7 +629,6 @@ class GoalReadPublishedReward(Goal):
 class GoalMotiven(Goal):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
         super().__init__(name, class_name, **params)
-        self.activation_sources = ['Drive', 'Goal']
         self.drive_inputs = {}
         self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)

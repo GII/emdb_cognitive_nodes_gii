@@ -48,7 +48,6 @@ class Policy(CognitiveNode):
             callback_group=self.cbgroup_server
         )
     
-        self.activation_sources=['CNode']
         self.configure_activation_inputs(self.neighbors) 
 
     async def calculate_activation(self, perception=None, activation_list=None):

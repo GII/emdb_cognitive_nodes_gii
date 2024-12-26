@@ -24,7 +24,6 @@ class CNode(CognitiveNode):
         :type str
         """
         super().__init__(name, class_name, **params)
-        self.activation_sources=['WorldModel', 'Goal', 'PNode']
         self.configure_activation_inputs(self.neighbors)
 
     async def calculate_activation(self, perception=None, activation_list=None):

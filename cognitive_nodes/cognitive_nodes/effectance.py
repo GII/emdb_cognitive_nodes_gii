@@ -10,7 +10,7 @@ from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
 
 from std_msgs.msg import String
-from core_interfaces.srv import GetNodeFromLTM, CreateNode
+from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor
 from cognitive_node_interfaces.msg import SuccessRate
 from cognitive_node_interfaces.srv import GetActivation
 from core.utils import perception_dict_to_msg
@@ -89,6 +89,10 @@ class PolicyEffectance(Policy, PNodeSuccess):
         self.pnode_goals_dict={}
 
     async def process_effectance(self):
+        """
+        This method proccesses the effectance policy. Selects the higher confidence P-Node
+        and creates a goal linked to it if the confidence threshold is exceeded.
+        """
         pnode=self.select_pnode()
         if self.pnode_evaluation[pnode] > self.confidence:
             await self.create_goal(pnode)
@@ -96,10 +100,17 @@ class PolicyEffectance(Policy, PNodeSuccess):
             self.get_logger().info("No PNode is elegible for creating a goal")
 
     def select_pnode(self):
+        """
+        Selects the P-Node with the highest confidence
+        """
         self.get_logger().info(f"DEBUG: PNode Success Rates: {self.pnode_evaluation}")
         return max(zip(self.pnode_evaluation.values(), self.pnode_evaluation.keys()))[1]
 
     def find_drives(self, ltm_dump):
+        """
+        ----DEPRECATED----
+        Searches the drives upstream from the P-Nodes
+        """
         pnodes = ltm_dump["PNode"]
         cnodes = {}
         goals = {}
@@ -119,14 +130,21 @@ class PolicyEffectance(Policy, PNodeSuccess):
         return drives
     
     def find_goals(self, ltm_dump):
+        """
+        Creates a dictionary with the P-Nodes as keys and a list of the upstream goals as values
+        """
         pnodes = ltm_dump["PNode"]
+        cnode_list = ltm_dump["CNode"]
         cnodes = {}
         goals = {}
-        for pnode in pnodes:
-            pnode_neighbors = pnodes[pnode]["neighbors"]
-            cnode = next((node["name"] for node in pnode_neighbors if node["node_type"] == "CNode"), None)
-            if cnode is not None:
+
+        #Get the C-Node that corresponds to each P-Node
+        for cnode in cnode_list:
+            cnode_neighbors = cnode_list[cnode]['neighbors']
+            pnode= next((node["name"] for node in cnode_neighbors if node["node_type"] == "PNode"), None)
+            if pnode is not None:
                 cnodes[pnode] = cnode
+
         for pnode, cnode in cnodes.items(): 
             cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
             goals[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"]
@@ -134,17 +152,12 @@ class PolicyEffectance(Policy, PNodeSuccess):
         return goals
         
     def changes_in_pnodes(self, ltm_dump):
+        """
+        Returns True if a P-Node has been added or deleted
+        """
         current_pnodes = set(self.pnode_goals_dict.keys())
         new_pnodes = set(ltm_dump["PNode"].keys())
-        if current_pnodes == new_pnodes:
-            return False
-        else:
-            added = new_pnodes - current_pnodes
-            deleted = current_pnodes - new_pnodes
-            if deleted:
-                for node in deleted:
-                    del self.pnode_goals_dict[node]          
-            return True
+        return not current_pnodes == new_pnodes
         
     async def create_goal(self, pnode_name):
         self.get_logger().info(f"Creating goal linked to P-Node: {pnode_name}...")
@@ -163,9 +176,9 @@ class PolicyEffectance(Policy, PNodeSuccess):
         limits= {"threshold_delta": self.threshold_delta}
         params={**neighbors, **limits}
         self.get_logger().info(f"DEBUG: Neighbor list: {neighbors}")
-        goal = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
-
-        if not goal.created:
+        goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
+        pnode_response = await self.add_neighbor_client(pnode_name, goal_name)
+        if not goal_response.created or not pnode_response.success:
             self.get_logger().fatal(f"Failed creation of Goal {goal_name}")
         
 
