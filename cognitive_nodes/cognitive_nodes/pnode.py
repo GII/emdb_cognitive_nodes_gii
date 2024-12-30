@@ -3,7 +3,7 @@ import rclpy
 from rclpy.time import Time
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
-from cognitive_node_interfaces.srv import AddPoint, SendPNodeSpace
+from cognitive_node_interfaces.srv import AddPoint, SendSpace
 from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
 
 class PNode(CognitiveNode):
@@ -27,15 +27,19 @@ class PNode(CognitiveNode):
         :type space: cognitive_nodes.space
         """
         super().__init__(name, class_name, **params)
-        self.spaces = [space if space else class_from_classname(space_class)(ident = name + " space")]
-        self.added_point=False
-        self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
-        self.send_pnode_space_service = self.create_service(SendPNodeSpace, 'pnode/' + str(name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
-        self.history_size=history_size
+        self.spaces = [space if space else class_from_classname(
+            space_class)(ident=name + " space")]
+        self.added_point = False
+        self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
+            name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
+        self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
+            name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
+        self.history_size = history_size
         self.history = deque([], history_size)
         self.success_rate = 0.0
         self.goal_linked = False
-        self.success_publisher = self.create_publisher(SuccessRate, f'pnode/{str(name)}/success_rate', 0)
+        self.success_publisher = self.create_publisher(
+            SuccessRate, f'pnode/{str(name)}/success_rate', 0)
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
 
@@ -133,7 +137,7 @@ class PNode(CognitiveNode):
 
                 activations.append(activation_value) 
             
-            self.activation.activation = activations[0] if len(activations) == 1 else float(activations)
+            self.activation.activation = activations[0] if len(activations) == 1 else float(max(activations)) #Fix this else case for multiple perceptions
             self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 

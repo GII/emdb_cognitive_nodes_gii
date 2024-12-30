@@ -1,5 +1,6 @@
 import rclpy
 from copy import copy
+from collections import deque
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.time import Time
@@ -8,14 +9,13 @@ import inspect
 
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate
-from cognitive_node_interfaces.srv import GetIteration
-from cognitive_node_interfaces.msg import Evaluation
+from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace
+from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 from builtin_interfaces.msg import Time as TimeMsg
 
-from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict
+from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict, separate_perceptions, compare_perceptions
 from math import isclose
 import numpy
 
@@ -131,6 +131,7 @@ class Goal(CognitiveNode):
         :return: Response that contais the reward
         :rtype: cognitive_node_interfaces.srv.GetReward_Response
         """
+        self.point_msg=request.perception
         self.old_perception = perception_msg_to_dict(request.old_perception)
         self.perception = perception_msg_to_dict(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
@@ -624,8 +625,6 @@ class GoalReadPublishedReward(Goal):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
-#TODO Implement GoalMotiven
-
 class GoalMotiven(Goal):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
         super().__init__(name, class_name, **params)
@@ -730,10 +729,10 @@ class GoalMotiven(Goal):
     def calculate_reward(self, drive_name):
         # Remember the case in which one drive reduces its evaluation and another increases
         if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation:
-            self.get_logger().info(f"DEBUG: REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
+            self.get_logger().info(f"REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 1.0
         elif self.drive_inputs[drive_name]['data'].evaluation > self.old_drive_inputs[drive_name]['data'].evaluation:
-            self.get_logger().info(f"DEBUG: RESETTING REWARD. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
+            self.get_logger().info(f"RESETTING REWARD. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 0.0
 
     def get_reward(self, old_perception=None, perception=None):
@@ -741,6 +740,134 @@ class GoalMotiven(Goal):
         reward = self.reward
         self.reward = 0.0
         return reward, self.reward_timestamp
+
+class GoalLearnedSpace(GoalMotiven):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, **params):
+        super().__init__(name, class_name, **params)
+        self.spaces = [space if space else class_from_classname(
+            space_class)(ident=name + " space")]
+        self.added_point = False
+        self.LTM_id=ltm_id
+        self.min_confidence=min_confidence
+        self.send_pnode_space_service = self.create_service(SendSpace, 'goal/' + str(
+            name) + '/send_goal_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
+        self.success_publisher = self.create_publisher(
+            SuccessRate, f'goal/{str(name)}/confidence', 0)
+        self.data_labels = []
+        self.history_size = history_size
+        self.history = deque([], history_size)
+        self.confidence=0.0
+        self.learned_space=False
+
+    def configure_labels(self):
+        self.point_msg:Perception
+        i = 0
+        for dim in self.point_msg.layout.dim:
+            sensor = dim.object[:-1]
+            for label in dim.labels:
+                data_label = str(i) + "_" + sensor + "_" + label
+                self.data_labels.append(data_label)
+            i = i+1
+
+    def send_goal_space_callback(self, request, response):
+        if not self.data_labels:
+            self.configure_labels()
+        response.labels = self.data_labels
+        
+        data = []
+        for perception in self.space.members[0:self.space.size]:
+            for value in perception:
+                data.append(value)
+        response.data = data
+
+        confidences = list(self.space.memberships[0:self.space.size])
+        response.confidences = confidences
+        
+        return response
+
+    def add_point(self, point, confidence):
+        """
+        Add a new point (or anti-point) to the Goal.
+        
+        :param point: The point that is added to the Goal
+        :type point: dict
+        :param confidence: Indicates if the perception added is a point or an antipoint.
+        :type confidence: float
+        """
+        points = separate_perceptions(point)
+        for point in points:
+            self.space = self.spaces[0]
+            if not self.space:
+                self.space = self.spaces[0].__class__()
+                self.spaces.append(self.space)
+            added_point_pos = self.space.add_point(point, confidence)
+        self.added_point = True
+
+    async def get_reward(self, old_perception=None, perception=None):
+        if perception:
+            reward_list = []
+            perceptions = separate_perceptions(perception)
+            for perception_line in perceptions:
+                space = self.spaces[0]
+                if space and self.added_point:
+                    reward_value = max(0.0, space.get_probability(perception_line))
+                else:
+                    reward_value = 0.0
+                reward_list.append(reward_value)    
+            expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
+        if self.linked_drive():
+            reward = self.reward
+            self.reward = 0.0
+            await self.update_space(reward, expected_reward, perception)
+            timestamp=self.reward_timestamp
+        else:
+            prob_reward=expected_reward if not compare_perceptions(old_perception, perception) else 0.0
+            #Threshold reward according to probability obtained from space
+            reward= 1.0 if prob_reward>0.75 else 0.0
+            timestamp=self.get_clock().now().to_msg()
+        return reward, timestamp
+    
+    async def update_space(self, reward, expected_reward, perception):
+        if reward>0.01:
+            #All rewarded points are saved and accounted to the confidence according to the prediction
+            self.add_point(perception, 1.0)
+            if expected_reward>0.01:
+                self.history.appendleft(True)
+            else:
+                self.history.appendleft(False)
+        else:
+            #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
+            if expected_reward>0.01:
+                self.history.appendleft(False)
+                self.add_point(perception, -1.0)
+        self.confidence=sum(self.history)/self.history.maxlen
+        #Set goal as learned if min_confidence is exceeded
+        if not self.learned_space and self.confidence>self.min_confidence:
+            self.learned_space=True
+        #Unlink drive if confidence goes below 50%
+        if self.learned_space and self.confidence<0.5:
+            drive=self.get_drive()
+            await self.update_neighbor_client(self.name, drive, False)
+        self.publish_success_rate()
+
+    def publish_success_rate(self):
+        msg = SuccessRate()
+        msg.node_name=self.name
+        msg.node_type=self.node_type
+        msg.flag=self.learned_space
+        msg.success_rate=self.confidence
+        self.success_publisher.publish(msg)
+
+    def linked_drive(self):
+        for neighbor in self.neighbors:
+            if neighbor["node_type"]=="Drive":
+                return True
+        return False
+
+    def get_drive(self):
+        for neighbor in self.neighbors:
+            if neighbor["node_type"]=="Drive":
+                return neighbor["name"]         
         
 def main(args=None):
     rclpy.init(args=args)
