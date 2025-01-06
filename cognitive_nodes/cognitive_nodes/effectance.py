@@ -5,14 +5,14 @@ from collections import deque
 
 from cognitive_nodes.need import Need
 from cognitive_nodes.drive import Drive
-from cognitive_nodes.goal import Goal, GoalMotiven
+from cognitive_nodes.goal import Goal, GoalMotiven, GoalLearnedSpace
 from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor
 from cognitive_node_interfaces.msg import SuccessRate
-from cognitive_node_interfaces.srv import GetActivation
+from cognitive_node_interfaces.srv import GetActivation, SendSpace
 from core.utils import perception_dict_to_msg
 
 class LTMSubscription:
@@ -222,14 +222,21 @@ class GoalActivatePNode(GoalMotiven):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
         self.threshold_delta=threshold_delta
+        self.send_pnode_space_service = self.create_service(SendSpace, 'goal/' + str(
+            name) + '/send_goal_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
         self.setup_pnode()
     
     def setup_pnode(self):
         pnode = next((node["name"] for node in self.neighbors if node["node_type"] == "PNode"))
         self.pnode_activation_client = ServiceClientAsync(self, GetActivation, f"cognitive_node/{pnode}/get_activation", self.cbgroup_client)
+        self.pnode_space_client = ServiceClientAsync(self, SendSpace, f"pnode/{pnode}/send_pnode_space", self.cbgroup_client) 
 
     def calculate_reward(self, drive_name):
         return None
+
+    async def send_goal_space_callback(self, request, response):
+        response = await self.pnode_space_client.send_request_async()
+        return response
 
     async def get_reward(self, old_perception=None, perception=None):
         old_perception_msg=perception_dict_to_msg(old_perception)

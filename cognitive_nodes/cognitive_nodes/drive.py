@@ -1,4 +1,5 @@
 import rclpy
+from copy import copy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.time import Time
@@ -6,8 +7,9 @@ from rclpy.time import Time
 from core.utils import class_from_classname
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRate, GetSatisfaction, GetActivation
+from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRate, GetReward, GetSatisfaction, GetActivation
 from cognitive_node_interfaces.msg import Evaluation
+from builtin_interfaces.msg import Time as TimeMsg
 
 from math import exp, isclose
 
@@ -50,12 +52,21 @@ class Drive(CognitiveNode):
             self.get_success_rate_callback,
         )
 
+        # N: Get Reward Service
+        self.get_reward_service = self.create_service(
+            GetReward,
+            'drive/' + str(name) + '/get_reward',
+            self.get_reward_callback,
+            callback_group=self.cbgroup_evaluation
+        )
         
 
         self.evaluation_publisher_timer = self.create_timer(0.01, self.publish_evaluation_callback, callback_group = self.cbgroup_evaluation)
-
+        self.old_evaluation=Evaluation()
         self.evaluation=Evaluation()
         self.evaluation.drive_name=self.name
+        self.reward=0.0
+        self.reward_timestamp=TimeMsg()
         self.configure_activation_inputs(self.neighbors)
 
     def set_activation_callback(self, request, response):
@@ -111,6 +122,29 @@ class Drive(CognitiveNode):
         # TODO: implement logic
         response.success_rate = 0.5
         return response
+    
+    def get_reward_callback(self, request, response):
+        """
+        Callback method to calculate the reward obtained 
+
+        :param request: Request that includes the new perception to check the reward
+        :type request: cognitive_node_interfaces.srv.GetReward_Request
+        :param response: Response that contais the reward
+        :type response: cognitive_node_interfaces.srv.GetReward_Response
+        :return: Response that contais the reward
+        :rtype: cognitive_node_interfaces.srv.GetReward_Response
+        """
+        reward, timestamp = self.get_reward()
+        response.reward = reward
+        if Time.from_msg(timestamp).nanoseconds > Time.from_msg(request.timestamp).nanoseconds:
+            response.updated = True
+        else:
+            response.updated = False
+        self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
+        return response
+    
+    def get_reward(self):
+        return self.reward, self.get_clock().now().to_msg()
 
     def calculate_activation(self, perception=None, activation_list=None):
         """ "
@@ -135,14 +169,27 @@ class DriveTopicInput(Drive):
         super().__init__(name, class_name, **params)
         self.min_eval=min_eval
         if input_topic:
-            self.input_subscription = self.create_subscription(class_from_classname(input_msg), input_topic, self.read_input_callback, 1)
+            self.input_subscription = self.create_subscription(class_from_classname(input_msg), input_topic, self.read_input_callback, 1, callback_group=self.cbgroup_evaluation)
             self.input = 0.0
             self.input_flag = False
     
     def read_input_callback(self, msg):
         self.input = msg.data
         self.evaluate()
+        self.calculate_reward()
+        self.reward_timestamp=self.get_clock().now().to_msg()
         self.input_flag = True
+
+    def calculate_reward(self):
+        if self.evaluation.evaluation < self.old_evaluation.evaluation:
+            self.get_logger().info(f"REWARD DETECTED. Drive: {self.name}, eval: {self.evaluation.evaluation}, old_eval: {self.old_evaluation.evaluation}")
+            self.reward = 1.0
+        elif self.evaluation.evaluation > self.old_evaluation.evaluation:
+            self.get_logger().info(f"RESETTING REWARD. Drive: {self.name}, eval: {self.evaluation.evaluation}, old_eval: {self.old_evaluation.evaluation}")
+            self.reward = 0.0
+
+    def get_reward(self):
+        return self.reward, self.reward_timestamp
 
     async def publish_activation_callback(self): #Timed publish of the activation value
         if self.activation_topic:
@@ -168,6 +215,7 @@ class DriveExponential(DriveTopicInput):
         :return: The valuation of the perception
         :rtype: float
         """
+        self.old_evaluation=copy(self.evaluation)
         if self.input>=0:
             a = 1-self.min_eval 
             self.evaluation.evaluation = a*exp(-5*self.input)+self.min_eval

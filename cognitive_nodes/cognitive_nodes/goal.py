@@ -711,20 +711,18 @@ class GoalMotiven(Goal):
                 goal_activations[node] = activation_list[node]['data'].activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
             if activation_list[node]['data'].node_type == "Goal":
-                goal_activations[node] = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that consequent subgoals have progressively less activation
+                goal_activations[node] = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that subgoals have progressively less activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
-
-
-        #THIS IS A HACK TO MAKE THE PROPAGATION OF GOAL ACTIVATION WORK. Will need to implement some sort of direction of neighbors so that downstream goals don't affect the activation of upstream goals
-        if getattr(self, "act_node", None) is None:
+        if goal_activations:
             activation=max(zip(goal_activations.values(), goal_activations.keys()))
             timestamp=goal_timestamps[activation[1]]
             self.activation.activation = activation[0]
             self.activation.timestamp=timestamp
-            self.act_node=activation[1]
         else:
-            self.activation.activation = goal_activations[self.act_node]
-            self.activation.timestamp=goal_timestamps[self.act_node]
+            self.activation.activation = 0.0
+            self.activation.timestamp=self.get_clock().now().to_msg()
+            
+
 
     def calculate_reward(self, drive_name):
         # Remember the case in which one drive reduces its evaluation and another increases
@@ -742,7 +740,7 @@ class GoalMotiven(Goal):
         return reward, self.reward_timestamp
 
 class GoalLearnedSpace(GoalMotiven):
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, **params):
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
             space_class)(ident=name + " space")]
@@ -758,6 +756,8 @@ class GoalLearnedSpace(GoalMotiven):
         self.history = deque([], history_size)
         self.confidence=0.0
         self.learned_space=False
+        if perception:
+            self.add_point(perception, 1.0)
 
     def configure_labels(self):
         self.point_msg:Perception
@@ -794,6 +794,7 @@ class GoalLearnedSpace(GoalMotiven):
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
+        self.get_logger().info(f"DEBUG - Adding point: {point}")
         points = separate_perceptions(point)
         for point in points:
             self.space = self.spaces[0]
@@ -821,6 +822,7 @@ class GoalLearnedSpace(GoalMotiven):
             await self.update_space(reward, expected_reward, perception)
             timestamp=self.reward_timestamp
         else:
+            #TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
             prob_reward=expected_reward if not compare_perceptions(old_perception, perception) else 0.0
             #Threshold reward according to probability obtained from space
             reward= 1.0 if prob_reward>0.75 else 0.0
