@@ -40,6 +40,43 @@ class PointBasedSpace(Space):
         self.memberships = []
         super().__init__(**kwargs)
 
+    def populate_space(self, point, members, memberships):
+        """
+        Populate the structured array and memberships list based on the given parameters.
+
+        :param point: A perception dictionary describing the structure of the space.
+        :type point: dict
+        :param members: A flattened list of data with size n_dims * n_data.
+        :type members: list
+        :param memberships: A list of membership data with size n_data.
+        :type memberships: list
+        :raises ValueError: If the size of memberships does not match the calculated size of the space.
+        """
+        if self.size != 0:
+            raise RuntimeError("Only an empty space can be populated.")
+
+        # Ensure the size matches the expected dimensions
+        if len(memberships) != self.real_size:
+            raise ValueError("Size of memberships does not match the space's real size.")
+
+        # Create a structured array using the provided point structure
+        self.members = self.create_structured_array(point, None, len(memberships))
+        
+        # Populate the structured array with the members' data
+        n_dims = len(self.members.dtype.names)
+        n_data = len(members) // n_dims
+
+        if n_data != len(memberships):
+            raise ValueError("Mismatch between members and memberships size.")
+
+        for i in range(n_data):
+            member_data = members[i * n_dims:(i + 1) * n_dims]
+            self.members[i] = tuple(member_data)
+
+        # Assign memberships
+        self.memberships = numpy.array(memberships)
+        self.size = len(memberships)
+
     def create_structured_array(self, perception, base_dtype, size):
         """
         Create a structured array to store points.
@@ -103,7 +140,7 @@ class PointBasedSpace(Space):
         :type space: numpy.ndarray
         :param position: Position of the array in which the perception is added
         :type position: int
-        :param perception: The perception thah is copied in the structured array
+        :param perception: The perception that is copied in the structured array
         :type perception: dict
         """
         if getattr(perception, "dtype", None):
@@ -239,7 +276,9 @@ class PointBasedSpace(Space):
         if space.size:
             contained = True
             for point in space.members[0 : space.size]:
-                if self.get_probability(point) < threshold:
+                probability = self.get_probability(point)
+                if probability < threshold:
+                    self.logger.info(f"Point not contained: {point} ({probability})")
                     contained = False
                     break
         return contained

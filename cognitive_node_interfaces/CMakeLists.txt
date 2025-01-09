@@ -27,6 +27,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Action.srv"
   "srv/AddPoint.srv"
   "srv/AddNeighbor.srv"
+  "srv/ContainsSpace.srv"
   "srv/DeleteNeighbor.srv"
   "srv/Evaluate.srv"
   "srv/Execute.srv"

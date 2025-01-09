@@ -1,0 +1,5 @@
+Perception point_msg
+float64[] data
+float64[] confidences
+---
+bool contained

@@ -2,8 +2,9 @@ from collections import deque
 import rclpy
 from rclpy.time import Time
 from core.cognitive_node import CognitiveNode
+from cognitive_nodes.space import PointBasedSpace
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
-from cognitive_node_interfaces.srv import AddPoint, SendSpace
+from cognitive_node_interfaces.srv import AddPoint, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
 
 class PNode(CognitiveNode):
@@ -34,6 +35,8 @@ class PNode(CognitiveNode):
             name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
             name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
+        self.contains_space_service = self.create_service(ContainsSpace, 'pnode/' + str(
+            name) + '/contains_space', self.contains_space_callback, callback_group=self.cbgroup_server)
         self.history_size = history_size
         self.history = deque([], history_size)
         self.success_rate = 0.0
@@ -49,7 +52,7 @@ class PNode(CognitiveNode):
         for dim in self.point_msg.layout.dim:
             sensor = dim.object[:-1]
             for label in dim.labels:
-                data_label = str(i) + "_" + sensor + "_" + label
+                data_label = str(i) + "-" + sensor + "-" + label
                 self.data_labels.append(data_label)
             i = i+1            
 
@@ -68,6 +71,18 @@ class PNode(CognitiveNode):
         response.confidences = confidences
         
         return response
+    
+    def contains_space_callback(self, request, response):
+        point_msg=perception_msg_to_dict(request.point_msg)
+        data = response.data  # Flattened list of data values
+        confidences = response.confidences  # List of confidence values
+        compare_space=PointBasedSpace(len(confidences))
+        compare_space.populate_space(point_msg, data, confidences)
+        if self.space:
+            response.contained=self.space.contains(compare_space)
+        else:
+            response.contained=False
+        return response    
 
     def add_point_callback(self, request, response):
         """

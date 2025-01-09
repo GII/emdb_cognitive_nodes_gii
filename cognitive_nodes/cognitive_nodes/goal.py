@@ -9,9 +9,10 @@ import inspect
 
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace
+from cognitive_node_interfaces.srv import SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
+from cognitive_nodes.space import PointBasedSpace
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 from builtin_interfaces.msg import Time as TimeMsg
 
@@ -749,6 +750,8 @@ class GoalLearnedSpace(GoalMotiven):
         self.min_confidence=min_confidence
         self.send_pnode_space_service = self.create_service(SendSpace, 'goal/' + str(
             name) + '/send_goal_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
+        self.contains_space_service = self.create_service(ContainsSpace, 'goal/' + str(
+            name) + '/contains_space', self.contains_space_callback, callback_group=self.cbgroup_server)
         self.success_publisher = self.create_publisher(
             SuccessRate, f'goal/{str(name)}/confidence', 0)
         self.data_labels = []
@@ -765,7 +768,7 @@ class GoalLearnedSpace(GoalMotiven):
         for dim in self.point_msg.layout.dim:
             sensor = dim.object[:-1]
             for label in dim.labels:
-                data_label = str(i) + "_" + sensor + "_" + label
+                data_label = str(i) + "-" + sensor + "-" + label
                 self.data_labels.append(data_label)
             i = i+1
 
@@ -785,6 +788,18 @@ class GoalLearnedSpace(GoalMotiven):
         
         return response
 
+    def contains_space_callback(self, request, response):
+        point_msg=separate_perceptions(perception_msg_to_dict(request.point_msg))[0]
+        data = request.data  # Flattened list of data values
+        confidences = request.confidences  # List of confidence values
+        compare_space=PointBasedSpace(len(confidences))
+        compare_space.populate_space(point_msg, data, confidences)
+        if self.space:
+            response.contained=self.space.contains(compare_space)
+        else:
+            response.contained=False
+        return response
+    
     def add_point(self, point, confidence):
         """
         Add a new point (or anti-point) to the Goal.
@@ -805,28 +820,34 @@ class GoalLearnedSpace(GoalMotiven):
         self.added_point = True
 
     async def get_reward(self, old_perception=None, perception=None):
-        if perception:
-            reward_list = []
-            perceptions = separate_perceptions(perception)
-            for perception_line in perceptions:
-                space = self.spaces[0]
-                if space and self.added_point:
-                    reward_value = max(0.0, space.get_probability(perception_line))
-                else:
-                    reward_value = 0.0
-                reward_list.append(reward_value)    
-            expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
-        if self.linked_drive():
-            reward = self.reward
-            self.reward = 0.0
-            await self.update_space(reward, expected_reward, perception)
-            timestamp=self.reward_timestamp
-        else:
-            #TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
-            prob_reward=expected_reward if not compare_perceptions(old_perception, perception) else 0.0
-            #Threshold reward according to probability obtained from space
-            reward= 1.0 if prob_reward>0.75 else 0.0
+        if not compare_perceptions(old_perception, perception):
+            if perception:
+                reward_list = []
+                perceptions = separate_perceptions(perception)
+                for perception_line in perceptions:
+                    space = self.spaces[0]
+                    if space and self.added_point:
+                        reward_value = max(0.0, space.get_probability(perception_line))
+                    else:
+                        reward_value = 0.0
+                    reward_list.append(reward_value)    
+                expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
+            if self.linked_drive():
+                reward = self.reward
+                self.reward = 0.0
+                await self.update_space(reward, expected_reward, perception)
+                timestamp=self.reward_timestamp
+            else:
+                #TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
+                prob_reward=expected_reward
+                #Threshold reward according to probability obtained from space
+                reward= 1.0 if prob_reward>0.75 else 0.0
             timestamp=self.get_clock().now().to_msg()
+        else:
+            reward=0.0
+            timestamp=self.get_clock().now().to_msg()
+
+
         return reward, timestamp
     
     async def update_space(self, reward, expected_reward, perception):
