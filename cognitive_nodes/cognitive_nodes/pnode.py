@@ -46,7 +46,7 @@ class PNode(CognitiveNode):
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
 
-    def configure_labels(self):
+    def configure_labels(self): #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
         self.point_msg:Perception
         i = 0
         for dim in self.point_msg.layout.dim:
@@ -73,16 +73,16 @@ class PNode(CognitiveNode):
         return response
     
     def contains_space_callback(self, request, response):
-        point_msg=perception_msg_to_dict(request.point_msg)
-        data = response.data  # Flattened list of data values
-        confidences = response.confidences  # List of confidence values
+        labels=request.labels
+        data = request.data  # Flattened list of data values
+        confidences = request.confidences  # List of confidence values
         compare_space=PointBasedSpace(len(confidences))
-        compare_space.populate_space(point_msg, data, confidences)
+        compare_space.populate_space(labels, data, confidences)
         if self.space:
             response.contained=self.space.contains(compare_space)
         else:
             response.contained=False
-        return response    
+        return response   
 
     def add_point_callback(self, request, response):
         """

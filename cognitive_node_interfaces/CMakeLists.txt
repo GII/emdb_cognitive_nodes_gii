@@ -34,6 +34,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetActivation.srv"
   "srv/GetInformation.srv"
   "srv/GetIteration.srv"
+  "srv/GetKnowledge.srv"
   "srv/GetReward.srv"
   "srv/GetSatisfaction.srv"
   "srv/GetSuccessRate.srv"

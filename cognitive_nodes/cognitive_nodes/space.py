@@ -7,6 +7,8 @@ import tensorflow as tf
 from rclpy.node import Node
 from rclpy.logging import get_logger
 
+from core.utils import separate_perceptions
+
 
 class Space(object):
     """A n-dimensional state space."""
@@ -40,7 +42,7 @@ class PointBasedSpace(Space):
         self.memberships = []
         super().__init__(**kwargs)
 
-    def populate_space(self, point, members, memberships):
+    def populate_space(self, labels, members, memberships):
         """
         Populate the structured array and memberships list based on the given parameters.
 
@@ -60,6 +62,7 @@ class PointBasedSpace(Space):
             raise ValueError("Size of memberships does not match the space's real size.")
 
         # Create a structured array using the provided point structure
+        point=self.create_point_from_labels(labels)
         self.members = self.create_structured_array(point, None, len(memberships))
         
         # Populate the structured array with the members' data
@@ -76,6 +79,22 @@ class PointBasedSpace(Space):
         # Assign memberships
         self.memberships = numpy.array(memberships)
         self.size = len(memberships)
+    
+    #TODO This method assumes that there is only one element per sensor. See configure_labels in goal.py
+    @staticmethod
+    def create_point_from_labels(labels):
+        point={}
+        for label in labels:
+            elements=label.split("-")
+            sensor=elements[1]
+            attribute=elements[2]
+            if not point.get(sensor):
+                point[sensor]=[{attribute: 0.0}]
+            else:
+                point[sensor][0][attribute]=0.0
+        point = separate_perceptions(point)[0]
+        print(f"Point: {point}")
+        return point
 
     def create_structured_array(self, perception, base_dtype, size):
         """
@@ -275,9 +294,10 @@ class PointBasedSpace(Space):
         contained = False
         if space.size:
             contained = True
-            for point in space.members[0 : space.size]:
+            for point, confidence in zip(space.members[0 : space.size],space.memberships[0 : space.size]) : #Cuando se excluyen los antipuntos????
+                self.logger.info(f"Evaluating point {point} [{confidence}]")
                 probability = self.get_probability(point)
-                if probability < threshold:
+                if probability < threshold and confidence>0:
                     self.logger.info(f"Point not contained: {point} ({probability})")
                     contained = False
                     break

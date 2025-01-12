@@ -762,6 +762,7 @@ class GoalLearnedSpace(GoalMotiven):
         if perception:
             self.add_point(perception, 1.0)
 
+    #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
     def configure_labels(self):
         self.point_msg:Perception
         i = 0
@@ -789,11 +790,11 @@ class GoalLearnedSpace(GoalMotiven):
         return response
 
     def contains_space_callback(self, request, response):
-        point_msg=separate_perceptions(perception_msg_to_dict(request.point_msg))[0]
+        labels=request.labels
         data = request.data  # Flattened list of data values
         confidences = request.confidences  # List of confidence values
         compare_space=PointBasedSpace(len(confidences))
-        compare_space.populate_space(point_msg, data, confidences)
+        compare_space.populate_space(labels, data, confidences)
         if self.space:
             response.contained=self.space.contains(compare_space)
         else:
