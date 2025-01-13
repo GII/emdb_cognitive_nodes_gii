@@ -823,38 +823,46 @@ class GoalLearnedSpace(GoalMotiven):
     async def get_reward(self, old_perception=None, perception=None):
         if not compare_perceptions(old_perception, perception):
             if perception:
-                reward_list = []
-                perceptions = separate_perceptions(perception)
-                for perception_line in perceptions:
-                    space = self.spaces[0]
-                    if space and self.added_point:
-                        reward_value = max(0.0, space.get_probability(perception_line))
-                    else:
-                        reward_value = 0.0
-                    reward_list.append(reward_value)    
-                expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
+                expected_reward=self.get_expected_reward(perception)
             if self.linked_drive():
                 reward = self.reward
+                drive_reward = self.reward
                 self.reward = 0.0
-                await self.update_space(reward, expected_reward, perception)
+                self.update_space(reward, expected_reward, perception)
                 timestamp=self.reward_timestamp
             else:
                 #TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
+                drive_reward=0.0
                 prob_reward=expected_reward
                 #Threshold reward according to probability obtained from space
                 reward= 1.0 if prob_reward>0.75 else 0.0
             timestamp=self.get_clock().now().to_msg()
+            self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {drive_reward} PRED_REWARD: {expected_reward}")
         else:
             reward=0.0
             timestamp=self.get_clock().now().to_msg()
-
-
+        
         return reward, timestamp
     
-    async def update_space(self, reward, expected_reward, perception):
+    def get_expected_reward(self, perception:dict):
+        reward_list = []
+        perceptions = separate_perceptions(perception)
+        for perception_line in perceptions:
+            space = self.spaces[0]
+            if space and self.added_point:
+                reward_value = max(0.0, space.get_probability(perception_line))
+            else:
+                reward_value = 0.0
+            reward_list.append(reward_value)    
+        expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
+        return expected_reward
+
+
+    def update_space(self, reward, expected_reward, perception):
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
-            self.add_point(perception, 1.0)
+            if not self.learned_space:
+                self.add_point(perception, 1.0)
             if expected_reward>0.01:
                 self.history.appendleft(True)
             else:
@@ -863,15 +871,12 @@ class GoalLearnedSpace(GoalMotiven):
             #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
                 self.history.appendleft(False)
-                self.add_point(perception, -1.0)
+                if not self.learned_space:
+                    self.add_point(perception, -1.0)
         self.confidence=sum(self.history)/self.history.maxlen
         #Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence>self.min_confidence:
             self.learned_space=True
-        #Unlink drive if confidence goes below 50%
-        if self.learned_space and self.confidence<0.5:
-            drive=self.get_drive()
-            await self.update_neighbor_client(self.name, drive, False)
         self.publish_success_rate()
 
     def publish_success_rate(self):
