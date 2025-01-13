@@ -1,7 +1,9 @@
 import yaml
 
-from cognitive_node_interfaces.msg import SuccessRate
 from std_msgs.msg import String
+from cognitive_node_interfaces.msg import SuccessRate
+from core.utils import class_from_classname
+
 
 class LTMSubscription:
     def configure_ltm_subscription(self, ltm):
@@ -32,4 +34,13 @@ class PNodeSuccess(LTMSubscription):
         goal_linked = msg.flag
         success_rate = msg.success_rate
         self.pnode_evaluation[pnode] = success_rate * (not goal_linked)
+
+class EpisodeSubscription:
+    def configure_episode_subscription(self, episode_topic, episode_msg):
+        msg_obj=class_from_classname(episode_msg)
+        self.ltm_suscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=self.cbgroup_activation)
+    
+    def episode_callback(self, msg):
+        raise NotImplementedError
+
   

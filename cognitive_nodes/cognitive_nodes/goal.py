@@ -810,7 +810,7 @@ class GoalLearnedSpace(GoalMotiven):
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
-        self.get_logger().info(f"DEBUG - Adding point: {point}")
+        self.get_logger().info(f"DEBUG - Adding point: {point} ({confidence})")
         points = separate_perceptions(point)
         for point in points:
             self.space = self.spaces[0]

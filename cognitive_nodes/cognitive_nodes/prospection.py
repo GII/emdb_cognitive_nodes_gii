@@ -20,7 +20,7 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.min_pnode_rate=min_pnode_rate
         self.min_goal_rate=min_goal_rate
         self.configure_prospection_suscrptor()
-        self.contains_space_service = self.create_service(GetKnowledge, 'drive/' + str(
+        self.get_knowledge_service = self.create_service(GetKnowledge, 'drive/' + str(
             name) + '/get_knowledge', self.get_knowledge_callback, callback_group=self.cbgroup_server)
     
     def configure_prospection_suscrptor(self, ltm):
@@ -143,6 +143,8 @@ class ProspectionDrive(Drive, LTMSubscription):
                 downstream_goals.append(ds_goal)
                 upstream_goals.append(us_goal)
         self.new_knowledge=False
+        response.downstream_goals=downstream_goals
+        response.upstream_goals=upstream_goals
         return response
             
     def evaluate(self, perception=None):
@@ -157,7 +159,7 @@ class PolicyProspection(Policy):
         else:    
             self.LTM_id = ltm_id
         if drive_name is None:
-            raise RuntimeError('No LTM input was provided.')
+            raise RuntimeError('No prospection drive was provided.')
         else:    
             self.drive = drive_name
         self.found_knowledge={}

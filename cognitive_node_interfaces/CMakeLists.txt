@@ -32,6 +32,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Evaluate.srv"
   "srv/Execute.srv"
   "srv/GetActivation.srv"
+  "srv/GetEffects.srv"
   "srv/GetInformation.srv"
   "srv/GetIteration.srv"
   "srv/GetKnowledge.srv"
