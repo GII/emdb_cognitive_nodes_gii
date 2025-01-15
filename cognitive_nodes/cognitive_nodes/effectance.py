@@ -250,14 +250,14 @@ class GoalActivatePNode(GoalMotiven):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', threshold_delta=0.2, **params):
         super().__init__(name, class_name, **params)
         self.threshold_delta=threshold_delta
-        self.send_pnode_space_service = self.create_service(SendSpace, 'goal/' + str(
-            name) + '/send_goal_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
+        self.send_goal_space_service = self.create_service(SendSpace, 'goal/' + str(
+            name) + '/send_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
         self.setup_pnode()
     
     def setup_pnode(self):
         pnode = next((node["name"] for node in self.neighbors if node["node_type"] == "PNode"))
         self.pnode_activation_client = ServiceClientAsync(self, GetActivation, f"cognitive_node/{pnode}/get_activation", self.cbgroup_client)
-        self.pnode_space_client = ServiceClientAsync(self, SendSpace, f"pnode/{pnode}/send_pnode_space", self.cbgroup_client) 
+        self.pnode_space_client = ServiceClientAsync(self, SendSpace, f"pnode/{pnode}/send_space", self.cbgroup_client) 
 
     def calculate_reward(self, drive_name):
         return None

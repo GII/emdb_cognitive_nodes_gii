@@ -34,7 +34,7 @@ class PNode(CognitiveNode):
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
             name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
-            name) + '/send_pnode_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
+            name) + '/send_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
         self.contains_space_service = self.create_service(ContainsSpace, 'pnode/' + str(
             name) + '/contains_space', self.contains_space_callback, callback_group=self.cbgroup_server)
         self.history_size = history_size

@@ -101,12 +101,12 @@ class ProspectionDrive(Drive, LTMSubscription):
                 #If a relationship has not been found before
                 if pnode not in self.found_knowledge.get(goal, []):
                     #Get goal space:
-                    service_name = f"goal/{goal}/send_goal_space"
+                    service_name = f"goal/{goal}/send_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, SendSpace, service_name, self.cbgroup_client)
                     goal_space = await self.node_clients[service_name].send_request_async()
                     #Get pnode space:
-                    service_name = f"pnode/{pnode}/send_pnode_space"
+                    service_name = f"pnode/{pnode}/send_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, SendSpace, service_name, self.cbgroup_client)
                     pnode_space = await self.node_clients[service_name].send_request_async()

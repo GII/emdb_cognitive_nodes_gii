@@ -79,6 +79,13 @@ class Goal(CognitiveNode):
             callback_group=self.cbgroup_reward
         )
 
+        self.send_goal_space_service = self.create_service(
+            SendSpace, 
+            'goal/' + str(name) + '/send_space', 
+            self.send_goal_space_callback, 
+            callback_group=self.cbgroup_server
+        )
+
     def set_activation_callback(self, request, response):
         """
         Drives can modify a goals's activation
@@ -95,6 +102,13 @@ class Goal(CognitiveNode):
         self.activation.activation = activation
         self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
+        return response
+    
+    def send_goal_space_callback(self, request, response):
+        response.labels = []
+        response.data = []
+        response.confidences = []
+
         return response
     
     async def is_reached_callback(self, request, response):
@@ -748,8 +762,6 @@ class GoalLearnedSpace(GoalMotiven):
         self.added_point = False
         self.LTM_id=ltm_id
         self.min_confidence=min_confidence
-        self.send_pnode_space_service = self.create_service(SendSpace, 'goal/' + str(
-            name) + '/send_goal_space', self.send_goal_space_callback, callback_group=self.cbgroup_server)
         self.contains_space_service = self.create_service(ContainsSpace, 'goal/' + str(
             name) + '/contains_space', self.contains_space_callback, callback_group=self.cbgroup_server)
         self.success_publisher = self.create_publisher(
