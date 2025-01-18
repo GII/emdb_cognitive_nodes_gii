@@ -674,6 +674,22 @@ class ANNSpace(PointBasedSpace):
         """
         Init attributes when a new object is created.
         """
+        #GPU USAGE TEST
+        tf.config.set_visible_devices([], 'GPU') #Temporary disable of GPU
+        '''
+        #tf.debugging.set_log_device_placement(True) #Detailed log in every TF operation
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Set memory growth to avoid allocating all GPU memory
+                for gpu in gpus:
+                    tf.config.experimental.set_virtual_device_configuration(
+                    gpus[0],
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
+                )
+            except RuntimeError as e:
+                print(e)
+        '''
 
         # Define train values
         output_activation = "sigmoid"
@@ -688,7 +704,7 @@ class ANNSpace(PointBasedSpace):
         # Define the Neural Network's model
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(9,)), #TODO Adapt to state space dimensions
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(10,)), #TODO Adapt to state space dimensions
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.Dense(32, activation="relu"),
                 tf.keras.layers.Dense(1, activation=output_activation),

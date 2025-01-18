@@ -216,7 +216,7 @@ class PolicyEffectanceExternal(Policy):
         else:    
             self.LTM_id = ltm_id
         if drive_name is None:
-            raise RuntimeError('No prospection drive was provided.')
+            raise RuntimeError('No effects drive was provided.')
         else:    
             self.drive = drive_name
         if goal_class is None:
@@ -241,7 +241,7 @@ class PolicyEffectanceExternal(Policy):
     async def create_goal(self, sensor, attribute):
         self.get_logger().info(f"Creating goal linked to effect in sensor {sensor}, attribute {attribute}")
         goal_name=f"effect_{sensor}_{attribute}"
-        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class)
+        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class, history_size=300, min_confidence=0.95)
         goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
         if not goal_response.created:
             self.get_logger().fatal(f"Failed creation of Goal {goal_name}")
@@ -313,7 +313,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
         if not self.learned_space:
             self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
         else:
-            self.activation.activation=max(0.015)
+            self.activation.activation=max(0.015, self.activation.activation)
         
 
 

@@ -849,7 +849,7 @@ class GoalLearnedSpace(GoalMotiven):
                 #Threshold reward according to probability obtained from space
                 reward= 1.0 if prob_reward>0.75 else 0.0
             timestamp=self.get_clock().now().to_msg()
-            self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {drive_reward} PRED_REWARD: {expected_reward}")
+            self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {drive_reward} PRED_REWARD: {expected_reward} CONF: {self.confidence}")
         else:
             reward=0.0
             timestamp=self.get_clock().now().to_msg()
@@ -873,8 +873,7 @@ class GoalLearnedSpace(GoalMotiven):
     def update_space(self, reward, expected_reward, perception):
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
-            if not self.learned_space:
-                self.add_point(perception, 1.0)
+            self.add_point(perception, 1.0)
             if expected_reward>0.01:
                 self.history.appendleft(True)
             else:
@@ -883,12 +882,14 @@ class GoalLearnedSpace(GoalMotiven):
             #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
                 self.history.appendleft(False)
-                if not self.learned_space:
-                    self.add_point(perception, -1.0)
+                self.add_point(perception, -1.0)
         self.confidence=sum(self.history)/self.history.maxlen
         #Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence>self.min_confidence:
             self.learned_space=True
+        #Flag goal if confidence goes below 75% of learned confidence
+        if self.learned_space and self.confidence<self.min_confidence*0.75:
+            self.learned_space=False
         self.publish_success_rate()
 
     def publish_success_rate(self):

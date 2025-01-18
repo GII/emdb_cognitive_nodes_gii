@@ -305,10 +305,14 @@ class IJCNNExperimentPerception(Perception):
                         self.normalize_values["angle_max"]
                         - self.normalize_values["angle_min"]
                     )
+                    state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    active = perception.active
                     value.append(
                         dict(
                             distance=distance,
-                            angle=angle
+                            angle=angle,
+                            state=state,
+                            active=active
                         )
                     )
             elif "fruits" in self.name:
@@ -331,13 +335,12 @@ class IJCNNExperimentPerception(Perception):
                         - self.normalize_values["dim_min"]
                     )
 
-                    state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    
                     value.append(
                         dict(
                             distance = distance,
                             angle = angle,
-                            dim_max = dim_max,
-                            state = state
+                            dim_max = dim_max
                         )
                     )
         else:
