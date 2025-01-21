@@ -759,6 +759,7 @@ class GoalLearnedSpace(GoalMotiven):
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
             space_class)(ident=name + " space")]
+        self.space=None
         self.added_point = False
         self.LTM_id=ltm_id
         self.min_confidence=min_confidence
@@ -786,19 +787,20 @@ class GoalLearnedSpace(GoalMotiven):
             i = i+1
 
     def send_goal_space_callback(self, request, response):
-        if not self.data_labels:
-            self.configure_labels()
-        response.labels = self.data_labels
-        
-        data = []
-        for perception in self.space.members[0:self.space.size]:
-            for value in perception:
-                data.append(value)
-        response.data = data
+        if self.space:
+            if not self.data_labels:
+                self.configure_labels()
+            response.labels = self.data_labels
+            
+            data = []
+            for perception in self.space.members[0:self.space.size]:
+                for value in perception:
+                    data.append(value)
+            response.data = data
 
-        confidences = list(self.space.memberships[0:self.space.size])
-        response.confidences = confidences
-        
+            confidences = list(self.space.memberships[0:self.space.size])
+            response.confidences = confidences
+            
         return response
 
     def contains_space_callback(self, request, response):
@@ -874,15 +876,16 @@ class GoalLearnedSpace(GoalMotiven):
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
             self.add_point(perception, 1.0)
-            if expected_reward>0.01:
+            if expected_reward>0.5:
                 self.history.appendleft(True)
             else:
                 self.history.appendleft(False)
         else:
             #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
-                self.history.appendleft(False)
                 self.add_point(perception, -1.0)
+                if expected_reward>0.1:
+                    self.history.appendleft(False)
         self.confidence=sum(self.history)/self.history.maxlen
         #Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence>self.min_confidence:

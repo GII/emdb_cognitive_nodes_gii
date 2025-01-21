@@ -289,31 +289,37 @@ class GoalRecreateEffect(GoalLearnedSpace):
     def get_reward(self, old_perception, perception):
         if not compare_perceptions(old_perception, perception):
             expected_reward=self.get_expected_reward(perception)
-            reward=float(self.process_effect(old_perception, perception))
-            self.update_space(reward, expected_reward, perception)
-            self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {reward} PRED_REWARD: {expected_reward}")
-            timestamp=self.get_clock().now().to_msg()
+            effect, old_sensing, _= self.process_effect(old_perception, perception)
+            if old_sensing<1.0:
+                reward=float(effect)
+                self.update_space(reward, expected_reward, perception)
+                self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {reward} PRED_REWARD: {expected_reward} CONF: {self.confidence}")
+                timestamp=self.get_clock().now().to_msg()
+            else:
+                self.get_logger().info(f"DEBUG - {self.name} - Effect already active")
+                reward=0.0
+                timestamp=self.get_clock().now().to_msg()
         else:
             reward=0.0
             timestamp=self.get_clock().now().to_msg()
         return reward, timestamp
-    
+       
     def process_effect(self, old_perception, perception):
         effect=False
         for index, _ in enumerate(perception[self.sensor]):
             old_sensing=old_perception[self.sensor][index][self.attribute]
             sensing=perception[self.sensor][index][self.attribute]
             effect=isclose(sensing-old_sensing, 1.0)
-        return effect
+            if effect:
+                break
+        return effect, old_sensing, sensing
     
     def calculate_activation(self, perception, activation_list):
-        #Calculates activation regularly
+        #Calculates activation as any goal
         super().calculate_activation(perception, activation_list)
-        #Provides activation if not learned depending on competence
+        #Provides activation if not learned depending on confidence
         if not self.learned_space:
             self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
-        else:
-            self.activation.activation=max(0.015, self.activation.activation)
         
 
 

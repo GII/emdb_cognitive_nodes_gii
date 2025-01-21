@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from math import isclose
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
@@ -306,6 +307,7 @@ class IJCNNExperimentPerception(Perception):
                         - self.normalize_values["angle_min"]
                     )
                     state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    state = 0.98 if isclose(state, 1.0) else state
                     active = perception.active
                     value.append(
                         dict(

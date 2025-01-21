@@ -30,6 +30,7 @@ class PNode(CognitiveNode):
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
             space_class)(ident=name + " space")]
+        self.space=None
         self.added_point = False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
             name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
@@ -57,19 +58,20 @@ class PNode(CognitiveNode):
             i = i+1            
 
     def send_pnode_space_callback(self, request, response):
-        if not self.data_labels:
-            self.configure_labels()
-        response.labels = self.data_labels
-        
-        data = []
-        for perception in self.space.members[0:self.space.size]:
-            for value in perception:
-                data.append(value)
-        response.data = data
+        if self.space:
+            if not self.data_labels:
+                self.configure_labels()
+            response.labels = self.data_labels
+            
+            data = []
+            for perception in self.space.members[0:self.space.size]:
+                for value in perception:
+                    data.append(value)
+            response.data = data
 
-        confidences = list(self.space.memberships[0:self.space.size])
-        response.confidences = confidences
-        
+            confidences = list(self.space.memberships[0:self.space.size])
+            response.confidences = confidences
+            
         return response
     
     def contains_space_callback(self, request, response):
