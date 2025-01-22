@@ -726,7 +726,7 @@ class GoalMotiven(Goal):
                 goal_activations[node] = activation_list[node]['data'].activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
             if activation_list[node]['data'].node_type == "Goal":
-                goal_activations[node] = activation_list[node]['data'].activation * 0.95 #Testing attenuation term, so that subgoals have progressively less activation
+                goal_activations[node] = activation_list[node]['data'].activation * 0.7 #Testing attenuation term, so that subgoals have progressively less activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
         if goal_activations:
             activation=max(zip(goal_activations.values(), goal_activations.keys()))
@@ -757,9 +757,14 @@ class GoalMotiven(Goal):
 class GoalLearnedSpace(GoalMotiven):
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, **params):
         super().__init__(name, class_name, **params)
-        self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space")]
-        self.space=None
+        if space_class:
+            self.spaces = [space if space else class_from_classname(
+                space_class)(ident=name + " space")]
+        if space:
+            self.space=space
+        else:
+            self.space=None
+        self.point_msg=None
         self.added_point = False
         self.LTM_id=ltm_id
         self.min_confidence=min_confidence
@@ -777,29 +782,31 @@ class GoalLearnedSpace(GoalMotiven):
 
     #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
     def configure_labels(self):
-        self.point_msg:Perception
-        i = 0
-        for dim in self.point_msg.layout.dim:
-            sensor = dim.object[:-1]
-            for label in dim.labels:
-                data_label = str(i) + "-" + sensor + "-" + label
-                self.data_labels.append(data_label)
-            i = i+1
+        if self.point_msg:
+            self.point_msg:Perception
+            i = 0
+            for dim in self.point_msg.layout.dim:
+                sensor = dim.object[:-1]
+                for label in dim.labels:
+                    data_label = str(i) + "-" + sensor + "-" + label
+                    self.data_labels.append(data_label)
+                i = i+1
 
     def send_goal_space_callback(self, request, response):
         if self.space:
             if not self.data_labels:
                 self.configure_labels()
-            response.labels = self.data_labels
-            
-            data = []
-            for perception in self.space.members[0:self.space.size]:
-                for value in perception:
-                    data.append(value)
-            response.data = data
+            if self.data_labels:
+                response.labels = self.data_labels
+                
+                data = []
+                for perception in self.space.members[0:self.space.size]:
+                    for value in perception:
+                        data.append(value)
+                response.data = data
 
-            confidences = list(self.space.memberships[0:self.space.size])
-            response.confidences = confidences
+                confidences = list(self.space.memberships[0:self.space.size])
+                response.confidences = confidences
             
         return response
 
