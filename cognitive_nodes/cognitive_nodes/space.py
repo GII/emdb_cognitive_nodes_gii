@@ -149,6 +149,18 @@ class PointBasedSpace(Space):
                     for attribute in attributes
                 ]
         return numpy.zeros(size, dtype=types)
+    
+    def learnable(self):
+        """
+        Only antipoints are considered learnables
+
+        :return: Return if the perception (point) is learnable or not
+        :rtype: bool
+        """
+        for i in self.memberships[0 : self.size]:
+            if numpy.isclose(i, -1.0):
+                return True
+        return False
 
     @staticmethod
     def copy_perception(space, position, perception):
@@ -295,7 +307,7 @@ class PointBasedSpace(Space):
         if space.size:
             contained = True
             for point, confidence in zip(space.members[0 : space.size],space.memberships[0 : space.size]) : #Cuando se excluyen los antipuntos????
-                self.logger.info(f"Evaluating point {point} [{confidence}]")
+                self.logger.debug(f"Evaluating point {point} [{confidence}]")
                 probability = self.get_probability(point)
                 if probability < threshold and confidence>0:
                     self.logger.info(f"Point not contained: {point} ({probability})")
@@ -535,17 +547,6 @@ class SVMSpace(PointBasedSpace):
         self.model = svm.SVC(kernel="poly", degree=32, max_iter=200000)
         super().__init__(**kwargs)
 
-    def learnable(self):
-        """
-        Only antipoints are considered learnables
-
-        :return: Return if the perception (point) is learnable or not
-        :rtype: bool
-        """
-        for i in self.memberships[0 : self.size]:
-            if numpy.isclose(i, -1.0):
-                return True
-        return False
 
     def prune_points(self, score, memberships):
         """

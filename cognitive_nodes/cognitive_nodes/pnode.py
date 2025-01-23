@@ -11,7 +11,7 @@ class PNode(CognitiveNode):
     """
     PNode class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=50, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, **params):
         """
         Constructor for the PNode class.
         
@@ -231,7 +231,7 @@ class PNode(CognitiveNode):
         self.success_publisher.publish(msg)
 
     def update_history(self, confidence):
-        if confidence>0:
+        if confidence>0 and self.space.learnable():
             self.history.appendleft(True)
         else:
             self.history.appendleft(False)

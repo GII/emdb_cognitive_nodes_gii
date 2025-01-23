@@ -17,25 +17,28 @@ class ProspectionDrive(Drive, LTMSubscription):
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
+        self.goals_info=None
         self.min_pnode_rate=min_pnode_rate
         self.min_goal_rate=min_goal_rate
-        self.configure_prospection_suscrptor()
+        self.configure_prospection_suscriptor(self.LTM_id)
         self.get_knowledge_service = self.create_service(GetKnowledge, 'drive/' + str(
             name) + '/get_knowledge', self.get_knowledge_callback, callback_group=self.cbgroup_server)
     
-    def configure_prospection_suscrptor(self, ltm):
+    def configure_prospection_suscriptor(self, ltm):
         self.configure_ltm_subscription(ltm)
         self.pnode_subscriptions = {}
         self.goal_subscriptions = {}
         self.learned_pnodes=[]
         self.learned_goals=[]
-        self.pnode_goals_dict={} #Dictionary of the goal linked to each pnode {'pnode0': 'goal0', ..., 'pnodeN': 'goal}
+        self.pnode_goals_dict={} #Dictionary of the goals linked to each pnode {'pnode0': ['goal0' ... ], ..., 'pnodeN': ['goal', ... ]}
         self.found_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
+        self.discarded_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
         self.new_knowledge=False
 
     def read_ltm(self, ltm_dump):
         pnodes = ltm_dump["PNode"]
         goals = ltm_dump["Goal"]
+        self.goals_dict = goals
         for pnode in pnodes:
             if pnode not in self.pnode_subscriptions.keys():
                 self.pnode_subscriptions[pnode] = self.create_subscription(SuccessRate, f"/pnode/{pnode}/success_rate", self.success_callback, 1, callback_group=self.cbgroup_activation)
@@ -96,10 +99,14 @@ class ProspectionDrive(Drive, LTMSubscription):
             await self.do_prospection()
 
     async def do_prospection(self):
+        self.get_logger().info(f"DEBUG - Performing prospection...")
         for goal in self.learned_goals:
             for pnode in self.learned_pnodes:
                 #If a relationship has not been found before
-                if pnode not in self.found_knowledge.get(goal, []):
+                discovered = any(element in self.pnode_goals_dict[pnode] for element in self.found_knowledge.get(goal, []))
+                discarded = any(element in self.pnode_goals_dict[pnode] for element in self.discarded_knowledge.get(goal, []))
+                if not (discovered or discarded): 
+                    self.get_logger().info(f"DEBUG - Searching relation between {goal} and {pnode}")
                     #Get goal space:
                     service_name = f"goal/{goal}/send_space"
                     if service_name not in self.node_clients:
@@ -114,34 +121,102 @@ class ProspectionDrive(Drive, LTMSubscription):
                     service_name = f"goal/{goal}/contains_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    pnode_in_goal = await self.node_clients[service_name].send_request_async(
+                    pnode_in_goal = (await self.node_clients[service_name].send_request_async(
                         labels=pnode_space.labels, data=pnode_space.data, confidences=pnode_space.confidences
-                        )
+                        )).contained
                     #PNode contains Goal
                     service_name = f"pnode/{pnode}/contains_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    goal_in_pnode = await self.node_clients[service_name].send_request_async(
+                    goal_in_pnode = (await self.node_clients[service_name].send_request_async(
                         labels=goal_space.labels, data=goal_space.data, confidences=goal_space.confidences
-                        )
+                        )).contained
                     #TODO THIS IS TESTING BOTH THAT THE GOAL IS INSIDE THE PNODE OR THE PNODE INSIDE THE GOAL. WE HAVE TO DECIDE THE 
                     #MOST APPROPRIATE METHOD TO DECIDE WHEN TO CHAIN OR NOT TO CHAIN GOALS.
                     #IF THE GOAL IS CONTAINED IN THE PNODE WE ARE SURE THAT THE GOALS MUST BE CHAINED.
                     #IF THE PNODE IS CONTAINED IN THE GOAL, THERE IS SOME PROBABILITY THAT ACHIEVING THE GOAL WILL ACTIVATE THE PNODE
                     if pnode_in_goal or goal_in_pnode:
-                        if not self.found_knowledge.get(goal, []):
-                            self.found_knowledge[goal]=[]
-                        self.found_knowledge[goal].append(self.pnode_goals_dict[pnode])
-                        self.new_knowledge=True
+                        self.get_logger().info(f"Found a relation between Goal {goal} and P-Node {pnode}")
+                        if not any(self.has_loop(upstream_goal, goal) for upstream_goal in self.pnode_goals_dict[pnode]):
+                            if not self.found_knowledge.get(goal, []):
+                                self.found_knowledge[goal]=[]
+                            self.found_knowledge[goal].extend(self.pnode_goals_dict[pnode])
+                            self.new_knowledge=True
+                            self.get_logger().info(f"Found knowledge: {self.found_knowledge}")
+                        else:
+                            if not self.discarded_knowledge.get(goal, []):
+                                self.discarded_knowledge[goal]=[]
+                            self.discarded_knowledge[goal].extend(self.pnode_goals_dict[pnode])
+                            self.get_logger().warn("Goals will not be linked because it would create a loop!")
+                    else:
+                        if not self.discarded_knowledge.get(goal, []):
+                            self.discarded_knowledge[goal]=[]
+                        self.discarded_knowledge[goal].extend(self.pnode_goals_dict[pnode])
+
+                else:
+                    self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} found before.")
+
+    def traverse_neighbors(self, goal_name, downstream_goal, visited):
+        """
+        Traverse the neighbors of a goal to check if the downstream goal is in the chain.
+        
+        Args:
+            goal_name (str): The name of the current goal being checked.
+            downstream_goal (str): The name of the downstream goal to check for loops.
+            visited (set): Set of already visited nodes to prevent revisiting.
+        
+        Returns:
+            bool: True if the downstream goal is found in the chain, False otherwise.
+        """
+        if goal_name in visited:
+            return False  # Prevent re-checking already visited nodes
+        visited.add(goal_name)
+
+        # Get neighbors of the current goal
+        neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
+        for neighbor in neighbors:
+            # Check if the downstream goal is found in the chain
+            if neighbor["name"] == downstream_goal:
+                return True
+            # Recur for each neighbor
+            if self.traverse_neighbors(neighbor["name"], downstream_goal, visited):
+                return True
+
+        return False
+
+    def has_loop(self, upstream_goal, downstream_goal):
+        """
+        Checks if adding downstream_goal to upstream_goal's neighbors creates a loop.
+        
+        Args:
+            upstream_goal (str): The name of the upstream goal.
+            downstream_goal (str): The name of the downstream goal.
+        
+        Returns:
+            bool: True if a loop would be created, False otherwise.
+        """
+        visited = set()
+        return self.traverse_neighbors(upstream_goal, downstream_goal, visited)
+    
+    def has_neighbor(self, goal_name, neighbor_name):
+        neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
+        for neighbor in neighbors:
+            # Check if the neighbor exists
+            if neighbor["name"] == neighbor_name:
+                return True
+        return False
+
 
     def get_knowledge_callback(self, request, response):
         downstream_goals=[]
         upstream_goals=[]
         #Creates a flattened list of the found_knowledge dictionary
+        self.get_logger().info(f"DEBUG - Found knowledge: {self.found_knowledge}")
         for ds_goal, linked_goals in self.found_knowledge.items():
             for us_goal in linked_goals:
                 downstream_goals.append(ds_goal)
                 upstream_goals.append(us_goal)
+        self.get_logger().info(f"DEBUG - Downstream goals: {downstream_goals}, Upstream Goals: {upstream_goals}")
         self.new_knowledge=False
         response.downstream_goals=downstream_goals
         response.upstream_goals=upstream_goals
@@ -163,7 +238,7 @@ class PolicyProspection(Policy):
         else:    
             self.drive = drive_name
         self.found_knowledge={}
-        self.knowledge_client = ServiceClientAsync(self, GetKnowledge, f"drive/{self.drive}/get_knowledge")
+        self.knowledge_client = ServiceClientAsync(self, GetKnowledge, f"drive/{self.drive}/get_knowledge", callback_group=self.cbgroup_client)
 
     async def execute_callback(self, request, response):
         self.get_logger().info('Executing policy: ' + self.name + '...')
@@ -174,6 +249,7 @@ class PolicyProspection(Policy):
             if us_goal not in self.found_knowledge[ds_goal]:
                 #If knowledge not found previously, update neighbor and save relationship
                 self.found_knowledge[ds_goal].append(us_goal)
+                self.get_logger().info(f"Linking {us_goal} to {ds_goal}")
                 await self.update_neighbor_client(ds_goal, us_goal, True)
         response.policy=self.name
         return response
