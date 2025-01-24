@@ -21,14 +21,32 @@ from cognitive_nodes.utils import PNodeSuccess, EpisodeSubscription
 
 class DriveEffectanceInternal(Drive, PNodeSuccess):
     #This class implements a simple effectance drive. It create goals to reach learned P-Nodes, in other words, reaching the effect of activaction of a P-Node.
-    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.1, **params):
+    def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_confidence=0.1, limit_depth=False, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
+        self.limit_depth=limit_depth
+        if self.limit_depth:
+            self.get_logger().error("DEBUG MESSAGE - DEPTH LIMIT ACTIVE")
         self.min_confidence=min_confidence
         self.configure_pnode_success(self.LTM_id)
+
+    #UGLY HACK: This was done to limit effectance chains to a depth of 1. 
+    # This must be done properly by analyzing neighbor chains and be general for any desired depth
+    def pnode_success_callback(self, msg):
+        if not self.limit_depth:
+            return super().pnode_success_callback(msg)
+        else:
+            pnode = msg.node_name
+            goal_linked = msg.flag
+            success_rate = msg.success_rate
+            if "reach_pnode_" in pnode:
+                self.pnode_evaluation[pnode] = 0.0
+            else:
+                self.pnode_evaluation[pnode] = success_rate * (not goal_linked)
+
 
     def evaluate(self):
         max_pnode= max(self.pnode_evaluation.values(), default=0.0)
@@ -90,18 +108,35 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         return self.evaluation
 
 class PolicyEffectanceInternal(Policy, PNodeSuccess):
-    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, threshold_delta=0.2, **params):
+    def __init__(self, name='policy_effectance', class_name='cognitive_nodes.policy.Policy', ltm_id=None, goal_class=None, confidence=0.5, threshold_delta=0.2, limit_depth=False, **params):
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
+        self.limit_depth=limit_depth
+        if self.limit_depth:
+            self.get_logger().error("DEBUG MESSAGE - DEPTH LIMIT ACTIVE")
         self.confidence=confidence
         self.threshold_delta=threshold_delta
         self.goal_class=goal_class
         self.index=0
         self.configure_pnode_success(self.LTM_id)
         self.pnode_goals_dict={}
+
+    #UGLY HACK: This was done to limit effectance chains to a depth of 1. 
+    # This must be done properly by analyzing neighbor chains and be general for any desired depth
+    def pnode_success_callback(self, msg):
+        if not self.limit_depth:
+            return super().pnode_success_callback(msg)
+        else:
+            pnode = msg.node_name
+            goal_linked = msg.flag
+            success_rate = msg.success_rate
+            if "reach_pnode_" in pnode:
+                self.pnode_evaluation[pnode] = 0.0
+            else:
+                self.pnode_evaluation[pnode] = success_rate * (not goal_linked)
 
     async def process_effectance(self):
         """

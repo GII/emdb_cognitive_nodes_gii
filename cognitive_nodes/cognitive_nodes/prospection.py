@@ -143,6 +143,7 @@ class ProspectionDrive(Drive, LTMSubscription):
                             self.found_knowledge[goal].extend(self.pnode_goals_dict[pnode])
                             self.new_knowledge=True
                             self.get_logger().info(f"Found knowledge: {self.found_knowledge}")
+                            return #Return after one link so that neighbors are connected one by one, to avoid creating a loop that goes unchecked by the has_loops() method
                         else:
                             if not self.discarded_knowledge.get(goal, []):
                                 self.discarded_knowledge[goal]=[]
