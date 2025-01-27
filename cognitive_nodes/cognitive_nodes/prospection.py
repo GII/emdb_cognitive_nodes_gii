@@ -140,10 +140,21 @@ class ProspectionDrive(Drive, LTMSubscription):
                         if not any(self.has_loop(upstream_goal, goal) for upstream_goal in self.pnode_goals_dict[pnode]):
                             if not self.found_knowledge.get(goal, []):
                                 self.found_knowledge[goal]=[]
-                            self.found_knowledge[goal].extend(self.pnode_goals_dict[pnode])
-                            self.new_knowledge=True
-                            self.get_logger().info(f"Found knowledge: {self.found_knowledge}")
-                            return #Return after one link so that neighbors are connected one by one, to avoid creating a loop that goes unchecked by the has_loops() method
+                            linked_goals=self.pnode_goals_dict[pnode]
+                            goal_neighbors=self.get_neighbor_names(goal)
+                            self.get_logger().info(f"DEBUG - Downstream goal neighbors: {goal_neighbors}")
+                            linked_goals_to_add=[linked_goal for linked_goal in linked_goals if linked_goal not in goal_neighbors]
+                            linked_goals_to_discard=[linked_goal for linked_goal in linked_goals if linked_goal in goal_neighbors]
+                            if linked_goals_to_add:
+                                self.get_logger().info(f"DEBUG - Goals to add: {linked_goals_to_add}")
+                                self.found_knowledge[goal].extend(linked_goals_to_add)
+                                self.new_knowledge=True
+                                self.get_logger().info(f"Found knowledge: {self.found_knowledge}")
+                                return #Return after one link so that neighbors are connected one by one, to avoid creating a loop that goes unchecked by the has_loops() method
+                            if linked_goals_to_discard:
+                                if not self.discarded_knowledge.get(goal, []):
+                                    self.discarded_knowledge[goal]=[]
+                                    self.discarded_knowledge[goal].extend(self.pnode_goals_dict[pnode])
                         else:
                             if not self.discarded_knowledge.get(goal, []):
                                 self.discarded_knowledge[goal]=[]
@@ -184,6 +195,11 @@ class ProspectionDrive(Drive, LTMSubscription):
                 return True
 
         return False
+    
+    def get_neighbor_names(self, goal_name):
+        neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
+        names = [neighbor["name"] for neighbor in neighbors]
+        return names
 
     def has_loop(self, upstream_goal, downstream_goal):
         """
