@@ -269,8 +269,8 @@ class Sim2DPerception(Perception):
         self.publish_msg.timestamp=self.get_clock().now().to_msg()
         self.perception_publisher.publish(self.publish_msg)
 
-class IJCNNExperimentPerception(Perception):
-    """IJCNN Perception class"""
+class FruitShopPerception(Perception):
+    """Fruit Shop Perception class"""
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
         Constructor for the Perception class
