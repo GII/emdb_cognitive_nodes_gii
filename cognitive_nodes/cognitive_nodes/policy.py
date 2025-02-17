@@ -120,7 +120,22 @@ class Policy(CognitiveNode):
     
 
 class PolicyAsync(Policy):
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyAsync', publisher_msg=None, publisher_topic=None, **params):
+    """
+    PolicyAsync class. Represents a policy that does not wait for completion of the execution.
+    """    
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher_msg=None, publisher_topic=None, **params):
+        """
+        Constructor for the PolicyAsync class.
+
+        :param name: The name of the policy.
+        :type name: str
+        :param class_name: The name of the base Policy class
+        :type class_name: str
+        :param publisher_msg: The publisher message to publicate the execution of the policy
+        :type publisher: str
+        :param publisher_topic: The publisher topic to publicate the execution of the policy
+        :type publisher: str
+        """        
         super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
         self.publisher_msg = publisher_msg
         self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)    
@@ -128,7 +143,7 @@ class PolicyAsync(Policy):
     def execute_callback(self, request, response):
 
         """
-        Mock method that pretends to execute the policy.
+        Method that publishes the policy that must be exectuted, there should be a node that reads this message and executes the actual policy.
         It logs the execution and returns the policy name in the response.
 
         :param request: The request to execute the policy.
@@ -146,7 +161,22 @@ class PolicyAsync(Policy):
         return response    
 
 class PolicyBlocking(Policy):
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.PolicyBlocking', service_msg=None, service_name=None, **params):
+    """
+    PolicyBlocking class. Represents a policy that waits for completion of the execution.
+    """    
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', service_msg=None, service_name=None, **params):
+        """
+        Constructor for the PolicyBlocking class.
+
+        :param name: The name of the policy.
+        :type name: str
+        :param class_name: The name of the base Policy class
+        :type class_name: str
+        :param service_msg: Message type of the service that executes the policy
+        :type service_msg: ROS2 message type. Typically cognitive_node_interfaces.srv.Policy
+        :param service_name: Name of the service that executes the policy
+        :type service_name: str
+        """        
         super().__init__(name, class_name, service_msg, service_name, **params)
         self.service_msg=service_msg
         self.service_name=service_name

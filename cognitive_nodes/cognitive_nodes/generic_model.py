@@ -15,7 +15,7 @@ class GenericModel(CognitiveNode):
     """
     def __init__(self, name='model', class_name = 'cognitive_nodes.generic_model.GenericModel', node_type="generic_model", **params):
         """
-        Constructor of the World Model class
+        Constructor of the Generic Model class
 
         Initializes a Generic instance with the given name
 
@@ -150,7 +150,28 @@ class GenericModel(CognitiveNode):
     
 
 class EpisodicBuffer:
+    """
+    Class that creates a buffer of episodes to be used as a STM and learn models. 
+
+    WORK IN PROGRESS
+    """    
     def __init__(self, node:CognitiveNode, episode_topic=None, episode_msg=None, max_size=500, inputs=[], outputs=[], **params) -> None:
+        """
+        Constructor of the EpisodicBuffer class
+
+        :param node: Cognitive node that will contain this episodic buffer
+        :type node: CognitiveNode
+        :param episode_topic: Topic where episodes are read.
+        :type episode_topic: str
+        :param episode_msg: Message type of the episodes topic
+        :type episode_msg: str
+        :param max_size: Maximum size of the episodic buffer, defaults to 500
+        :type max_size: int, optional
+        :param inputs: List to configure inputs (from the attributes of the episode message) considered in the buffer, defaults to []
+        :type inputs: list, optional
+        :param outputs: List to configure outputs (from the attributes of the episode message) considered in the buffer, defaults to []
+        :type outputs: list, optional
+        """        
         self.node=node
         self.inputs=inputs #Fields of the episode msg that are considered inputs (Used for prediction)
         self.outputs=outputs #Fields of the episode msg that are considered outputs (Predicted), or a post calculated value (e.g. Value)
@@ -161,7 +182,13 @@ class EpisodicBuffer:
         self.episode_subscription=node.create_subscription(class_from_classname(episode_msg), episode_topic, self.episode_callback, callback_group=node.cbgroup_activation)
 
     def configure_labels(self, msg):
-        #Creates the label list
+        """
+        Creates the label list
+
+        :param msg: Episode message
+        :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
+        """        
+        
         for io_list, is_input_flag in [(self.inputs, True), (self.outputs, False)]:
             for io in io_list:
                 io_dict = getattr(msg, io)
@@ -172,14 +199,32 @@ class EpisodicBuffer:
                         self.is_input.append(is_input_flag)
 
     def episode_callback(self, msg):
+        """
+        Callback that proccesses the episode messages.
+
+        :param msg: Episode message
+        :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
+        """        
         if not self.labels:
             self.configure_labels(msg)
         self.process_sample(msg)
 
     def get_sample(self, index):
+        """
+        WORK IN PROGRESS: Method to obtain a sample from the buffer
+
+        :param index: Index of the sample to obtain
+        :type index: int
+        """        
         raise NotImplementedError
 
     def process_sample(self, episode):
+        """
+        Adds a new episode to the buffer.
+
+        :param episode: Episode message
+        :type episode: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
+        """        
         #TODO Add method so that data external to the episode can be added here. E.g. Novelty, Value...
         new=[]
         for label in self.labels:
@@ -191,19 +236,47 @@ class EpisodicBuffer:
             
 
     def split_data(self):
+        """
+        Work in progress
+
+        :raises NotImplementedError
+        """        
         raise NotImplementedError
     
     
 class Learner:
+    """
+    Class that wraps around a learning model (Linear Classifier, ANN, SVM...)
+    """    
     def __init__(self, buffer:EpisodicBuffer, **params) -> None:
+        """
+        Constructor of the Learner class
+
+        :param buffer: Episodic buffer to use
+        :type buffer: generic_model.EpisodicBuffer
+        """        
         self.model=None
         self.buffer=buffer
         self.training_data=[]
     
     def train(self):
+        """
+        Placeholder method for training the model
+
+        :raises NotImplementedError
+        """        
         raise NotImplementedError
     
     def predict(self, perception, action):
+        """
+        Placeholder method for predicting an outcome
+
+        :param perception: Perception dictionary
+        :type perception: dict
+        :param action: Candidate action dictionary
+        :type action: dict
+        :raises NotImplementedError
+        """        
         raise NotImplementedError
 
     

@@ -48,6 +48,9 @@ class PNode(CognitiveNode):
         self.data_labels = []
 
     def configure_labels(self): #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
+        """
+        Configure the labels of the space.
+        """  
         self.point_msg:Perception
         i = 0
         for dim in self.point_msg.layout.dim:
@@ -58,6 +61,16 @@ class PNode(CognitiveNode):
             i = i+1            
 
     def send_pnode_space_callback(self, request, response):
+        """
+        Callback that sends the space of the P-Node.
+
+        :param request: Empty request
+        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :param response: Response that contains the space of the P-Node.
+        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :return: Response that contains the space of the P-Node.
+        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        """     
         if self.space:
             if not self.data_labels:
                 self.configure_labels()
@@ -75,6 +88,16 @@ class PNode(CognitiveNode):
         return response
     
     def contains_space_callback(self, request, response):
+        """
+        Callback that checks if the space contains a given space.
+
+        :param request: Request that contains the space to check
+        :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
+        :param response: Response that indicates if the space is contained
+        :type response: cognitive_node_interfaces.srv.ContainsSpace.Response
+        :return: Response that indicates if the space is contained
+        :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
+        """           
         labels=request.labels
         data = request.data  # Flattened list of data values
         confidences = request.confidences  # List of confidence values
@@ -177,6 +200,12 @@ class PNode(CognitiveNode):
         return None
     
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
+        """
+        Adds perceptions to the activation inputs list.
+
+        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}
+        :type node: dict
+        """    
         name=node['name']
         node_type=node['node_type']
         if node_type == "Perception":
@@ -190,6 +219,12 @@ class PNode(CognitiveNode):
 
 
     def read_activation_callback(self, msg: PerceptionStamped):
+        """
+        Callback method that reads a perception and stores it in the activation inputs list.
+
+        :param msg: PerceptionStamped message that contains the perception and its timestamp.
+        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        """        
         perception_dict=perception_msg_to_dict(msg=msg.perception)
         if len(perception_dict)>1:
             self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
@@ -203,18 +238,41 @@ class PNode(CognitiveNode):
             self.get_logger().warn("Empty perception recieved in PNode. No activation calculated")
     
     def add_neighbor_callback(self, request, response):
+        """
+        Extends the default add_neighbor_callback method to process the neighbors and publish the success rate.
+
+        :param request: Add neighbor request.
+        :type request: cognitive_node_interfaces.srv.AddNeighbor.Request
+        :param response: Response with the result of the add neighbor operation.
+        :type response: cognitive_node_interfaces.srv.AddNeighbor.Response
+        :return: Response with the result of the add neighbor operation.
+        :rtype: cognitive_node_interfaces.srv.AddNeighbor.Response
+        """        
         response = super().add_neighbor_callback(request, response)
         self.process_neighbors()
         self.publish_success_rate()
         return response
     
     def delete_neighbor_callback(self, request, response):
+        """
+        Extends the default delete_neighbor_callback method to process the neighbors and publish the success rate.
+
+        :param request: Delete neighbor request.
+        :type request: cognitive_node_interfaces.srv.DeleteNeighbor.Request
+        :param response: Response with the result of the delete neighbor operation.
+        :type response: cognitive_node_interfaces.srv.DeleteNeighbor.Response
+        :return: Response with the result of the delete neighbor operation.
+        :rtype: cognitive_node_interfaces.srv.DeleteNeighbor.Response
+        """       
         response = super().delete_neighbor_callback(request, response)
         self.process_neighbors()
         self.publish_success_rate()
         return response
 
     def process_neighbors(self):
+        """
+        Detects if the P-Node is linked to a Goal node.
+        """        
         goals=[node["name"] for node in self.neighbors if node["node_type"] == "Goal"]
         self.get_logger().debug(f"DEBUG: PNode {self.name} neighbors: {self.neighbors}")
         if len(goals)>0:
@@ -223,6 +281,9 @@ class PNode(CognitiveNode):
             self.goal_linked=False
 
     def publish_success_rate(self):
+        """
+        Publishes the success rate of the P-Node.
+        """        
         msg = SuccessRate()
         msg.node_name=self.name
         msg.node_type=self.node_type
@@ -231,6 +292,12 @@ class PNode(CognitiveNode):
         self.success_publisher.publish(msg)
 
     def update_history(self, confidence):
+        """
+        Updates the history of the P-Node with the new confidence value (point or anti-point).
+
+        :param confidence: Confidence value of the new point or anti-point.
+        :type confidence: int
+        """        
         if confidence>0 and self.space.learnable():
             self.history.appendleft(True)
         else:

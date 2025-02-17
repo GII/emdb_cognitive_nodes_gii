@@ -28,15 +28,18 @@ class CNode(CognitiveNode):
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """
-        Calculate the new activation value by multiplying the activation values of its previous neighbors.
-        By default, with percerception = None, it will multiply the last activations of its neighbors, but
+        Calculate the new activation value by multiplying the activation values of its neighbors.
+        When an activation list is passed, this method will multiply the last perceptions of the neighbors.
+        Otherwise, with percerception = None, it will multiply the last activations of its neighbors, but
         it's possible to use an arbitrary perception, that will propagate to the neighbors, calculating the
         final activation of the CNode for that perception.
 
         :param perception: Arbitrary perception
         :type perception: dict
+        :param activation_list: Dictionary with the activation of multiple nodes. 
+        :type activation_list: dict
         :return: The activation of the CNode
-        :rtype: float
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list==None:
             node_activations = []

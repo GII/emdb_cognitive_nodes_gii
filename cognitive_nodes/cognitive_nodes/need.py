@@ -53,6 +53,12 @@ class Need(CognitiveNode):
         self.need_type = need_type # Need types: [Operational, Cognitive]
 
     def read_evaluation_callback(self, msg:Evaluation):
+        """
+        Callback that reads the evaluation of a Drive node. Used to check if the need is satisfied.
+
+        :param msg: Message containing the evaluation of the Drive node
+        :type msg: cognitive_node_interfaces.msg.Evaluation
+        """        
         drive_name = msg.drive_name
         if drive_name == self.drive_id:
             if Time.from_msg(msg.timestamp).nanoseconds>Time.from_msg(self.drive_evaluation.timestamp).nanoseconds:

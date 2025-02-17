@@ -165,7 +165,25 @@ class Drive(CognitiveNode):
     
 
 class DriveTopicInput(Drive):
+    """
+    Drive class that reads an input topic to obtain its evaluation value.
+    """
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic=None, input_msg=None, min_eval=0.0, **params):
+        """Constructor of the DriveTopicInput class
+
+        Initializes a base class Drive instance and creates a subscriptor to the input topic.
+
+        :param name: The name of the drive instance
+        :type name: str
+        :param class_name: The name of the base Drive class, defaults to "cognitive_nodes.drive.Drive"
+        :type class_name: str, optional
+        :param input_topic: Topic where the input will be published
+        :type input_topic: str
+        :param input_msg: Message type of the input topic
+        :type input_msg: ROS2 Interface
+        :param min_eval: Minimum evaluation value as input reaches 1.0, defaults to 0.0
+        :type min_eval: float, optional
+        """        
         super().__init__(name, class_name, **params)
         self.min_eval=min_eval
         if input_topic:
@@ -174,6 +192,11 @@ class DriveTopicInput(Drive):
             self.input_flag = False
     
     def read_input_callback(self, msg):
+        """Reads a message from the input topic and updates the evaluation and reward obtained.
+
+        :param msg: Input data message
+        :type msg: Configurable (Typically std_msgs.msg.Float32)
+        """        
         self.input = msg.data
         self.evaluate()
         self.calculate_reward()
@@ -181,6 +204,8 @@ class DriveTopicInput(Drive):
         self.input_flag = True
 
     def calculate_reward(self):
+        """Calculates the reward depending if the evaluation value increases or decreases.
+        """        
         if self.evaluation.evaluation < self.old_evaluation.evaluation:
             self.get_logger().info(f"REWARD DETECTED. Drive: {self.name}, eval: {self.evaluation.evaluation}, old_eval: {self.old_evaluation.evaluation}")
             self.reward = 1.0
@@ -189,9 +214,17 @@ class DriveTopicInput(Drive):
             self.reward = 0.0
 
     def get_reward(self):
+        """Returns the latest reward obtained.
+
+        :return: Reward and timestamp.
+        :rtype: Tuple (float, builtin_interfaces.msg.Time)
+        """        
         return self.reward, self.reward_timestamp
 
     async def publish_activation_callback(self): #Timed publish of the activation value
+        """
+        Timed publish of the activation value. This method will calculate the activation based on the evaluation of the drive and the activation of its neighbors, and then publish it in the corresponding topic.
+        """   
         if self.activation_topic:
             self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
             updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
@@ -208,7 +241,7 @@ class DriveTopicInput(Drive):
 class DriveExponential(DriveTopicInput):
     def evaluate(self, perception=None):
         """
-        Evaluates the drive value according to the 
+        Evaluates the drive value according to an exponential function
 
         :param perception: The given normalized perception
         :type perception: dict

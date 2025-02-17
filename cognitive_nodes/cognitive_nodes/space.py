@@ -83,6 +83,14 @@ class PointBasedSpace(Space):
     #TODO This method assumes that there is only one element per sensor. See configure_labels in goal.py
     @staticmethod
     def create_point_from_labels(labels):
+        """
+        Generates a point from a list of labels.
+
+        :param labels: List of labels of the space.
+        :type labels: list
+        :return: Space point.
+        :rtype: dict
+        """        
         point={}
         for label in labels:
             elements=label.split("-")

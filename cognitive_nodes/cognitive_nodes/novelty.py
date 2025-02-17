@@ -18,16 +18,48 @@ from cognitive_node_interfaces.srv import Execute, Predict
 
 
 class DriveNovelty(Drive):
+    """
+    DriveNovelty Class, represents a drive to explore the environment. 
+    """    
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
+        """
+        Constructor of the DriveNovelty class.
+
+        :param name: The name of the Drive instance
+        :type name: str
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive"
+        :type class_name: str
+        """        
         super().__init__(name, class_name, **params)
 
     def evaluate(self, perception=None):
+        """
+        Evaluation that always returns 1.0, as the drive is always .
+
+        :param perception: Unused perception, defaults to None
+        :type perception: dict/NoneType, optional
+        :return: Evaluation of the Drive
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """        
         self.evaluation.evaluation = 1.0
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
     
 class PolicyNovelty(Policy):
+    """
+    PolicyNovelty Class, represents a policy that selects a random policy from the LTM and executes it.
+    """    
     def __init__(self, name='policy_novelty', exclude_list=[], ltm_id=None, **params):
+        """
+        Constructor of the PolicyNovelty class.
+
+        :param name: Name of the node
+        :type name: str
+        :param exclude_list: List of policies that should not be selected for executions, defaults to []
+        :type exclude_list: list, optional
+        :param ltm_id: Id of the LTM that includes the nodes
+        :type ltm_id: str
+        """        
         super().__init__(name, **params)
         self.policies = PolicyQueue()
         self.LTM_id = ltm_id
@@ -39,6 +71,9 @@ class PolicyNovelty(Policy):
         
 
     def setup(self):
+        """
+        Setup method that configures the PolicyNovelty node.
+        """        
         ltm = self.request_ltm()
         random_seed = getattr(self, 'random_seed', None)
         self.rng = np.random.default_rng(random_seed)
@@ -46,6 +81,12 @@ class PolicyNovelty(Policy):
         self.get_logger().info("Configured Novelty Policy.")
 
     def request_ltm(self):
+        """
+        Requests data from the LTM.
+
+        :return: LTM dump
+        :rtype: dict
+        """        
         # Call get_node service from LTM
         service_name = "/" + str(self.LTM_id) + "/get_node"
         request = ""
@@ -55,11 +96,23 @@ class PolicyNovelty(Policy):
         return ltm
     
     def ltm_change_callback(self, msg):
+        """
+        Callback that reads the LTM change and updates the policies accordingly.
+
+        :param msg: LTM change message
+        :type msg: std_msgs.msg.String
+        """        
         self.get_logger().debug("Reading LTM Change...")
         ltm = yaml.safe_load(msg.data)
         self.configure_policies(ltm)
 
     def configure_policies(self, ltm_cache):
+        """
+        Creates a list of eligible policies to be executed and shuffles it.
+
+        :param ltm_cache: LTM cache
+        :type ltm_cache: dict
+        """        
         policies = list(ltm_cache["Policy"].keys())
         self.get_logger().info(f"Configuring Policies: {policies}")
         changes = self.policies.merge(policies)
@@ -71,6 +124,12 @@ class PolicyNovelty(Policy):
         self.get_logger().info(f"Configured policies: {self.policies.queue}")
 
     def select_policy(self):
+        """
+        Selects a policy from the queue. It begins by selecting the front policy and rotates the queue, once all the queue has been iterated, the policies are shuffled.
+
+        :return: Selected policy
+        :rtype: str
+        """        
         policy=self.policies.select_policy()
         self.counter+=1
 
@@ -82,6 +141,16 @@ class PolicyNovelty(Policy):
         return policy
 
     async def execute_callback(self, request, response):
+        """
+        Callback that selects a policy and then executes it.
+
+        :param request: Execution request
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Response of the execution. Includes the name of the selected policy
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Response of the execution
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
+        """        
         policy = self.select_policy()
         if policy not in self.node_clients:
             self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
@@ -92,6 +161,9 @@ class PolicyNovelty(Policy):
     
 
 class PolicyQueue:
+    """
+    PolicyQueue Class, wrapper over the builtin deque object to create a policy queue.
+    """    
     def __init__(self):
         self.queue = deque()
 
@@ -149,16 +221,31 @@ class PolicyQueue:
     
 
 class PolicyRandomAction(PolicyBlocking):
+    """
+    WORK IN PROGRESS
+
+    PolicyRandomAction Class, represents a policy that executes a random low level action.
+    """    
     def __init__(self, name='policy_random_action', actuation_config=None, **params):
+        """
+        Constructor of the PolicyRandomAction class.
+
+        :param name: Name of the policy node.
+        :type name: str
+        :param actuation_config: Dictionary with the existing actuators and its data type, defaults to None
+        :type actuation_config: dict
+        """        
         super().__init__(name, **params)
         self.actuation_config=actuation_config
         self.actuation={} #All fields are normalized 0 to 1
         self.setup()
 
-    
-
     def setup(self):
-        self.world_model_client=ServiceClientAsync(self, Predict, "/world_model/GRIPPER_AND_LOW_FRICTION/predict", self.cbgroup_client)
+        """
+        Setup method that configures the PolicyRandomAction node.
+        :raises TypeError: Unknown type assigned to an actuator.
+        """        
+        self.world_model_client=ServiceClientAsync(self, Predict, "/world_model/GRIPPER_AND_LOW_FRICTION/predict", self.cbgroup_client) #TODO: Change world model service to a parameter
         random_seed = getattr(self, 'random_seed', None)
         self.rng = np.random.default_rng(random_seed)
         for actuator in self.actuation_config:
@@ -172,6 +259,11 @@ class PolicyRandomAction(PolicyBlocking):
                     raise TypeError("Type assigned to actuator not recognized")
     
     def randomize_actuation(self):
+        """
+        Randomizes the actuation values.
+
+        :raises TypeError: Unknown type assigned to an actuator.
+        """        
         for actuator in self.actuation:
             for param in self.actuation[actuator][0]:
                 if self.actuation_config[actuator][param]["type"]=="float":
@@ -185,6 +277,16 @@ class PolicyRandomAction(PolicyBlocking):
 
     
     def denormalize_actuation(self, actuation, actuation_config):
+        """
+        Denormalizes the actuation values.
+
+        :param actuation: Actuation values to denormalize
+        :type actuation: dict
+        :param actuation_config: Actuation configuration
+        :type actuation_config: dict
+        :return: Denormalized actuation
+        :rtype: dict
+        """        
         act=deepcopy(actuation)
         for actuator in act:
             for param in act[actuator][0]:

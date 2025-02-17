@@ -176,7 +176,11 @@ class Goal(CognitiveNode):
 
 
 class GoalObjectInBoxStandalone(Goal):
-    """Goal representing the desire of putting an object in a box."""
+    """
+    Goal representing the desire of putting an object in a box.
+    
+    --DEPRECATED, prefer the use of GoalMotiven class--
+    """
 
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, robot_service='simulator', normalize_data=None, **params):
         super().__init__(name, class_name, **params)
@@ -572,7 +576,26 @@ class GoalObjectInBoxStandalone(Goal):
         return raw
     
 class GoalReadPublishedReward(Goal):
+    """
+    Goal that reads the reward obtained from a topic.
+
+    --DEPRECATED, prefer the use of GoalMotiven class--
+    """
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', default_topic=None, default_msg=None, **params):
+        """
+        Constructor of the GoalReadPublishedReward class
+
+        :param name: Name of the node
+        :type name: str
+        :param data: _description_, defaults to None
+        :type data: _type_, optional
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
+        :type class_name: str, optional
+        :param default_topic: Topic from where the reward is read
+        :type default_topic: str
+        :param default_msg: Message type of the reward message
+        :type default_msg: ROS Message (Typically std_msgs.Float32)
+        """        
         super().__init__(name, class_name, **params)
         self.reward_cbg=MutuallyExclusiveCallbackGroup()
         msg_type=class_from_classname(class_name=default_msg)
@@ -602,10 +625,25 @@ class GoalReadPublishedReward(Goal):
 
 
     def reward_topic_callback(self, msg):
+        """
+        Callback that reads the reward message. Sets a flag that indicates that reward is updated.
+
+        :param msg: Reward message
+        :type msg: ROS Message (Typically std_msgs.Float32)
+        """        
         self.reward=msg.data
         self.flag.set()
 
     def get_reward(self, old_perception=None, perception=None):
+        """_summary_
+
+        :param old_perception: Unused perception, defaults to None
+        :type old_perception: NoneType, optional
+        :param perception: Unused perception, defaults to None
+        :type perception: NoneType, optional
+        :return: Obtained reward
+        :rtype: float
+        """        
         self.flag.wait()
         reward=self.reward
         self.flag.clear()
@@ -641,7 +679,18 @@ class GoalReadPublishedReward(Goal):
         return self.activation
     
 class GoalMotiven(Goal):
+    """
+    Class that implements a Goal that aims at minimizing a drive.
+    """    
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
+        """
+        Constructor of the GoalActivatePNode class.
+
+        :param name: Name of the node
+        :type name: str
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
+        :type class_name: str, optional
+        """        
         super().__init__(name, class_name, **params)
         self.drive_inputs = {}
         self.old_drive_inputs = {}
@@ -651,11 +700,24 @@ class GoalMotiven(Goal):
     
 
     def configure_drive_inputs(self, neighbors):
+        """
+        Reads the neighbors list of the goal and configures inputs for each drive.
+
+        :param neighbors: Dictionary with the information of the node [{'name': <name>, 'node_type': <node_type>}, .... ]
+        :type neighbors: dict
+        """        
         drive_list = [node for node in neighbors if node['node_type']== 'Drive']
         for drive in drive_list:
             self.create_drive_input(drive)
     
     def create_drive_input(self, drive: dict):
+        """
+        Creates a new drive input if it does not already exist.
+
+        :param drive: A dictionary containing the drive's name and node type.
+        :type drive: dict
+        :raises KeyError: If the 'name' or 'node_type' key is missing in the drive dictionary.
+        """        
         name = drive['name']
         node_type = drive['node_type']
         if name not in self.drive_inputs:
@@ -673,12 +735,28 @@ class GoalMotiven(Goal):
             self.get_logger().error(f'Tried to add {name} to drive inputs more than once')
 
     def delete_drive_input(self, drive: dict):
+        """
+        Deletes the drive input and its associated subscription.
+
+        :param drive: The drive input to be deleted.
+        :type drive: dict
+        """        
         name = drive['name']
         if name in self.drive_inputs:
             self.destroy_subscription(self.drive_inputs[name]['subscription'])
             self.activation_inputs.pop(name)
 
     def add_neighbor_callback(self, request, response):
+        """
+        This method extends the base add_neighbor_callback by handling the addition of a Drive node.
+
+        :param request: The request that contains the neighbor info
+        :type request: cognitive_node_interfaces.srv.AddNeighbor_Request
+        :param response: The response that indicates if the neighbor was added
+        :type response: cognitive_node_interfaces.srv.AddNeighbor_Response
+        :return: The response that indicates if the neighbor was added
+        :rtype: cognitive_node_interfaces.srv.AddNeighbor_Response
+        """        
         node_name = request.neighbor_name
         node_type = request.neighbor_type
         response = super().add_neighbor_callback(request, response)
@@ -689,6 +767,17 @@ class GoalMotiven(Goal):
         return response
 
     def delete_neighbor_callback(self, request, response):
+        """
+        This method extends the base delete_neighbor_callback by handling the deletion of a Drive node.
+
+        :param request: The request that contains the neighbor info
+        :type request: cognitive_node_interfaces.srv.DeleteNeighbor_Request
+        :param response: The response that indicates if the neighbor was deleted
+        :type response: cognitive_node_interfaces.srv.DeleteNeighbor_Response
+        :return: The response that indicates if the neighbor was deleted
+        :rtype: cognitive_node_interfaces.srv.DeleteNeighbor_Response
+        """
+
         node_name = request.neighbor_name
         node_type = request.neighbor_type
         neighbor_to_delete = {'name':node_name, 'node_type':node_type}
@@ -707,6 +796,12 @@ class GoalMotiven(Goal):
         return response    
 
     def read_evaluation_callback(self, msg: Evaluation):
+        """
+        Callback that reads the evaluation of a Drive node. It updates the reward of the goal.
+
+        :param msg: Message containing the evaluation of the Drive node
+        :type msg: cognitive_node_interfaces.msg.Evaluation
+        """        
         drive_name = msg.drive_name
         if drive_name in self.drive_inputs:
             if Time.from_msg(msg.timestamp).nanoseconds>Time.from_msg(self.drive_inputs[drive_name]['data'].timestamp).nanoseconds:
@@ -719,6 +814,14 @@ class GoalMotiven(Goal):
                 self.get_logger().warn(f'Detected jump back in time, evaluation of Drive: {drive_name}')
     
     def calculate_activation(self, perception, activation_list):
+        """
+        Calculates the activation of the goal based on the activations of the neihboring drives and goals.
+
+        :param perception: Unused perception.
+        :type perception: dict
+        :param activation_list: List of activations of the neighboring nodes.
+        :type activation_list: list
+        """        
         goal_activations = {}
         goal_timestamps = {}
         for node in activation_list.keys():
@@ -737,9 +840,13 @@ class GoalMotiven(Goal):
             self.activation.activation = 0.0
             self.activation.timestamp=self.get_clock().now().to_msg()
             
-
-
     def calculate_reward(self, drive_name):
+        """
+        Calculates the reward of the goal based on the evaluation of the Drive node.
+
+        :param drive_name: Name of the drive node.
+        :type drive_name: str
+        """        
         # Remember the case in which one drive reduces its evaluation and another increases
         if self.drive_inputs[drive_name]['data'].evaluation < self.old_drive_inputs[drive_name]['data'].evaluation:
             self.get_logger().info(f"REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
@@ -749,13 +856,46 @@ class GoalMotiven(Goal):
             self.reward = 0.0
 
     def get_reward(self, old_perception=None, perception=None):
+        """
+        Returns the reward of the goal.
+
+        :param old_perception: Unused perception, defaults to None
+        :type old_perception: NoneType, optional
+        :param perception: Unused perception, defaults to None
+        :type perception: NoneType, optional
+        :return: Reward of the goal and its timestamp.
+        :rtype: tuple (float, builtin_interfaces.msg.Time)
+        """        
         self.get_logger().info(f"Calculating reward: {self.reward}, Drives: {self.drive_inputs}")
         reward = self.reward
         self.reward = 0.0
         return reward, self.reward_timestamp
 
 class GoalLearnedSpace(GoalMotiven):
+    """
+    Class that extends the functionality of the GoalMotiven class by adding a space to store goal state space.
+    """    
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, **params):
+        """
+        Constructor of the GoalLearnedSpace class.
+
+        :param name: Name of the node
+        :type name: str
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
+        :type class_name: str, optional
+        :param space_class: Class of the space.
+        :type space_class: str
+        :param space: Provided space object, defaults to None
+        :type space: space.Space, optional
+        :param history_size: Samples to consider for confidence calculation, defaults to 50
+        :type history_size: int, optional
+        :param min_confidence: Minimum confidence to consider Goal as learned, defaults to 0.85
+        :type min_confidence: float, optional
+        :param ltm_id: Id of the LTM that includes the nodes.
+        :type ltm_id: str
+        :param perception: Perception to add when initializing space, defaults to None
+        :type perception: dict, optional
+        """        
         super().__init__(name, class_name, **params)
         if space_class:
             self.spaces = [space if space else class_from_classname(
@@ -782,6 +922,9 @@ class GoalLearnedSpace(GoalMotiven):
 
     #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
     def configure_labels(self):
+        """
+        Configure the labels of the space.
+        """        
         if self.point_msg:
             self.point_msg:Perception
             i = 0
@@ -793,6 +936,16 @@ class GoalLearnedSpace(GoalMotiven):
                 i = i+1
 
     def send_goal_space_callback(self, request, response):
+        """
+        Callback that sends the space of the goal.
+
+        :param request: Empty request
+        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :param response: Response that contains the space of the goal.
+        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :return: Response that contains the space of the goal.
+        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        """        
         if self.space:
             if not self.data_labels:
                 self.configure_labels()
@@ -811,6 +964,16 @@ class GoalLearnedSpace(GoalMotiven):
         return response
 
     def contains_space_callback(self, request, response):
+        """
+        Callback that checks if the space contains a given space.
+
+        :param request: Request that contains the space to check
+        :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
+        :param response: Response that indicates if the space is contained
+        :type response: cognitive_node_interfaces.srv.ContainsSpace.Response
+        :return: Response that indicates if the space is contained
+        :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
+        """        
         labels=request.labels
         data = request.data  # Flattened list of data values
         confidences = request.confidences  # List of confidence values
@@ -842,6 +1005,16 @@ class GoalLearnedSpace(GoalMotiven):
         self.added_point = True
 
     async def get_reward(self, old_perception=None, perception=None):
+        """
+        Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
+
+        :param old_perception: First perception, defaults to None
+        :type old_perception: dict, optional
+        :param perception: Second perception, defaults to None
+        :type perception: dict, optional
+        :return: The reward obtained and its timestamp
+        :rtype: Tuple (float, builtin_interfaces.msg.Time)
+        """        
         if not compare_perceptions(old_perception, perception):
             if perception:
                 expected_reward=self.get_expected_reward(perception)
@@ -866,6 +1039,14 @@ class GoalLearnedSpace(GoalMotiven):
         return reward, timestamp
     
     def get_expected_reward(self, perception:dict):
+        """
+        Calculate the expected reward of the goal based on the perception and the goal state.
+
+        :param perception: Perception to evaluate
+        :type perception: dict
+        :return: Expected reward
+        :rtype: float
+        """        
         reward_list = []
         perceptions = separate_perceptions(perception)
         for perception_line in perceptions:
@@ -880,6 +1061,16 @@ class GoalLearnedSpace(GoalMotiven):
 
 
     def update_space(self, reward, expected_reward, perception):
+        """
+        Update the space of the goal based on the reward obtained and the expected reward. Adds point or antipoint to the space, updates the confidence score of the goal.
+
+        :param reward: Real reward (from a Drive) obtained.
+        :type reward: float
+        :param expected_reward: Reward expected from the state space of the goal.
+        :type expected_reward: float
+        :param perception: Perception that corresponds to the reward obtained.
+        :type perception: dict
+        """        
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
             self.add_point(perception, 1.0)
@@ -903,6 +1094,9 @@ class GoalLearnedSpace(GoalMotiven):
         self.publish_success_rate()
 
     def publish_success_rate(self):
+        """
+        Publish the success rate of the goal.
+        """        
         msg = SuccessRate()
         msg.node_name=self.name
         msg.node_type=self.node_type
@@ -911,12 +1105,24 @@ class GoalLearnedSpace(GoalMotiven):
         self.success_publisher.publish(msg)
 
     def linked_drive(self):
+        """
+        Check if there is a drived linked to the goal.
+
+        :return: Value that indicates if there is a linked drive
+        :rtype: bool
+        """        
         for neighbor in self.neighbors:
             if neighbor["node_type"]=="Drive":
                 return True
         return False
 
     def get_drive(self):
+        """
+        Returns the name of the linked drive.
+
+        :return: Drive name
+        :rtype: str
+        """        
         for neighbor in self.neighbors:
             if neighbor["node_type"]=="Drive":
                 return neighbor["name"]         
