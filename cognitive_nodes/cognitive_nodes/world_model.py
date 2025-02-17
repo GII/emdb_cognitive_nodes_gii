@@ -34,18 +34,56 @@ class WorldModel(GenericModel):
 
 
 class Sim2DWorldModel(WorldModel):
-    
+    """
+    Sim2DWorldModel class: A fixed world model of a 2D simulator. It uses the SimpleScenario simulator to predict the next perception.
+    """    
     def __init__(self, name='world_model', actuation_config=None, perception_config=None, class_name='cognitive_nodes.world_model.WorldModel', **params):
+        """
+        Constructor of the Sim2DWorldModel class
+
+        :param name: The name of the World Model instance
+        :type name: str
+        :param actuation_config: Dictionary with the parameters of the actuation
+        :type actuation_config: dict
+        :param perception_config: Dictionary with the parameters of the perception
+        :type perception_config: dict
+        :param class_name: Name of the base WorldModel class, defaults to 'cognitive_nodes.world_model.WorldModel'
+        :type class_name: str, optional
+        """        
         super().__init__(name, class_name, **params)
         self.learner=Sim2D(actuation_config, perception_config, self.get_logger())
     
     def predict(self, perception, action):
+        """
+        Predicts the next perception according to a perception and an action
+
+        :param perception: The start perception
+        :type perception: cognitive_node_interfaces.msg.Perception
+        :param action: The action performed
+        :type action: cognitive_node_interfaces.msg.Actuation
+        :return: The predicted perception
+        :rtype: cognitive_node_interfaces.msg.Perception
+        """        
         prediction=self.learner.predict(perception, action)
         return prediction
 
     
 class Sim2D(Learner):
+    """
+    Sim2D class: A class that mimics a model that learned the dynamics of a 2D simulator.
+    Actually it uses the same simulator as the environment to predict the next perception.
+    """    
     def __init__(self, actuation_config, perception_config, logger:RcutilsLogger, **params):
+        """
+        Constructor of the Sim2D class
+
+        :param actuation_config: Dictionary with the parameters of the actuation
+        :type actuation_config: dict
+        :param perception_config: Dictionary with the parameters of the perception
+        :type perception_config: dict
+        :param logger: Logger object from the parent node
+        :type logger: RcutilsLogger
+        """        
         super().__init__(None, **params)
         self.model=SimpleScenario(visualize=False)
         self.actuation_config=actuation_config
@@ -53,7 +91,17 @@ class Sim2D(Learner):
         self.logger=logger
 
     def predict(self, perception: Perception, action: Actuation) -> Perception:  
-        """Predicts the next perception according to the actual perception and an action"""
+        """
+        Predicts the next perception according to a perception and an action
+
+        :param perception: The start perception
+        :type perception: cognitive_node_interfaces.msg.Perception
+        :param action: The action performed
+        :type action: cognitive_node_interfaces.msg.Actuation
+        :return: The predicted perception
+        :rtype: cognitive_node_interfaces.msg.Perception
+        """        
+        """"""
         perc_dict=self.denormalize(perception_msg_to_dict(perception), self.perception_config)
         act_dict=self.denormalize(actuation_msg_to_dict(action), self.actuation_config)
         
@@ -104,6 +152,16 @@ class Sim2D(Learner):
         return perception_dict_to_msg(self.normalize(perc_dict, self.perception_config))
 
     def denormalize(self, input_dict, config):
+        """
+        Denormalize the input dictionary according to the configuration
+
+        :param input_dict: Perception or actuation dictionary
+        :type input_dict: dict
+        :param config: Configuration of the perception or actuation bounds
+        :type config: dict
+        :return: Denormalized dictionary
+        :rtype: dict
+        """        
         out=deepcopy(input_dict)
         for dim in out:
             for param in out[dim][0]:
@@ -114,6 +172,16 @@ class Sim2D(Learner):
         return out
 
     def normalize(self, input_dict, config):
+        """
+        Normalize the input dictionary according to the configuration
+
+        :param input_dict: Perception or actuation dictionary
+        :type input_dict: dict
+        :param config: Configuration of the perception or actuation bounds
+        :type config: dict
+        :return: Normalized dictionary
+        :rtype: dict
+        """        
         out=deepcopy(input_dict)
         for dim in out:
             for param in out[dim][0]:

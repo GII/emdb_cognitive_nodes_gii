@@ -11,7 +11,25 @@ from cognitive_node_interfaces.srv import ContainsSpace, SendSpace, GetKnowledge
 
 
 class ProspectionDrive(Drive, LTMSubscription):
+    """
+    ProspectionDrive class. Represents a drive that searches for new knowledge using forward prospection on the LTM nodes.
+    """    
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_pnode_rate=0.84, min_goal_rate=0.84,**params):
+        """
+        Constructor of the ProspectionDrive class.
+
+        :param name: The name of the Drive instance
+        :type name: str
+        :param class_name: The name of the base Drive class
+        :type class_name: str
+        :param ltm_id: Id of the LTM that includes the nodes.
+        :type ltm_id: str
+        :param min_pnode_rate: Minimum confidence rate of P-Nodes to be considered, defaults to 0.84
+        :type min_pnode_rate: float
+        :param min_goal_rate: Minimum confidence rate of Goals to be considered, defaults to 0.84
+        :type min_goal_rate: float
+        :raises Exception: Raises an exception if no LTM name is provided
+        """        
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
@@ -25,6 +43,12 @@ class ProspectionDrive(Drive, LTMSubscription):
             name) + '/get_knowledge', self.get_knowledge_callback, callback_group=self.cbgroup_server)
     
     def configure_prospection_suscriptor(self, ltm):
+        """
+        Setup of the ProspectionDrive class. Subscribes to the LTM nodes and initializes the dictionaries for the P-Nodes, Goals, and knowledge found.
+
+        :param ltm: Id of the LTM to subscribe to.
+        :type ltm: str
+        """        
         self.configure_ltm_subscription(ltm)
         self.pnode_subscriptions = {}
         self.goal_subscriptions = {}
@@ -36,6 +60,12 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.new_knowledge=False
 
     def read_ltm(self, ltm_dump):
+        """
+        Reads a LTM dump and creates the appropriate subscribers for the P-Nodes and Goals.
+
+        :param ltm_dump: The LTM dump to read.
+        :type ltm_dump: dict
+        """        
         pnodes = ltm_dump["PNode"]
         goals = ltm_dump["Goal"]
         self.goals_dict = goals
@@ -83,6 +113,13 @@ class ProspectionDrive(Drive, LTMSubscription):
         return not current_pnodes == new_pnodes
     
     async def success_callback(self, msg: SuccessRate):
+        """
+        Callback that reads the success rate of a P-Node or a Goal
+
+        :param msg: Message from P-Node or Goal
+        :type msg: cognitive_node_interfaces.msg.SuccessRate
+        :raises RuntimeError: If message recieved is not from a P-Node or Goal
+        """        
         node_name=msg.node_name
         node_type=msg.node_type
         success_rate=msg.success_rate
@@ -93,12 +130,16 @@ class ProspectionDrive(Drive, LTMSubscription):
             learned_list=self.learned_goals
             threshold=self.min_goal_rate
         else:
-            raise RuntimeError("Expected node type 'Pnode' or 'Goal'")
+            raise RuntimeError("Expected node type 'P-Node' or 'Goal'")
         if success_rate>threshold and node_name not in learned_list:
             learned_list.append(node_name)
             await self.do_prospection()
 
     async def do_prospection(self):
+        """
+        This method executes the prospection process. 
+        It iterates over the learned goals and P-Nodes to find relationships between them.
+        """        
         self.get_logger().info(f"DEBUG - Performing prospection...")
         for goal in self.learned_goals:
             for pnode in self.learned_pnodes:
@@ -197,6 +238,14 @@ class ProspectionDrive(Drive, LTMSubscription):
         return False
     
     def get_neighbor_names(self, goal_name):
+        """
+        This method returns the names of the neighbors of a goal.
+
+        :param goal_name: Name of the goal
+        :type goal_name: str
+        :return: List of neighbor names
+        :rtype: list
+        """        
         neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
         names = [neighbor["name"] for neighbor in neighbors]
         return names
@@ -216,6 +265,16 @@ class ProspectionDrive(Drive, LTMSubscription):
         return self.traverse_neighbors(upstream_goal, downstream_goal, visited)
     
     def has_neighbor(self, goal_name, neighbor_name):
+        """
+        Checks if a goal has a neighbor.
+
+        :param goal_name: Name of the goal to check
+        :type goal_name: str
+        :param neighbor_name: Name of the neighbor to search
+        :type neighbor_name: str
+        :return: Whether or not the goal has that neighbor
+        :rtype: bool
+        """        
         neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
         for neighbor in neighbors:
             # Check if the neighbor exists
@@ -225,6 +284,16 @@ class ProspectionDrive(Drive, LTMSubscription):
 
 
     def get_knowledge_callback(self, request, response):
+        """
+        Callback that returns the knowledge found
+
+        :param request: Empty request
+        :type request: cognitive_node_interfaces.srv.GetKnowledge.Request
+        :param response: Response with the found knowledge
+        :type response: cognitive_node_interfaces.srv.GetKnowledge.Response
+        :return: Response with the found knowledge
+        :rtype: cognitive_node_interfaces.srv.GetKnowledge.Response
+        """        
         downstream_goals=[]
         upstream_goals=[]
         #Creates a flattened list of the found_knowledge dictionary
@@ -240,11 +309,33 @@ class ProspectionDrive(Drive, LTMSubscription):
         return response
             
     def evaluate(self, perception=None):
+        """
+        Evaluates the drive depending if there is newly discovered knowledge.
+
+        :param perception: Unused perception
+        :type perception: dict/NoneType
+        """
         self.evaluation.evaluation=float(self.new_knowledge)
         self.evaluation.timestamp=self.get_clock().now().to_msg()
 
 class PolicyProspection(Policy):
+    """
+    PolicyProspection class. Implements a policy that links goals to P-Nodes based on prospection.
+    """    
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', ltm_id=None, drive_name=None, **params):
+        """
+        Constructor of the PolicyProspection class.
+
+        :param name: Name of the node
+        :type name: str
+        :param class_name: The name of the base Policy class, defaults to 'cognitive_nodes.policy.Policy'
+        :type class_name: str, optional
+        :param ltm_id: Id of the LTM that includes the nodes.
+        :type ltm_id: str
+        :param drive_name: Name of the prospection drive to use.
+        :type drive_name: str
+        :raises RuntimeError: Raises an exception if no LTM or prospection Drive name are provided
+        """        
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise RuntimeError('No LTM input was provided.')
@@ -258,6 +349,17 @@ class PolicyProspection(Policy):
         self.knowledge_client = ServiceClientAsync(self, GetKnowledge, f"drive/{self.drive}/get_knowledge", callback_group=self.cbgroup_client)
 
     async def execute_callback(self, request, response):
+        """
+        Callback that executes the policy.
+        It sends a request to the prospection drive to get the knowledge found. Then, it links goals of the relations found.
+
+        :param request: _description_
+        :type request: _type_
+        :param response: _description_
+        :type response: _type_
+        :return: _description_
+        :rtype: _type_
+        """        
         self.get_logger().info('Executing policy: ' + self.name + '...')
         knowledge_msg = await self.knowledge_client.send_request_async()
         for ds_goal, us_goal in zip(knowledge_msg.downstream_goals, knowledge_msg.upstream_goals):
