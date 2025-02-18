@@ -24,30 +24,44 @@ class CNode(CognitiveNode):
         :type str
         """
         super().__init__(name, class_name, **params)
+        self.configure_activation_inputs(self.neighbors)
 
-    async def calculate_activation(self, perception=None):
+    async def calculate_activation(self, perception=None, activation_list=None):
         """
-        Calculate the new activation value by multiplying the activation values of its previous neighbors.
-        By default, with percerception = None, it will multiply the last activations of its neighbots, but
+        Calculate the new activation value by multiplying the activation values of its neighbors.
+        When an activation list is passed, this method will multiply the last perceptions of the neighbors.
+        Otherwise, with percerception = None, it will multiply the last activations of its neighbors, but
         it's possible to use an arbitrary perception, that will propagate to the neighbors, calculating the
         final activation of the CNode for that perception.
 
-        :param perception: Arbitraty perception
+        :param perception: Arbitrary perception
         :type perception: dict
+        :param activation_list: Dictionary with the activation of multiple nodes. 
+        :type activation_list: dict
         :return: The activation of the CNode
-        :rtype: float
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
-        node_activations = []
-        neighbors_name = [
-            neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"
-        ]
-        for name in neighbors_name:
-            perception_msg = perception_dict_to_msg(perception)
-            service_name = "cognitive_node/" + str(name) + "/get_activation"
-            if not service_name in self.node_clients:
-                self.node_clients[service_name] = ServiceClientAsync(
-                    self, GetActivation, service_name, self.cbgroup_client
+        if activation_list==None:
+            node_activations = []
+            neighbors_name = [
+                neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"
+            ]
+            for name in neighbors_name:
+                perception_msg = perception_dict_to_msg(perception)
+                service_name = "cognitive_node/" + str(name) + "/get_activation"
+                if not service_name in self.node_clients:
+                    self.node_clients[service_name] = ServiceClientAsync(
+                        self, GetActivation, service_name, self.cbgroup_client
+                    )
+                activation = await self.node_clients[service_name].send_request_async(
+                    perception=perception_msg
                 )
+                self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}")
+                node_activations.append(activation.activation)
+            self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}")
+            activation_list = numpy.prod(node_activations)
+            self.activation.activation = float(numpy.max(activation_list))
+            self.activation.timestamp=self.get_clock().now().to_msg()
             activation = await self.node_clients[service_name].send_request_async(
                 perception=perception_msg
             )
@@ -56,13 +70,12 @@ class CNode(CognitiveNode):
         self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}.")
         activation_list = numpy.prod(node_activations)
         self.activation = numpy.max(activation_list)
-        # TODO: Selection of the perception that have the max CNode or PNode activation (if it exists), as in the old MDB
 
-        self.get_logger().debug(
-            self.node_type + " activation for " + self.name + " = " + str(self.activation)
-        )
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+            self.get_logger().debug(
+                self.node_type + " activation for " + self.name + " = " + str(self.activation)
+            )
+        else:
+            self.calculate_activation_prod(activation_list)
 
         return self.activation
 

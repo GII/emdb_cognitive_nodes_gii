@@ -5,6 +5,9 @@ import pandas as pd
 from sklearn import svm
 import tensorflow as tf
 from rclpy.node import Node
+from rclpy.logging import get_logger
+
+from core.utils import separate_perceptions
 
 
 class Space(object):
@@ -18,12 +21,14 @@ class Space(object):
         """
         self.ident = ident
         self.parent_space = None
+        self.logger = get_logger("space_" + str(ident))
+        self.logger.info(f"CREATING SPACE: {ident}")
 
 
 class PointBasedSpace(Space):
     """A state space based on points."""
 
-    def __init__(self, size=5000, **kwargs):
+    def __init__(self, size=15000, **kwargs):
         """
         Init attributes when a new object is created
 
@@ -36,6 +41,68 @@ class PointBasedSpace(Space):
         self.members = []
         self.memberships = []
         super().__init__(**kwargs)
+
+    def populate_space(self, labels, members, memberships):
+        """
+        Populate the structured array and memberships list based on the given parameters.
+
+        :param point: A perception dictionary describing the structure of the space.
+        :type point: dict
+        :param members: A flattened list of data with size n_dims * n_data.
+        :type members: list
+        :param memberships: A list of membership data with size n_data.
+        :type memberships: list
+        :raises ValueError: If the size of memberships does not match the calculated size of the space.
+        """
+        if self.size != 0:
+            raise RuntimeError("Only an empty space can be populated.")
+
+        # Ensure the size matches the expected dimensions
+        if len(memberships) != self.real_size:
+            raise ValueError("Size of memberships does not match the space's real size.")
+
+        # Create a structured array using the provided point structure
+        point=self.create_point_from_labels(labels)
+        self.members = self.create_structured_array(point, None, len(memberships))
+        
+        # Populate the structured array with the members' data
+        n_dims = len(self.members.dtype.names)
+        n_data = len(members) // n_dims
+
+        if n_data != len(memberships):
+            raise ValueError("Mismatch between members and memberships size.")
+
+        for i in range(n_data):
+            member_data = members[i * n_dims:(i + 1) * n_dims]
+            self.members[i] = tuple(member_data)
+
+        # Assign memberships
+        self.memberships = numpy.array(memberships)
+        self.size = len(memberships)
+    
+    #TODO This method assumes that there is only one element per sensor. See configure_labels in goal.py
+    @staticmethod
+    def create_point_from_labels(labels):
+        """
+        Generates a point from a list of labels.
+
+        :param labels: List of labels of the space.
+        :type labels: list
+        :return: Space point.
+        :rtype: dict
+        """        
+        point={}
+        for label in labels:
+            elements=label.split("-")
+            sensor=elements[1]
+            attribute=elements[2]
+            if not point.get(sensor):
+                point[sensor]=[{attribute: 0.0}]
+            else:
+                point[sensor][0][attribute]=0.0
+        point = separate_perceptions(point)[0]
+        print(f"Point: {point}")
+        return point
 
     def create_structured_array(self, perception, base_dtype, size):
         """
@@ -90,6 +157,18 @@ class PointBasedSpace(Space):
                     for attribute in attributes
                 ]
         return numpy.zeros(size, dtype=types)
+    
+    def learnable(self):
+        """
+        Only antipoints are considered learnables
+
+        :return: Return if the perception (point) is learnable or not
+        :rtype: bool
+        """
+        for i in self.memberships[0 : self.size]:
+            if numpy.isclose(i, -1.0):
+                return True
+        return False
 
     @staticmethod
     def copy_perception(space, position, perception):
@@ -100,7 +179,7 @@ class PointBasedSpace(Space):
         :type space: numpy.ndarray
         :param position: Position of the array in which the perception is added
         :type position: int
-        :param perception: The perception thah is copied in the structured array
+        :param perception: The perception that is copied in the structured array
         :type perception: dict
         """
         if getattr(perception, "dtype", None):
@@ -235,8 +314,11 @@ class PointBasedSpace(Space):
         contained = False
         if space.size:
             contained = True
-            for point in space.members[0 : space.size]:
-                if self.get_probability(point) < threshold:
+            for point, confidence in zip(space.members[0 : space.size],space.memberships[0 : space.size]) : #Cuando se excluyen los antipuntos????
+                self.logger.debug(f"Evaluating point {point} [{confidence}]")
+                probability = self.get_probability(point)
+                if probability < threshold and confidence>0:
+                    self.logger.info(f"Point not contained: {point} ({probability})")
                     contained = False
                     break
         return contained
@@ -456,7 +538,10 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
             if self.parent_space
             else activation
         )
-
+    
+class ActivatedDummySpace(PointBasedSpace):
+    def get_probability(self, perception):
+        return 1.0
 
 class SVMSpace(PointBasedSpace):
     """
@@ -470,17 +555,6 @@ class SVMSpace(PointBasedSpace):
         self.model = svm.SVC(kernel="poly", degree=32, max_iter=200000)
         super().__init__(**kwargs)
 
-    def learnable(self):
-        """
-        Only antipoints are considered learnables
-
-        :return: Return if the perception (point) is learnable or not
-        :rtype: bool
-        """
-        for i in self.memberships[0 : self.size]:
-            if numpy.isclose(i, -1.0):
-                return True
-        return False
 
     def prune_points(self, score, memberships):
         """
@@ -512,16 +586,16 @@ class SVMSpace(PointBasedSpace):
         memberships[memberships <= 0] = 0
         self.model.fit(members, memberships)
         score = self.model.score(members, memberships)
-        # Node.get_logger().logdebug(
-        #     "SVM: iterations "
-        #     + str(self.model.n_iter_)
-        #     + " support vectors "
-        #     + str(len(self.model.support_vectors_))
-        #     + " score "
-        #     + str(score)
-        #     + " points "
-        #     + str(len(members))
-        # ) #TODO: Pass pnode logger to space
+        self.logger.debug(
+            "SVM: iterations "
+            + str(self.model.n_iter_)
+            + " support vectors "
+            + str(len(self.model.support_vectors_))
+            + " score "
+            + str(score)
+            + " points "
+            + str(len(members))
+        ) #TODO: Pass pnode logger to space
         return score
 
     def remove_close_points(self):
@@ -609,6 +683,22 @@ class ANNSpace(PointBasedSpace):
         """
         Init attributes when a new object is created.
         """
+        #GPU USAGE TEST
+        tf.config.set_visible_devices([], 'GPU') #Temporary disable of GPU
+        '''
+        #tf.debugging.set_log_device_placement(True) #Detailed log in every TF operation
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Set memory growth to avoid allocating all GPU memory
+                for gpu in gpus:
+                    tf.config.experimental.set_virtual_device_configuration(
+                    gpus[0],
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
+                )
+            except RuntimeError as e:
+                print(e)
+        '''
 
         # Define train values
         output_activation = "sigmoid"
@@ -623,7 +713,7 @@ class ANNSpace(PointBasedSpace):
         # Define the Neural Network's model
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)),
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(10,)), #TODO Adapt to state space dimensions
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.Dense(32, activation="relu"),
                 tf.keras.layers.Dense(1, activation=output_activation),
@@ -661,7 +751,7 @@ class ANNSpace(PointBasedSpace):
             candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
             self.copy_perception(candidate_point, 0, perception)
             point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
-            prediction = self.model.call(point)[0][0]
+            prediction = (self.model.call(point)[0][0]*2)-1 #Pass from [0,1] to [-1, 1]
             pos = super().add_point(perception, confidence)
 
             members = structured_to_unstructured(
@@ -671,12 +761,11 @@ class ANNSpace(PointBasedSpace):
             memberships[memberships > 0] = 1.0
             memberships[memberships <= 0] = 0.0
 
-            prediction = 1.0 if prediction >= 0.5 else 0.0
 
             if self.size >= self.max_data:
                 self.first_data = self.size - self.max_data
 
-            if (confidence <= 0 and prediction == 1.0) or (confidence >= 0 and prediction == 0.0):
+            if abs(confidence - prediction)>0.4: #HACK: Select a proper training threshold
                 # Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
                 X = members[self.first_data : self.size]
                 Y = memberships[self.first_data : self.size]
@@ -717,8 +806,9 @@ class ANNSpace(PointBasedSpace):
         point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
         if self.there_are_points:
             if self.there_are_antipoints:
-                act = self.model.call(point)[0][0]
-                act = 1.0 if act >= 0.5 else 0.0
+                act = float(self.model.call(point)[0][0])
+                if act < 0.01:
+                    act=0.0
             else:
                 act = 1.0
         else:

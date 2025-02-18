@@ -1,9 +1,10 @@
 import rclpy
 from rclpy.node import Node
+from math import isclose
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
-from cognitive_node_interfaces.msg import Perception as Percept
+from cognitive_node_interfaces.msg import PerceptionStamped
 from core.utils import class_from_classname, perception_dict_to_msg
 
 import random
@@ -31,10 +32,10 @@ class Perception(CognitiveNode):
         """
         super().__init__(name, class_name, **params)       
         # We set 1.0 as the default activation value
-        self.activation = 1.0
+        self.activation.activation = 1.0
 
         #N: Value topic
-        self.perception_publisher = self.create_publisher(Percept, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
+        self.perception_publisher = self.create_publisher(PerceptionStamped, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
@@ -52,11 +53,13 @@ class Perception(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
+        self.publish_msg = PerceptionStamped()
+
         self.normalize_values = normalize_data
 
-        self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 10)
+        self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 1)
         
-    def calculate_activation(self, perception = None):
+    def calculate_activation(self, perception = None, activation_list=None):
         """
         Returns the the activation value of the instance
 
@@ -65,8 +68,7 @@ class Perception(CognitiveNode):
         :return: The activation of the instance
         :rtype: float
         """
-        if self.activation_topic:
-            self.publish_activation(self.activation)
+        self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
     def set_activation_callback(self, request, response):
@@ -82,7 +84,8 @@ class Perception(CognitiveNode):
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
+        self.activation.activation = activation
+        self.activation.timestamp = self.get_clock().now().to_msg()
         response.set = True
         return response
     
@@ -188,7 +191,173 @@ class DiscreteEventSimulatorPerception(Perception):
         sensor[self.name] = value
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
         sensor_msg = perception_dict_to_msg(sensor)
-        self.perception_publisher.publish(sensor_msg)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
+
+class Sim2DPerception(Perception):
+    """
+    Sim2DPerception class
+    """
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class
+
+        Initializes a Perception instance with the given name and registers it in the ltm.
+        
+        :param name: The name of the Perception instance
+        :type name: str
+        :param class_name: The name of the Perception class
+        :type class_name: str
+        :param default_msg: The msg of the default subscription
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+     
+    def process_and_send_reading(self):
+        """
+        Method that processes the sensor values received
+        """
+        sensor = {}
+        value = []
+        if isinstance(self.reading.data, list):
+            for perception in self.reading.data:
+                x = (
+                    perception.x - self.normalize_values["x_min"]
+                ) / (
+                    self.normalize_values["x_max"]
+                    - self.normalize_values["x_min"]
+                )
+                y = (
+                    perception.y - self.normalize_values["y_min"]
+                ) / (
+                    self.normalize_values["y_max"]
+                    - self.normalize_values["y_min"]
+                )
+                if self.normalize_values.get("angle_max") and self.normalize_values.get("angle_min"):
+                    angle=(
+                    perception.angle - self.normalize_values["angle_min"]
+                    ) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    value.append(
+                    dict(
+                        x=x,
+                        y=y,
+                        angle=angle
+                    )
+                    )
+                else:
+                    value.append(
+                        dict(
+                            x=x,
+                            y=y,
+                        )
+                    )
+        else:
+            value.append(dict(data=self.reading.data))
+
+        sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
+        sensor_msg = perception_dict_to_msg(sensor)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
+
+class FruitShopPerception(Perception):
+    """Fruit Shop Perception class"""
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class
+
+        Initializes a Perception instance with the given name and registers it in the ltm.
+        
+        :param name: The name of the Perception instance
+        :type name: str
+        :param class_name: The name of the Perception class
+        :type class_name: str
+        :param default_msg: The msg of the default subscription
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+
+    def process_and_send_reading(self):
+        sensor = {}
+        value = []
+        if isinstance(self.reading.data, list):
+            if "scales" in self.name:
+                for perception in self.reading.data:
+                    distance = (
+                    perception.distance - self.normalize_values["distance_min"]
+                    ) / (
+                        self.normalize_values["distance_max"]
+                        - self.normalize_values["distance_min"]
+                    )
+                    angle = (perception.angle - self.normalize_values["angle_min"]) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    state = 0.98 if isclose(state, 1.0) else state
+                    active = perception.active
+                    value.append(
+                        dict(
+                            distance=distance,
+                            angle=angle,
+                            state=state,
+                            active=active
+                        )
+                    )
+            elif "fruits" in self.name:
+                for perception in self.reading.data:
+                    distance = (
+                    perception.distance - self.normalize_values["distance_min"]
+                    ) / (
+                        self.normalize_values["distance_max"]
+                        - self.normalize_values["distance_min"]
+                    )
+                    angle = (perception.angle - self.normalize_values["angle_min"]) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    
+                    dim_max = (
+                    perception.dim_max - self.normalize_values["dim_min"]
+                    ) / (
+                        self.normalize_values["dim_max"]
+                        - self.normalize_values["dim_min"]
+                    )
+
+                    
+                    value.append(
+                        dict(
+                            distance = distance,
+                            angle = angle,
+                            dim_max = dim_max
+                        )
+                    )
+        else:
+            value.append(dict(data=self.reading.data))
+        
+        sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
+        sensor_msg = perception_dict_to_msg(sensor)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
+
+        
+
+
 
 def main(args=None):
     rclpy.init(args=args)

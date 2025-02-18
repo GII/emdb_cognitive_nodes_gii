@@ -1,4 +1,5 @@
-string timestamp
+cognitive_node_interfaces/Perception perception
+cognitive_node_interfaces/Actuation actuation
 string policy
 ---
-Perception perception
+Perception prediction
