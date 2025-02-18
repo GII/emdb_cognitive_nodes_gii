@@ -67,13 +67,13 @@ class CNode(CognitiveNode):
             )
             self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}.")
             node_activations.append(activation.activation)
-        self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}.")
-        activation_list = numpy.prod(node_activations)
-        self.activation = numpy.max(activation_list)
+            self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}.")
+            activation_list = numpy.prod(node_activations)
+            self.activation = numpy.max(activation_list)
 
             self.get_logger().debug(
-                self.node_type + " activation for " + self.name + " = " + str(self.activation)
-            )
+                    self.node_type + " activation for " + self.name + " = " + str(self.activation)
+                )
         else:
             self.calculate_activation_prod(activation_list)
 
