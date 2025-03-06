@@ -2,7 +2,7 @@ import rclpy
 from copy import deepcopy
 
 from cognitive_nodes.generic_model import GenericModel, Learner
-from simulators.scenarios_2D import SimpleScenario
+from simulators.scenarios_2D import SimpleScenario, EntityType
 from cognitive_node_interfaces.msg import Perception, Actuation
 from core.utils import actuation_dict_to_msg, actuation_msg_to_dict, perception_dict_to_msg, perception_msg_to_dict
 from rclpy.impl.rcutils_logger import RcutilsLogger
@@ -107,21 +107,71 @@ class Sim2D(Learner):
         
         self.logger.info(f"DEBUG: Perception {perc_dict}")
         self.logger.info(f"DEBUG: Action: {act_dict}")
-        
 
+        angle_l = act_dict["left_arm"][0]["angle"]
+        angle_r = act_dict["right_arm"][0]["angle"]
+        vel_l = act_dict["left_arm"][0]["dist"]
+        vel_r = act_dict["right_arm"][0]["dist"]        
+        gripper_l=perc_dict["ball_in_left_hand"][0]["data"]
+        gripper_r=perc_dict["ball_in_right_hand"][0]["data"]
         #Set simulator to initial state:
         self.model.baxter_left.set_pos(perc_dict["left_arm"][0]["x"],perc_dict["left_arm"][0]["y"])
         self.model.baxter_left.set_angle(perc_dict["left_arm"][0]["angle"])
-        self.model.baxter_left.set_gripper(perc_dict["ball_in_left_hand"][0]["data"])
+        self.model.baxter_left.set_gripper(gripper_l)
         self.model.baxter_right.set_pos(perc_dict["right_arm"][0]["x"],perc_dict["right_arm"][0]["y"])
         self.model.baxter_right.set_angle(perc_dict["right_arm"][0]["angle"])
-        self.model.baxter_right.set_gripper(perc_dict["ball_in_right_hand"][0]["data"])
+        self.model.baxter_right.set_gripper(gripper_r)
         self.model.box1.set_pos(perc_dict["box"][0]["x"], perc_dict["box"][0]["y"])
         self.model.objects[0].set_pos(perc_dict["ball"][0]["x"], perc_dict["ball"][0]["y"])
         self.model.world_rules()
 
         #Apply action
-        self.model.apply_action(act_dict["left_arm"][0]["angle"], act_dict["right_arm"][0]["angle"], act_dict["left_arm"][0]["dist"], act_dict["right_arm"][0]["dist"], act_dict["left_arm"][0]["gripper"], act_dict["right_arm"][0]["gripper"])
+        self.model.apply_action(angle_l, angle_r, vel_l, vel_r, gripper_l, gripper_r)
+
+        #GRASP OBJECT IF GRIPPER IS CLOSE
+        grippers_close = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.ROBOT)
+        self.logger.info(f"DEBUG - {[ent.name for ent in grippers_close]}")
+        if grippers_close and not self.changed_grippers: #If grippers are close, change hands
+            self.logger.info(f"DEBUG - Checking if changing grippers is possible")
+            #Ball in left gripper
+            if self.model.robots[0].catched_object and not self.model.robots[1].catched_object:
+                gripper_l=False
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                gripper_r=True
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                self.changed_grippers=True
+
+            #Ball in right gripper
+            if self.model.robots[1].catched_object and not self.model.robots[0].catched_object:
+                gripper_r=False
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                gripper_l=True
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                self.changed_grippers=True
+            
+        if not grippers_close: #Check if objects are close to the grippers
+            self.logger.info(f"DEBUG - Checking if objects are close to gripper")
+            self.changed_grippers=False
+            close_l_obj = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.BALL)
+            close_r_obj = self.model.filter_entities(self.model.get_close_entities(self.model.robots[1], threshold=50), EntityType.BALL)
+            if close_l_obj:
+                self.logger.info(f"DEBUG - Objects {[obj.name for obj in close_l_obj]} detected close to left gripper")
+                gripper_l = True
+            if close_r_obj:
+                self.logger.info(f"DEBUG - Objects {[obj.name for obj in close_r_obj]} detected close to right gripper")
+                gripper_r = True
+        
+            #RELEASE OBJECT IF OVER BOX
+            left_over_box = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.BOX)
+            right_over_box = self.model.filter_entities(self.model.get_close_entities(self.model.robots[1], threshold=50), EntityType.BOX)
+            if left_over_box:
+                self.logger.info(f"DEBUG - Boxes {[box.name for box in left_over_box]} detected close to left gripper")
+                gripper_l = False
+            if right_over_box:
+                self.logger.info(f"DEBUG - Boxes {[box.name for box in right_over_box]} detected close to right gripper")
+                gripper_r = False
+            
+            self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
 
         #Read predicted perceptions
         left_arm=self.model.baxter_left.get_pos()
