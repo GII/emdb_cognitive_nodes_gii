@@ -283,7 +283,7 @@ class ProspectionDrive(Drive, LTMSubscription):
         return False
 
 
-    def get_knowledge_callback(self, request, response):
+    async def get_knowledge_callback(self, request, response):
         """
         Callback that returns the knowledge found
 
@@ -304,6 +304,7 @@ class ProspectionDrive(Drive, LTMSubscription):
                 upstream_goals.append(us_goal)
         self.get_logger().info(f"DEBUG - Downstream goals: {downstream_goals}, Upstream Goals: {upstream_goals}")
         self.new_knowledge=False
+        await self.do_prospection()
         response.downstream_goals=downstream_goals
         response.upstream_goals=upstream_goals
         return response
