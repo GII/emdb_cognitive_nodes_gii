@@ -13,7 +13,7 @@ class Perception(CognitiveNode):
     """
     Perception class
     """
-    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, threshold=0.9, **params):
         """
         Constructor for the Perception class
 
@@ -33,6 +33,8 @@ class Perception(CognitiveNode):
         super().__init__(name, class_name, **params)       
         # We set 1.0 as the default activation value
         self.activation.activation = 1.0
+        #Activation threshold for processing
+        self.threshold = threshold
 
         #N: Value topic
         self.perception_publisher = self.create_publisher(PerceptionStamped, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
@@ -119,9 +121,12 @@ class Perception(CognitiveNode):
         :param reading: The sensor values
         :type reading: ROS msg
         """
-        self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
-        self.reading = reading
-        self.process_and_send_reading()
+        if self.activation.activation > self.threshold:
+            self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
+            self.reading = reading
+            self.process_and_send_reading()
+        else:
+            self.get_logger().debug("Ignoring input...")
 
     def process_and_send_reading(self):
         """

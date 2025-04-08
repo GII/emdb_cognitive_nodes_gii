@@ -815,7 +815,7 @@ class GoalMotiven(Goal):
     
     def calculate_activation(self, perception, activation_list):
         """
-        Calculates the activation of the goal based on the activations of the neihboring drives and goals.
+        Calculates the activation of the goal based on the activations of the neighboring drives and goals.
 
         :param perception: Unused perception.
         :type perception: dict

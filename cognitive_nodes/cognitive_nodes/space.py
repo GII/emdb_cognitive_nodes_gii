@@ -540,6 +540,9 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
         )
     
 class ActivatedDummySpace(PointBasedSpace):
+    def add_point(self, perception, confidence):
+        return -1
+
     def get_probability(self, perception):
         return 1.0
 
@@ -713,7 +716,7 @@ class ANNSpace(PointBasedSpace):
         # Define the Neural Network's model
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(10,)), #TODO Adapt to state space dimensions
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)), #TODO Adapt to state space dimensions
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.Dense(32, activation="relu"),
                 tf.keras.layers.Dense(1, activation=output_activation),
