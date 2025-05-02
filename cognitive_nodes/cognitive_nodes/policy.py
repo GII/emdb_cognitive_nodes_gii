@@ -9,7 +9,7 @@ from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import SetActivation, Execute
 from cognitive_node_interfaces.srv import GetActivation
 
-from core.utils import perception_dict_to_msg, class_from_classname
+from core.utils import perception_dict_to_msg, class_from_classname, actuation_dict_to_msg
 
 class Policy(CognitiveNode):
     """
@@ -197,6 +197,80 @@ class PolicyBlocking(Policy):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.policy_service.send_request_async(policy=self.name)
         response.policy = self.name
+        return response
+    
+class PolicyBlockingParametrized(PolicyBlocking):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', service_msg=None, service_name=None, **params):
+        super().__init__(name, class_name, service_msg, service_name, **params)
+
+    async def calculate_activation(self, perception=None, activation_list=None):
+            """
+            Calculate the activation level of the policy by obtaining that of its neighboring CNodes
+            As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
+
+            :param perception: Arbitrary perception
+            :type perception: dict
+            :return: The activation of the Policy
+            :rtype: float
+            """
+            if activation_list:
+                self.calculate_activation_max(activation_list)
+            else:
+                self.activation.activation=0.0
+                self.activation.timestamp=self.get_clock().now().to_msg()
+            return self.activation
+
+    def calculate_activation_max(self, activation_list):
+            """
+            Calculates the activation of the node by extracting the maximum activation 
+            and the "parameter" attribute from the node with the maximum activation.
+            The timestamp of the resulting activation will be the oldest timestamp of the nodes in the list.
+
+            :param activation_list: Dictionary with the activation of multiple nodes. 
+            :type activation_list: dict
+            """        
+            node_activations = [(node_name, activation_list[node_name]['data'].activation) for node_name in activation_list]
+            timestamp, _ = self.extract_oldest_timestamp(activation_list)
+            if node_activations:
+                max_node, max_activation = max(node_activations, key=lambda x: x[1])
+                parameter = activation_list[max_node]['data'].parameter  # Extract the "parameter" attribute
+                self.get_logger().debug(f'Max activation node: {max_node}, Parameter: {parameter}')
+            else:
+                self.get_logger().debug(f'Node activation list empty!!')
+                max_activation = 0
+                parameter = None
+            self.activation.activation = float(max_activation)
+            self.activation.timestamp = timestamp
+            if max_activation > 0:
+                self.activation.parameter = None  # Store the parameter in the activation object
+
+    def obtain_random_parameter(self):
+        """
+        Obtains a random parameter for the policy.
+
+        :return: The random parameter.
+        :rtype: int
+        """
+        random_num=numpy.random.randint(0, 14)
+        return {'policy_params': [{'object': random_num}]}
+
+    async def execute_callback(self, request, response):
+
+        """
+        Makes a service call to the server that handles the execution of the policy.
+
+        :param request: The request to execute the policy.
+        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :param response: The response indicating the executed policy.
+        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :return: The response with the executed policy name.
+        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        """
+        self.get_logger().info('Executing policy: ' + self.name + '...')
+        parameter = self.activation.parameter if self.activation.activation else self.obtain_random_parameter()
+        await self.policy_service.send_request_async(policy=self.name, parameter=parameter)
+        response.policy = self.name
+        response.action = parameter
         return response
     
 

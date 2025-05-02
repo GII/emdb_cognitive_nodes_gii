@@ -1,5 +1,7 @@
 import numpy
 import rclpy
+import yaml
+from rclpy.time import Time
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import GetActivation
@@ -25,6 +27,25 @@ class CNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
         self.configure_activation_inputs(self.neighbors)
+
+    async def register_in_LTM(self, data_dic):
+        """
+        Requests registering the node in the LTM. 
+
+        :param data_dic: A dictionary with the data to be saved.
+        :type data_dic: dict
+        :return: A future that will contain the response from the LTM service.
+        :rtype: rclpy.task.Future
+        """
+        self.get_logger().debug(f'DEBUG START Registering {self.node_type} {self.name} in LTM...')
+        
+        data = yaml.dump({**data_dic, 'activation': self.activation.activation, 'activation_timestamp': Time.from_msg(self.activation.timestamp).nanoseconds, 'neighbors': self.neighbors, 'policy_params': getattr(self, 'policy_params', None)})
+
+        ltm_response = self.add_node_to_LTM_client.send_request_async(name=self.name, node_type=self.node_type, data=data)
+        await ltm_response
+        self.get_logger().debug(f'DEBUG FINISH Registering {self.node_type} {self.name} in LTM...')
+
+        return ltm_response
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """
@@ -78,6 +99,29 @@ class CNode(CognitiveNode):
             self.calculate_activation_prod(activation_list)
 
         return self.activation
+
+class CNodeParameter(CNode):
+    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", **params):
+        """
+        Constructor of the CNode class
+        Initializes a CNode with the given name and registers it in the LTM
+
+        :param name: The name of the CNode
+        :type name: str
+        :param class_name: The name of the CNode class
+        :type str
+        """
+        super().__init__(name, class_name, **params)
+        
+        if getattr(self, "policy_params", None) is None:
+            raise RuntimeError(
+                "CNodeParameter: policy_params is not set. Please set it in the configuration file."
+            )
+
+    def calculate_activation_prod(self, activation_list):
+        super().calculate_activation_prod(activation_list)
+        self.activation.parameter = self.policy_params
+
 
 
 def main(args=None):
