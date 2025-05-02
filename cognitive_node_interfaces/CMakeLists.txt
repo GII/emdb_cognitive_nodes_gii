@@ -43,6 +43,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/IsReached.srv"
   "srv/IsSatisfied.srv"
   "srv/Policy.srv"
+  "srv/PolicyParametrized.srv"
   "srv/Predict.srv"
   "srv/SendSpace.srv"
   "srv/SetActivation.srv"
