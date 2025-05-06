@@ -360,8 +360,87 @@ class FruitShopPerception(Perception):
         self.publish_msg.timestamp=self.get_clock().now().to_msg()
         self.perception_publisher.publish(self.publish_msg)
 
-        
+class PumpPanelPerception(Perception):
+    """Fruit Shop Perception class"""
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class
 
+        Initializes a Perception instance with the given name and registers it in the ltm.
+        
+        :param name: The name of the Perception instance
+        :type name: str
+        :param class_name: The name of the Perception class
+        :type class_name: str
+        :param default_msg: The msg of the default subscription
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+
+    def process_and_send_reading(self):
+        sensor = {}
+        value = []
+        if isinstance(self.reading.data, list):
+            if "panel_objects" in self.name:
+                for perception in self.reading.data:
+                    voltage_dial = (
+                    perception.voltage_dial - self.normalize_values["voltage_min"]
+                    ) / (
+                        self.normalize_values["voltage_max"]
+                        - self.normalize_values["voltage_min"]
+                    )
+                    output_flow_dial = (
+                    perception.output_flow_dial - self.normalize_values["output_flow_min"]
+                    ) / (
+                        self.normalize_values["output_flow_max"]
+                        - self.normalize_values["output_flow_min"]
+                    )
+                    tool_1 = perception.tool_1/(self.normalize_values["tool_states"] - 1)
+                    tool_2 = perception.tool_2/(self.normalize_values["tool_states"] - 1)
+                    v1_button = perception.v1_button/(self.normalize_values["v_states"] - 1)
+                    v2_button = perception.v2_button/(self.normalize_values["v_states"] - 1)
+                    v3_button = perception.v3_button/(self.normalize_values["v_states"] - 1)
+                    start_button = perception.start_button/(self.normalize_values["start_states"] - 1)     
+                    discharge_light = perception.discharge_light
+                    emergency_button = perception.emergency_button
+                    mode_selector = perception.mode_selector
+                    off_button = perception.off_button
+                    on_button = perception.on_button
+                    system_backup_light = perception.system_backup_light
+                    test_light = perception.test_light
+
+                    value.append(
+                        dict(
+                            discharge_light = discharge_light,
+                            emergency_button = emergency_button,
+                            mode_selector = mode_selector,
+                            off_button = off_button,
+                            on_button = on_button,
+                            output_flow_dial = output_flow_dial,
+                            start_button = start_button,
+                            system_backup_light = system_backup_light,
+                            test_light = test_light,
+                            tool_1 = tool_1,
+                            tool_2 = tool_2,
+                            v1_button = v1_button,
+                            v2_button = v2_button,
+                            v3_button = v3_button,
+                            voltage_dial = voltage_dial
+                        )
+                    )
+        else:
+            value.append(dict(data=self.reading.data))
+        
+        sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
+        sensor_msg = perception_dict_to_msg(sensor)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
 
 
 def main(args=None):

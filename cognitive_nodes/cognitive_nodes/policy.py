@@ -3,13 +3,15 @@ from rclpy.node import Node
 from core.cognitive_node import CognitiveNode
 import random
 import numpy
+import math
 
 from std_msgs.msg import Int64
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, Execute
-from cognitive_node_interfaces.srv import GetActivation
+from cognitive_node_interfaces.srv import GetActivation, SetActivation, Execute
+from cognitive_node_interfaces.msg import Actuation 
+from simulators.pump_panel_sim_discrete import PumpObjects
 
-from core.utils import perception_dict_to_msg, class_from_classname, actuation_dict_to_msg
+from core.utils import perception_dict_to_msg, class_from_classname, actuation_dict_to_msg, actuation_msg_to_dict
 
 class Policy(CognitiveNode):
     """
@@ -233,16 +235,14 @@ class PolicyBlockingParametrized(PolicyBlocking):
             timestamp, _ = self.extract_oldest_timestamp(activation_list)
             if node_activations:
                 max_node, max_activation = max(node_activations, key=lambda x: x[1])
-                parameter = activation_list[max_node]['data'].parameter  # Extract the "parameter" attribute
-                self.get_logger().debug(f'Max activation node: {max_node}, Parameter: {parameter}')
+                self.activation.parameter = activation_list[max_node]['data'].parameter  # Extract the "parameter" attribute
             else:
                 self.get_logger().debug(f'Node activation list empty!!')
                 max_activation = 0
-                parameter = None
             self.activation.activation = float(max_activation)
             self.activation.timestamp = timestamp
-            if max_activation > 0:
-                self.activation.parameter = None  # Store the parameter in the activation object
+            if math.isclose(max_activation, 0):
+                self.activation.parameter = Actuation()  # Store the parameter in the activation object
 
     def obtain_random_parameter(self):
         """
@@ -251,10 +251,11 @@ class PolicyBlockingParametrized(PolicyBlocking):
         :return: The random parameter.
         :rtype: int
         """
+        self.get_logger().info('Obtaining random parameter...')
         random_num=numpy.random.randint(0, 14)
-        return {'policy_params': [{'object': random_num}]}
+        return actuation_dict_to_msg({'policy_params': [{'object': random_num}]})
 
-    async def execute_callback(self, request, response):
+    async def execute_callback(self, request:Execute.Request, response):
 
         """
         Makes a service call to the server that handles the execution of the policy.
@@ -267,7 +268,14 @@ class PolicyBlockingParametrized(PolicyBlocking):
         :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
-        parameter = self.activation.parameter if self.activation.activation else self.obtain_random_parameter()
+        param_msg = request.parameter
+        param_dict = actuation_msg_to_dict(param_msg)
+        param_coded = param_dict.get('policy_params', [{"object":None}])[0]['object']
+        if param_coded is None:
+            parameter = self.activation.parameter if self.activation.activation>0.1 else self.obtain_random_parameter()
+        else:
+            parameter = request.parameter
+        self.get_logger().info('Executing policy with parameter: ' + str(parameter))
         await self.policy_service.send_request_async(policy=self.name, parameter=parameter)
         response.policy = self.name
         response.action = parameter

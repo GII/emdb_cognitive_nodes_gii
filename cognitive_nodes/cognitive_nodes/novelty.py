@@ -155,7 +155,8 @@ class PolicyNovelty(Policy):
         if policy not in self.node_clients:
             self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
         self.get_logger().info('Executing policy: ' + policy + '...')
-        await self.node_clients[policy].send_request_async()
+        policy_response = await self.node_clients[policy].send_request_async()
+        response.action = policy_response.action
         response.policy = policy
         return response
     

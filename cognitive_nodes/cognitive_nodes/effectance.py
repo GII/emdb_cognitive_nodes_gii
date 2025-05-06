@@ -114,8 +114,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         else:    
             self.episode_topic = episodes_topic
             self.episode_msg = episodes_msg
-        self.effects={} 
-        self.new_effects={}
+        self.effects=set() 
+        self.new_effects=set()
         self.get_effects_service = self.create_service(GetEffects, 'drive/' + str(
             name) + '/get_effects', self.get_effects_callback, callback_group=self.cbgroup_server)
         self.configure_episode_subscription(episodes_topic, episodes_msg)
@@ -146,10 +146,10 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
                     sensing=perception[sensor][index][attribute]
                     old_sensing=old_perception[sensor][index][attribute]
                     if isclose(sensing-old_sensing, 1.0):
-                        existing_effect=self.effects.get(sensor, None)
-                        if existing_effect!=attribute:
-                            self.effects[sensor]=attribute
-                            self.new_effects[sensor]=attribute
+                        effect=(sensor, attribute)
+                        if effect not in self.effects:
+                            self.effects.add(effect)
+                            self.new_effects.add(effect)
                             self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
 
     def get_effects_callback(self, request, response:GetEffects.Response):
@@ -166,10 +166,11 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         sensors=[]
         attributes=[]
         if self.new_effects:
-            effects=copy(self.new_effects)
-            for sensor in effects:
-                sensors.append(sensor)
-                attributes.append(self.new_effects.pop(sensor))
+            self.get_logger().info(f"Sending effects found: {self.new_effects}")
+            for effect in self.new_effects:
+                sensors.append(effect[0])
+                attributes.append(effect[1])
+            self.new_effects.clear()
         response.sensors=sensors
         response.attributes=attributes
         return response

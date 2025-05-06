@@ -5,7 +5,7 @@ from rclpy.time import Time
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import GetActivation
-from core.utils import perception_dict_to_msg
+from core.utils import perception_dict_to_msg, actuation_dict_to_msg
 
 
 class CNode(CognitiveNode):
@@ -120,7 +120,7 @@ class CNodeParameter(CNode):
 
     def calculate_activation_prod(self, activation_list):
         super().calculate_activation_prod(activation_list)
-        self.activation.parameter = self.policy_params
+        self.activation.parameter = actuation_dict_to_msg(self.policy_params)
 
 
 

@@ -23,7 +23,7 @@ class PNode(CognitiveNode):
         :param class_name: The name of the PNode class.
         :type class_name: str
         :param space_class: The class of the space used to define the PNode
-        :type space_class: str
+        :type space_class: strf
         :param space: The space used to define the PNode
         :type space: cognitive_nodes.space
         """

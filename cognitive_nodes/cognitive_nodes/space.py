@@ -8,6 +8,7 @@ from rclpy.node import Node
 from rclpy.logging import get_logger
 
 from core.utils import separate_perceptions
+from sklearn.ensemble import RandomForestClassifier
 
 
 class Space(object):
@@ -545,7 +546,8 @@ class ActivatedDummySpace(PointBasedSpace):
 
     def get_probability(self, perception):
         return 1.0
-
+    
+    
 class SVMSpace(PointBasedSpace):
     """
     Use a SVM to calculate activations.
@@ -716,7 +718,7 @@ class ANNSpace(PointBasedSpace):
         # Define the Neural Network's model
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)), #TODO Adapt to state space dimensions
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(15,)), #TODO Adapt to state space dimensions
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.Dense(32, activation="relu"),
                 tf.keras.layers.Dense(1, activation=output_activation),
