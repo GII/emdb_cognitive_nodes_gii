@@ -230,12 +230,12 @@ class PolicyLLMExploration(Policy):
     
 class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     """
-    PolicyLLMExploration Class, represents a policy that selects a policy guided by a LLM and executes it.
+    PolicyLLMExplorationFruitShop Class, represents a policy to explore the Fruit Shop experiment environment with LLMs.
     """
 
     def read_reward(self, reward_list):
         """
-        Reads the reward from the reward list, taking into account the stages of this experiment.
+        Reads the reward from the reward list, taking into account the stages of the Fruit Shop experiment.
         :param reward_list: Dictionary with the reward list.
         :type reward_list: dict
         :return: True if there is a reward, False otherwise.
@@ -258,7 +258,7 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     def format_episode(self, episode):
         """
         Formats the episode into a YAML string that can be sent to the LLM.
-        Specific for this experiment.
+        Specific for the Fruit Shop experiment.
 
         :param episode: List containing the old perception, action, new perception, and reward.
         :type episode: list
