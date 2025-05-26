@@ -25,9 +25,9 @@ class DriveNovelty(Drive):
         """
         Constructor of the DriveNovelty class.
 
-        :param name: The name of the Drive instance
+        :param name: The name of the Drive instance.
         :type name: str
-        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive"
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
         :type class_name: str
         """        
         super().__init__(name, class_name, **params)
@@ -36,9 +36,9 @@ class DriveNovelty(Drive):
         """
         Evaluation that always returns 1.0, as the drive is always .
 
-        :param perception: Unused perception, defaults to None
-        :type perception: dict/NoneType, optional
-        :return: Evaluation of the Drive
+        :param perception: Unused perception.
+        :type perception: dict or Any.
+        :return: Evaluation of the Drive.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
         self.evaluation.evaluation = 1.0
@@ -53,11 +53,11 @@ class PolicyNovelty(Policy):
         """
         Constructor of the PolicyNovelty class.
 
-        :param name: Name of the node
+        :param name: Name of the node.
         :type name: str
-        :param exclude_list: List of policies that should not be selected for executions, defaults to []
-        :type exclude_list: list, optional
-        :param ltm_id: Id of the LTM that includes the nodes
+        :param exclude_list: List of policies that should not be selected for executions, defaults to [].
+        :type exclude_list: list
+        :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
         """        
         super().__init__(name, **params)
@@ -84,7 +84,7 @@ class PolicyNovelty(Policy):
         """
         Requests data from the LTM.
 
-        :return: LTM dump
+        :return: LTM dump.
         :rtype: dict
         """        
         # Call get_node service from LTM
@@ -99,7 +99,7 @@ class PolicyNovelty(Policy):
         """
         Callback that reads the LTM change and updates the policies accordingly.
 
-        :param msg: LTM change message
+        :param msg: LTM change message.
         :type msg: std_msgs.msg.String
         """        
         self.get_logger().debug("Reading LTM Change...")
@@ -110,7 +110,7 @@ class PolicyNovelty(Policy):
         """
         Creates a list of eligible policies to be executed and shuffles it.
 
-        :param ltm_cache: LTM cache
+        :param ltm_cache: LTM cache.
         :type ltm_cache: dict
         """        
         policies = list(ltm_cache["Policy"].keys())
@@ -127,7 +127,7 @@ class PolicyNovelty(Policy):
         """
         Selects a policy from the queue. It begins by selecting the front policy and rotates the queue, once all the queue has been iterated, the policies are shuffled.
 
-        :return: Selected policy
+        :return: Selected policy.
         :rtype: str
         """        
         policy=self.policies.select_policy()
@@ -146,9 +146,9 @@ class PolicyNovelty(Policy):
 
         :param request: Execution request
         :type request: cognitive_node_interfaces.srv.Execute.Request
-        :param response: Response of the execution. Includes the name of the selected policy
+        :param response: Response of the execution. Includes the name of the selected policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :return: Response of the execution
+        :return: Response of the execution.
         :rtype: cognitive_node_interfaces.srv.Execute.Response
         """        
         policy = self.select_policy()
@@ -165,22 +165,53 @@ class PolicyQueue:
     PolicyQueue Class, wrapper over the builtin deque object to create a policy queue.
     """    
     def __init__(self):
+        """
+        Constructor of the PolicyQueue class.
+        """
         self.queue = deque()
 
     def select_policy(self):
+        """
+        Selects a policy from the queue. It begins by selecting the front policy and rotates the queue.
+
+        :return: Selected policy.
+        :rtype: str
+        """
         policy = self.front()
         self.queue.rotate(1)
         return policy
     
     def shuffle(self, rng: np.random.Generator):
+        """
+        Shuffles the queue using the provided random number generator.
+
+        :param rng: Random number generator to use for shuffling.
+        :type rng: np.random.Generator
+        """
         rng.shuffle(self.queue)
 
     def find_differences(self, items):
+        """
+        Finds the differences between the current queue and the provided items.
+
+        :param items: List of items to compare with the queue.
+        :type items: list
+        :return: Tuple containing the new items and the missing items.
+        :rtype: tuple (new_items, missing_items)
+        """
         new = [x for x in items if x not in self.queue]
         missing = [x for x in self.queue if x not in items]
         return new, missing
     
     def merge(self, items):
+        """
+        Merges the current queue with the provided items. It adds new items and removes missing items.
+
+        :param items: List of items to merge with the queue.
+        :type items: list
+        :return: True if there are changes, False otherwise.
+        :rtype:  bool
+        """
         new, missing = self.find_differences(items)
         for item in new:
             self.enqueue(item)
@@ -193,30 +224,84 @@ class PolicyQueue:
     #Default access and change methods
 
     def enqueue(self, item):
+        """
+        Adds an item to the front of the queue.
+
+        :param item: Item to add to the queue.
+        :type item: str
+        :return: None
+        :rtype: NoneType
+        """
         return self.queue.appendleft(item)
     
     def dequeue(self):
+        """
+        Removes the last item from the queue.
+
+        :return: The last item in the queue.
+        :rtype: str
+        """
         return self.queue.pop()
     
     def remove(self, item):
+        """
+        Removes an item from the queue.
+
+        :param item: Item to remove from the queue.
+        :type item: str
+        :return: True if the item was removed, False otherwise.
+        :rtype: bool
+        """
         if item in self.queue:
             self.queue.remove(item)
             return True
         return False
     
     def isEmpty(self):
+        """
+        Checks if the queue is empty.
+
+        :return: True if the queue is empty, False otherwise
+        :rtype: bool
+        """
         return len(self.queue) == 0
     
     def front(self):
+        """
+        Returns the first item in the queue.
+
+        :return: The first item in the queue.
+        :rtype: str
+        """
         return self.queue[-1]
     
     def rear(self):
+        """
+        Returns the last item in the queue.
+
+        :return: The last item in the queue.
+        :rtype: str
+        """
         return self.queue[0]
     
     def exists(self, item):
+        """
+        Checks if an item exists in the queue.
+
+        :param item: Item to check for existence in the queue.
+        :type item: str
+        :return: True if the item exists in the queue, False otherwise.
+        :rtype: bool
+        """
         return item in self.queue
     
     def __len__(self):
+        """
+        Returns the length of the queue.
+
+        :return: The length of the queue.
+        :rtype: int
+        """
         return len(self.queue)
     
 
@@ -232,7 +317,7 @@ class PolicyRandomAction(PolicyBlocking):
 
         :param name: Name of the policy node.
         :type name: str
-        :param actuation_config: Dictionary with the existing actuators and its data type, defaults to None
+        :param actuation_config: Dictionary with the existing actuators and its data type.
         :type actuation_config: dict
         """        
         super().__init__(name, **params)
@@ -280,11 +365,11 @@ class PolicyRandomAction(PolicyBlocking):
         """
         Denormalizes the actuation values.
 
-        :param actuation: Actuation values to denormalize
+        :param actuation: Actuation values to denormalize.
         :type actuation: dict
-        :param actuation_config: Actuation configuration
+        :param actuation_config: Actuation configuration.
         :type actuation_config: dict
-        :return: Denormalized actuation
+        :return: Denormalized actuation.
         :rtype: dict
         """        
         act=deepcopy(actuation)
@@ -302,11 +387,11 @@ class PolicyRandomAction(PolicyBlocking):
         Makes a service call to the server that handles the execution of the policy.
 
         :param request: The request to execute the policy.
-        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
-        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :type response: cognitive_node_interfaces.srv.Execute.Response
         :return: The response with the executed policy name.
-        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
         self.randomize_actuation()

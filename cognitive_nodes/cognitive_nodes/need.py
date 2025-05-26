@@ -11,18 +11,24 @@ from math import isclose
 
 class Need(CognitiveNode):
     """"
-    Need Class
+    Need Class.
     """
     def __init__(self, name='need', class_name = 'cognitive_nodes.need.Need', weight = 1.0, drive_id = None, need_type= None, **params):
         """
         Constructor of the Need class
 
-        Initializes a Need instance with the given name and registers it in the ltm
+        Initializes a Need instance with the given name and registers it in the LTM.
 
-        :param name: The name of the Need instance
+        :param name: The name of the Need instance.
         :type name: str
-        :param class_name: The name of the Need class
+        :param class_name: The name of the Need class.
         :type class_name: str
+        :param weight: The weight of the Need.
+        :type weight: float
+        :param drive_id: The ID of the Drive node associated with the Need.
+        :type drive_id: str
+        :param need_type: The type of the Need (Operational or Cognitive).
+        :type need_type: str
         """
         super().__init__(name, class_name, **params)
 
@@ -56,7 +62,7 @@ class Need(CognitiveNode):
         """
         Callback that reads the evaluation of a Drive node. Used to check if the need is satisfied.
 
-        :param msg: Message containing the evaluation of the Drive node
+        :param msg: Message containing the evaluation of the Drive node.
         :type msg: cognitive_node_interfaces.msg.Evaluation
         """        
         drive_name = msg.drive_name
@@ -72,12 +78,12 @@ class Need(CognitiveNode):
         """
         Purposes can modify the need's activation
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -88,14 +94,14 @@ class Need(CognitiveNode):
     
     def get_satisfaction_callback(self, request:IsSatisfied.Request, response:IsSatisfied.Response):
         """
-        Check if the need had been satisfied
+        Check if the need had been satisfied.
 
-        :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.IsSatisfied_Request
-        :param response: Response that indicates if the need is satisfied or not
-        :type response: cognitive_node_interfaces.srv.IsSatisfied_Response
-        :return: Response that indicates if the need is satisfied or not
-        :rtype: cognitive_node_interfaces.srv.IsSatisfied_Response
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.IsSatisfied.Request
+        :param response: Response that indicates if the need is satisfied or not.
+        :type response: cognitive_node_interfaces.srv.IsSatisfied.Response
+        :return: Response that indicates if the need is satisfied or not.
+        :rtype: cognitive_node_interfaces.srv.IsSatisfied.Response
         """
         self.get_logger().info('Calculating satisfaction..')
         response.satisfied = self.calculate_satisfaction()
@@ -108,11 +114,10 @@ class Need(CognitiveNode):
 
     def calculate_satisfaction(self):
         """
-        Calculate whether the need is satisfied 
+        Calculate whether the need is satisfied.
 
-        :param perception: The given normalized perception
-        :type perception: dict
-        :raises NotImplementedError: Evaluate method has to be implemented in a child class
+        :return: True if the need is satisfied, False otherwise.
+        :rtype: bool
         """
         satisfied = isclose(0, self.drive_evaluation.evaluation)
 
@@ -121,11 +126,13 @@ class Need(CognitiveNode):
 
     def calculate_activation(self, perception = None, activation_list=None):
         """
-        Returns the the activation value of the World Model
+        Returns the the activation value of the World Model.
 
-        :param perception: Perception does not influence the activation 
-        :type perception: dict
-        :return: The activation of the instance
+        :param perception: Perception does not influence the activation.
+        :type perception: dict.
+        :param activation_list: Activation list does not influence the activation.
+        :type activation_list: list
+        :return: The activation of the instance.
         :rtype: float
         """
         self.activation.timestamp = self.get_clock().now().to_msg()

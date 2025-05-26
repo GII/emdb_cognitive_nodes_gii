@@ -9,23 +9,25 @@ from cognitive_node_interfaces.msg import Perception, PerceptionStamped, Success
 
 class PNode(CognitiveNode):
     """
-    PNode class
+    P-Node class
     """
     def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, **params):
         """
-        Constructor for the PNode class.
+        Constructor for the P-Node class.
         
-        Initializes a PNode with the given name and registers it in the LTM.
+        Initializes a P-Node with the given name and registers it in the LTM.
         It also creates a service for adding points to the node.
         
-        :param name: The name of the PNode.
+        :param name: The name of the P-Node.
         :type name: str
-        :param class_name: The name of the PNode class.
+        :param class_name: The name of the P-Node class.
         :type class_name: str
-        :param space_class: The class of the space used to define the PNode
+        :param space_class: The class of the space used to define the P-Node.
         :type space_class: str
-        :param space: The space used to define the PNode
+        :param space: The space used to define the P-Node.
         :type space: cognitive_nodes.space
+        :param history_size: The size of the history of the P-Node.
+        :type history_size: int
         """
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
@@ -64,7 +66,7 @@ class PNode(CognitiveNode):
         """
         Callback that sends the space of the P-Node.
 
-        :param request: Empty request
+        :param request: Empty request.
         :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
         :param response: Response that contains the space of the P-Node.
         :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
@@ -91,11 +93,11 @@ class PNode(CognitiveNode):
         """
         Callback that checks if the space contains a given space.
 
-        :param request: Request that contains the space to check
+        :param request: Request that contains the space to check.
         :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
-        :param response: Response that indicates if the space is contained
+        :param response: Response that indicates if the space is contained.
         :type response: cognitive_node_interfaces.srv.ContainsSpace.Response
-        :return: Response that indicates if the space is contained
+        :return: Response that indicates if the space is contained.
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """           
         labels=request.labels
@@ -111,14 +113,14 @@ class PNode(CognitiveNode):
 
     def add_point_callback(self, request, response):
         """
-        Callback method for adding a point (or anti-point) to a specific PNode.
+        Callback method for adding a point (or anti-point) to a specific P-Node.
 
         :param request: The request that contains the point that is added and its confidence.
-        :type request: cognitive_node_interfaces.srv.AddPoint_Request
-        :param response: The response indicating if the point was added to the PNode.
-        :type respone: core_interfaces.srv.AddPoint_Response
-        :return: The response indicating if the point was added to the PNode.
-        :rtype: cognitive_node_interfaces.srv.AddPoint_Response
+        :type request: cognitive_node_interfaces.srv.AddPoint.Request
+        :param response: The response indicating if the point was added to the P-Node.
+        :type respone: core_interfaces.srv.AddPoint.Response
+        :return: The response indicating if the point was added to the P-Node.
+        :rtype: cognitive_node_interfaces.srv.AddPoint.Response
         """
         self.point_msg = request.point
         confidence = request.confidence
@@ -131,9 +133,9 @@ class PNode(CognitiveNode):
     
     def add_point(self, point, confidence):
         """
-        Add a new point (or anti-point) to the PNode.
+        Add a new point (or anti-point) to the P-Node.
         
-        :param point: The point that is added to the PNode
+        :param point: The point that is added to the P-Node.
         :type point: dict
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
@@ -151,11 +153,13 @@ class PNode(CognitiveNode):
             
     def calculate_activation(self, perception=None, activation_list=None):
         """
-        Calculate the new activation value for a given perception
+        Calculate the new activation value for a given perception.
 
-        :param perception: The perception for which PNode activation is calculated.
+        :param perception: The perception for which P-Node activation is calculated.
         :type perception: dict
-        :return: If there is space, returns the activation of the PNode. If not, returns 0
+        :param activation_list: The list of activations to be used for the calculation.
+        :type activation_list: list
+        :return: If there is space, returns the activation of the P-Node. If not, returns 0.
         :rtype: float
         """
         if activation_list!=None:
@@ -185,9 +189,9 @@ class PNode(CognitiveNode):
         """
         Return the compatible space with perception.
         (Ugly hack just to see if this works. In that case, everything need to be checked to reduce the number of
-        conversions between sensing, perception and space.)
+        conversions between sensing, perception and space).
 
-        :param perception: The perception for which PNode activation is calculated.
+        :param perception: The perception for which P-Node activation is calculated.
         :type perception: dict
         :return: If there is space, returns it. If not, returns None.
         :rtype: cognitive_nodes.space or None
@@ -203,7 +207,7 @@ class PNode(CognitiveNode):
         """
         Adds perceptions to the activation inputs list.
 
-        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}
+        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}.
         :type node: dict
         """    
         name=node['name']
@@ -235,7 +239,7 @@ class PNode(CognitiveNode):
                 self.activation_inputs[node_name]['updated']=True
                 self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
         else:
-            self.get_logger().warn("Empty perception recieved in PNode. No activation calculated")
+            self.get_logger().warn("Empty perception recieved in P-Node. No activation calculated")
     
     def add_neighbor_callback(self, request, response):
         """
@@ -274,7 +278,7 @@ class PNode(CognitiveNode):
         Detects if the P-Node is linked to a Goal node.
         """        
         goals=[node["name"] for node in self.neighbors if node["node_type"] == "Goal"]
-        self.get_logger().debug(f"DEBUG: PNode {self.name} neighbors: {self.neighbors}")
+        self.get_logger().debug(f"DEBUG: P-Node {self.name} neighbors: {self.neighbors}")
         if len(goals)>0:
             self.goal_linked=True
         else:

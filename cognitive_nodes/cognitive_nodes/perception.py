@@ -15,20 +15,22 @@ class Perception(CognitiveNode):
     """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, threshold=0.9, **params):
         """
-        Constructor for the Perception class
+        Constructor for the Perception class.
 
-        Initializes a Perception instance with the given name and registers it in the ltm.
+        Initializes a Perception instance with the given name and registers it in the LTM.
         
-        :param name: The name of the Perception instance
+        :param name: The name of the Perception instance.
         :type name: str
-        :param class_name: The name of the Perception class
+        :param class_name: The name of the Perception class.
         :type class_name: str
-        :param default_msg: The msg of the default subscription
+        :param default_msg: The msg of the default subscription.
         :type default_msg: str
-        :param default_topic: The topic of the default subscription
+        :param default_topic: The topic of the default subscription.
         :type default_topic: str
-        :param normalize_data: Values in order to normalize values
+        :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param threshold: The activation threshold for processing.
+        :type threshold: float
         """
         super().__init__(name, class_name, **params)       
         # We set 1.0 as the default activation value
@@ -63,11 +65,13 @@ class Perception(CognitiveNode):
         
     def calculate_activation(self, perception = None, activation_list=None):
         """
-        Returns the the activation value of the instance
+        Returns the the activation value of the instance.
 
-        :param perception: Perception does not influence the activation of the instance
+        :param perception: Perception does not influence the activation of the instance.
         :type perception: dict
-        :return: The activation of the instance
+        :param activation_list: List of activations. Not used in this case.
+        :type activation_list: list
+        :return: The activation of the instance.
         :rtype: float
         """
         self.activation.timestamp = self.get_clock().now().to_msg()
@@ -75,14 +79,14 @@ class Perception(CognitiveNode):
     
     def set_activation_callback(self, request, response):
         """
-        Attention mechanisms can modify the activation of a perception instance
+        Attention mechanisms can modify the activation of a perception instance.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -93,15 +97,15 @@ class Perception(CognitiveNode):
     
     def set_inputs_callback(self, request, response):
         """
-        Set inputs for the perception
-        This method is not working yet
+        Set inputs for the perception.
+        This method is not working yet.
 
-        :param request: The request that contains the inputs data
-        :type request: cognitive_node_interfaces.SetInputs_Request
-        :param response: The response that indicates if the inputs were set
-        :type response: cognitive_node_interfaces.SetInputs_Response
-        :return: The response that indicates if the inputs were set
-        :rtype: cognitive_node_interfaces.SetInputs_Response
+        :param request: The request that contains the inputs data.
+        :type request: cognitive_node_interfaces.SetInputs.Request
+        :param response: The response that indicates if the inputs were set.
+        :type response: cognitive_node_interfaces.SetInputs.Response
+        :return: The response that indicates if the inputs were set.
+        :rtype: cognitive_node_interfaces.SetInputs.Response
         """
         input_topics = request.input_topics
         input_msgs = request.input_msgs
@@ -116,10 +120,10 @@ class Perception(CognitiveNode):
     
     def read_perception_callback(self, reading): 
         """
-        Callback to process the sensor values
+        Callback to process the sensor values.
 
-        :param reading: The sensor values
-        :type reading: ROS msg
+        :param reading: The sensor values.
+        :type reading: cognitive_node_interfaces.msg.Perception
         """
         if self.activation.activation > self.threshold:
             self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
@@ -130,7 +134,8 @@ class Perception(CognitiveNode):
 
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received
+        Method that processes the sensor values received.
+        :raise NotImplementedError: This method should be implemented in subclasses.
         """
         raise NotImplementedError
 
@@ -142,25 +147,24 @@ class DiscreteEventSimulatorPerception(Perception):
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
         Constructor for the Perception class
-
-        Initializes a Perception instance with the given name and registers it in the ltm.
+        Initializes a Perception instance with the given name and registers it in the LTM.
         
-        :param name: The name of the Perception instance
+        :param name: The name of the Perception instance.
         :type name: str
-        :param class_name: The name of the Perception class
+        :param class_name: The name of the Perception class.
         :type class_name: str
-        :param default_msg: The msg of the default subscription
+        :param default_msg: The msg of the default subscription.
         :type default_msg: str
-        :param default_topic: The topic of the default subscription
+        :param default_topic: The topic of the default subscription.
         :type default_topic: str
-        :param normalize_data: Values in order to normalize values
+        :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
         super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
      
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received
+        Method that processes the sensor values received.
         """
         sensor = {}
         value = []
@@ -206,26 +210,25 @@ class Sim2DPerception(Perception):
     """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
-        Constructor for the Perception class
-
-        Initializes a Perception instance with the given name and registers it in the ltm.
+        Constructor for the Perception class.
+        Initializes a Perception instance with the given name and registers it in the LTM.
         
-        :param name: The name of the Perception instance
+        :param name: The name of the Perception instance.
         :type name: str
-        :param class_name: The name of the Perception class
+        :param class_name: The name of the Perception class.
         :type class_name: str
-        :param default_msg: The msg of the default subscription
+        :param default_msg: The msg of the default subscription.
         :type default_msg: str
-        :param default_topic: The topic of the default subscription
+        :param default_topic: The topic of the default subscription.
         :type default_topic: str
-        :param normalize_data: Values in order to normalize values
+        :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
         super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
      
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received
+        Method that processes the sensor values received.
         """
         sensor = {}
         value = []
@@ -278,24 +281,26 @@ class FruitShopPerception(Perception):
     """Fruit Shop Perception class"""
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
-        Constructor for the Perception class
-
-        Initializes a Perception instance with the given name and registers it in the ltm.
+        Constructor for the Perception class.
+        Initializes a Perception instance with the given name and registers it in the LTM.
         
-        :param name: The name of the Perception instance
+        :param name: The name of the Perception instance.
         :type name: str
-        :param class_name: The name of the Perception class
+        :param class_name: The name of the Perception class.
         :type class_name: str
-        :param default_msg: The msg of the default subscription
+        :param default_msg: The msg of the default subscription.
         :type default_msg: str
-        :param default_topic: The topic of the default subscription
+        :param default_topic: The topic of the default subscription.
         :type default_topic: str
-        :param normalize_data: Values in order to normalize values
+        :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
         super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
 
     def process_and_send_reading(self):
+        """
+        Method that processes the sensor values received.
+        """
         sensor = {}
         value = []
         if isinstance(self.reading.data, list):

@@ -18,17 +18,17 @@ class ProspectionDrive(Drive, LTMSubscription):
         """
         Constructor of the ProspectionDrive class.
 
-        :param name: The name of the Drive instance
+        :param name: The name of the Drive instance.
         :type name: str
-        :param class_name: The name of the base Drive class
+        :param class_name: The name of the base Drive class.
         :type class_name: str
-        :param ltm_id: Id of the LTM that includes the nodes.
+        :param ltm_id: ID of the LTM that includes the nodes.
         :type ltm_id: str
-        :param min_pnode_rate: Minimum confidence rate of P-Nodes to be considered, defaults to 0.84
+        :param min_pnode_rate: Minimum confidence rate of P-Nodes to be considered.
         :type min_pnode_rate: float
-        :param min_goal_rate: Minimum confidence rate of Goals to be considered, defaults to 0.84
+        :param min_goal_rate: Minimum confidence rate of Goals to be considered.
         :type min_goal_rate: float
-        :raises Exception: Raises an exception if no LTM name is provided
+        :raises Exception: Raises an exception if no LTM name is provided.
         """        
         super().__init__(name, class_name, **params)
         if ltm_id is None:
@@ -46,7 +46,7 @@ class ProspectionDrive(Drive, LTMSubscription):
         """
         Setup of the ProspectionDrive class. Subscribes to the LTM nodes and initializes the dictionaries for the P-Nodes, Goals, and knowledge found.
 
-        :param ltm: Id of the LTM to subscribe to.
+        :param ltm: ID of the LTM to subscribe to.
         :type ltm: str
         """        
         self.configure_ltm_subscription(ltm)
@@ -84,7 +84,12 @@ class ProspectionDrive(Drive, LTMSubscription):
 
     def find_goals(self, ltm_dump): #TODO refactor with find_goals in effectance.py
         """
-        Creates a dictionary with the P-Nodes as keys and a list of the upstream goals as values
+        Creates a dictionary with the P-Nodes as keys and a list of the upstream goals as values.
+
+        :param ltm_dump: The LTM dump to read.
+        :type ltm_dump: dict
+        :return: Dictionary with P-Nodes as keys and lists of upstream goals as values.
+        :rtype: dict
         """
         pnodes = ltm_dump["PNode"]
         cnode_list = ltm_dump["CNode"]
@@ -106,19 +111,23 @@ class ProspectionDrive(Drive, LTMSubscription):
 
     def changes_in_pnodes(self, ltm_dump): #TODO refactor with changes_in_pnodes in effectance.py
         """
-        Returns True if a P-Node has been added or deleted
-        """
+        Returns True if a P-Node has been added or deleted.
+
+        :param ltm_dump: The LTM dump to read.
+        :type ltm_dump: dict
+        :return: True if a P-Node has been added or deleted, False otherwise.
+        :rtype: bool"""
         current_pnodes = set(self.pnode_goals_dict.keys())
         new_pnodes = set(ltm_dump["PNode"].keys())
         return not current_pnodes == new_pnodes
     
     async def success_callback(self, msg: SuccessRate):
         """
-        Callback that reads the success rate of a P-Node or a Goal
+        Callback that reads the success rate of a P-Node or a Goal.
 
-        :param msg: Message from P-Node or Goal
+        :param msg: Message from P-Node or Goal.
         :type msg: cognitive_node_interfaces.msg.SuccessRate
-        :raises RuntimeError: If message recieved is not from a P-Node or Goal
+        :raises RuntimeError: If message recieved is not from a P-Node or Goal. 
         """        
         node_name=msg.node_name
         node_type=msg.node_type
@@ -212,14 +221,15 @@ class ProspectionDrive(Drive, LTMSubscription):
     def traverse_neighbors(self, goal_name, downstream_goal, visited):
         """
         Traverse the neighbors of a goal to check if the downstream goal is in the chain.
-        
-        Args:
-            goal_name (str): The name of the current goal being checked.
-            downstream_goal (str): The name of the downstream goal to check for loops.
-            visited (set): Set of already visited nodes to prevent revisiting.
-        
-        Returns:
-            bool: True if the downstream goal is found in the chain, False otherwise.
+
+        :param goal_name: The name of the current goal being checked.
+        :type goal_name: str
+        :param downstream_goal: The name of the downstream goal to check for loops.
+        :type downstream_goal: str
+        :param visited: Set of already visited nodes to prevent revisiting.
+        :type visited: set
+        :return: True if the downstream goal is found in the chain, False otherwise.
+        :rtype: bool
         """
         if goal_name in visited:
             return False  # Prevent re-checking already visited nodes
@@ -241,10 +251,10 @@ class ProspectionDrive(Drive, LTMSubscription):
         """
         This method returns the names of the neighbors of a goal.
 
-        :param goal_name: Name of the goal
-        :type goal_name: str
-        :return: List of neighbor names
-        :rtype: list
+        :param goal_name: Name of the goal.
+        :type goal_name: str.
+        :return: List of neighbor names.
+        :rtype: list.
         """        
         neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
         names = [neighbor["name"] for neighbor in neighbors]
@@ -253,13 +263,13 @@ class ProspectionDrive(Drive, LTMSubscription):
     def has_loop(self, upstream_goal, downstream_goal):
         """
         Checks if adding downstream_goal to upstream_goal's neighbors creates a loop.
-        
-        Args:
-            upstream_goal (str): The name of the upstream goal.
-            downstream_goal (str): The name of the downstream goal.
-        
-        Returns:
-            bool: True if a loop would be created, False otherwise.
+
+        :param upstream_goal: The name of the upstream goal.
+        :type upstream_goal: str
+        :param downstream_goal: The name of the downstream goal.
+        :type downstream_goal: str
+        :return: True if a loop would be created, False otherwise.
+        :rtype: bool
         """
         visited = set()
         return self.traverse_neighbors(upstream_goal, downstream_goal, visited)
@@ -268,11 +278,11 @@ class ProspectionDrive(Drive, LTMSubscription):
         """
         Checks if a goal has a neighbor.
 
-        :param goal_name: Name of the goal to check
+        :param goal_name: Name of the goal to check.
         :type goal_name: str
-        :param neighbor_name: Name of the neighbor to search
+        :param neighbor_name: Name of the neighbor to search.
         :type neighbor_name: str
-        :return: Whether or not the goal has that neighbor
+        :return: Whether or not the goal has that neighbor.
         :rtype: bool
         """        
         neighbors = self.goals_dict.get(goal_name, {}).get("neighbors", [])
@@ -285,13 +295,13 @@ class ProspectionDrive(Drive, LTMSubscription):
 
     async def get_knowledge_callback(self, request, response):
         """
-        Callback that returns the knowledge found
+        Callback that returns the knowledge found.
 
-        :param request: Empty request
+        :param request: Empty request.
         :type request: cognitive_node_interfaces.srv.GetKnowledge.Request
-        :param response: Response with the found knowledge
+        :param response: Response with the found knowledge.
         :type response: cognitive_node_interfaces.srv.GetKnowledge.Response
-        :return: Response with the found knowledge
+        :return: Response with the found knowledge.
         :rtype: cognitive_node_interfaces.srv.GetKnowledge.Response
         """        
         downstream_goals=[]
@@ -314,7 +324,7 @@ class ProspectionDrive(Drive, LTMSubscription):
         Evaluates the drive depending if there is newly discovered knowledge.
 
         :param perception: Unused perception
-        :type perception: dict/NoneType
+        :type perception: dict or NoneType
         """
         self.evaluation.evaluation=float(self.new_knowledge)
         self.evaluation.timestamp=self.get_clock().now().to_msg()
@@ -327,15 +337,15 @@ class PolicyProspection(Policy):
         """
         Constructor of the PolicyProspection class.
 
-        :param name: Name of the node
+        :param name: Name of the node.
         :type name: str
-        :param class_name: The name of the base Policy class, defaults to 'cognitive_nodes.policy.Policy'
+        :param class_name: The name of the base Policy class, defaults to 'cognitive_nodes.policy.Policy'.
         :type class_name: str, optional
         :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
         :param drive_name: Name of the prospection drive to use.
         :type drive_name: str
-        :raises RuntimeError: Raises an exception if no LTM or prospection Drive name are provided
+        :raises RuntimeError: Raises an exception if no LTM or prospection Drive name are provided.
         """        
         super().__init__(name, class_name, **params)
         if ltm_id is None:
@@ -354,12 +364,12 @@ class PolicyProspection(Policy):
         Callback that executes the policy.
         It sends a request to the prospection drive to get the knowledge found. Then, it links goals of the relations found.
 
-        :param request: _description_
-        :type request: _type_
-        :param response: _description_
-        :type response: _type_
-        :return: _description_
-        :rtype: _type_
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Response with the executed policy name.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Response with the executed policy name.
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
         """        
         self.get_logger().info('Executing policy: ' + self.name + '...')
         knowledge_msg = await self.knowledge_client.send_request_async()

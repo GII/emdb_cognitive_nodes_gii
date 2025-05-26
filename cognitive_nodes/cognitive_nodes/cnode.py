@@ -8,19 +8,19 @@ from core.utils import perception_dict_to_msg
 
 class CNode(CognitiveNode):
     """
-    CNode class
+    C-Node class
     It represents a context, that is, a link between nodes that were activated together in the past.
     It is assumed that there is only one element of each type connected to the C-Node.
     """
 
     def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", **params):
         """
-        Constructor of the CNode class
-        Initializes a CNode with the given name and registers it in the LTM
+        Constructor of the C-Node class.
+        Initializes a C-Node with the given name and registers it in the LTM.
 
-        :param name: The name of the CNode
+        :param name: The name of the C-Node.
         :type name: str
-        :param class_name: The name of the CNode class
+        :param class_name: The name of the C-Node class.
         :type str
         """
         super().__init__(name, class_name, **params)
@@ -32,13 +32,13 @@ class CNode(CognitiveNode):
         When an activation list is passed, this method will multiply the last perceptions of the neighbors.
         Otherwise, with percerception = None, it will multiply the last activations of its neighbors, but
         it's possible to use an arbitrary perception, that will propagate to the neighbors, calculating the
-        final activation of the CNode for that perception.
+        final activation of the C-Node for that perception.
 
-        :param perception: Arbitrary perception
+        :param perception: Arbitrary perception.
         :type perception: dict
         :param activation_list: Dictionary with the activation of multiple nodes. 
         :type activation_list: dict
-        :return: The activation of the CNode
+        :return: The activation of the C-Node.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list==None:

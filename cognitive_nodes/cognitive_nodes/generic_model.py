@@ -15,14 +15,16 @@ class GenericModel(CognitiveNode):
     """
     def __init__(self, name='model', class_name = 'cognitive_nodes.generic_model.GenericModel', node_type="generic_model", **params):
         """
-        Constructor of the Generic Model class
+        Constructor of the Generic Model class.
 
-        Initializes a Generic instance with the given name
+        Initializes a Generic instance with the given name.
 
-        :param name: The name of the World Model instance
+        :param name: The name of the Generic Model instance.
         :type name: str
-        :param class_name: The name of the GenericModel class
+        :param class_name: The name of the GenericModel class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "generic_model".
+        :type node_type: str
         """
         super().__init__(name, class_name, **params)
 
@@ -67,14 +69,14 @@ class GenericModel(CognitiveNode):
 
     def set_activation_callback(self, request, response):
         """
-        Some processes can modify the activation of a Model
+        Some processes can modify the activation of a Model.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -86,14 +88,14 @@ class GenericModel(CognitiveNode):
     def predict_callback(self, request, response): # TODO: implement
         """
         Get predicted perception values for the last perceptions not newer than a given
-        timestamp and for a given policy
+        timestamp and for a given policy.
 
-        :param request: The request that contains the timestamp and the policy
-        :type request: cognitive_node_interfaces.srv.Predict_Request
-        :param response: The response that included the obtained perception
-        :type response: cognitive_node_interfaces.srv.Predict_Response
-        :return: The response that included the obtained perception
-        :rtype: cognitive_node_interfaces.srv.Predict_Response
+        :param request: The request that contains the timestamp and the policy.
+        :type request: cognitive_node_interfaces.srv.Predict.Request
+        :param response: The response that included the obtained perception.
+        :type response: cognitive_node_interfaces.srv.Predict.Response
+        :return: The response that included the obtained perception.
+        :rtype: cognitive_node_interfaces.srv.Predict.Response
         """
         self.get_logger().info('Predicting ...')
         response.prediction = self.predict(request.perception, request.actuation)
@@ -102,14 +104,14 @@ class GenericModel(CognitiveNode):
     
     def get_success_rate_callback(self, request, response): # TODO: implement
         """
-        Get a prediction success rate based on a historic of previous predictions
+        Get a prediction success rate based on a historic of previous predictions.
 
-        :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.GetSuccessRate_Request
-        :param response: The response that contains the predicted success rate
-        :type response: cognitive_node_interfaces.srv.GetSuccessRate_Response
-        :return: The response that contains the predicted success rate
-        :rtype: cognitive_node_interfaces.srv.GetSuccessRate_Response
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.GetSuccessRate.Request
+        :param response: The response that contains the predicted success rate.
+        :type response: cognitive_node_interfaces.srv.GetSuccessRate.Response
+        :return: The response that contains the predicted success rate.
+        :rtype: cognitive_node_interfaces.srv.GetSuccessRate.Response
         """
         self.get_logger().info('Getting success rate..')
         raise NotImplementedError
@@ -118,14 +120,14 @@ class GenericModel(CognitiveNode):
     
     def is_compatible_callback(self, request, response): # TODO: implement
         """
-        Check if the Model is compatible with the current avaliable perceptions
+        Check if the Model is compatible with the current avaliable perceptions.
 
-        :param request: The request that contains the current avaliable perceptions
-        :type request: cognitive_node_interfaces.srv.IsCompatible_Request
-        :param response: The response indicating if the Model is compatible or not
-        :type response: cognitive_node_interfaces.srv.IsCompatible_Response
-        :return: The response indicating if the Model is compatible or not
-        :rtype: cognitive_node_interfaces.srv.IsCompatible_Response
+        :param request: The request that contains the current avaliable perceptions.
+        :type request: cognitive_node_interfaces.srv.IsCompatible.Request
+        :param response: The response indicating if the Model is compatible or not.
+        :type response: cognitive_node_interfaces.srv.IsCompatible.Response
+        :return: The response indicating if the Model is compatible or not.
+        :rtype: cognitive_node_interfaces.srv.IsCompatible.Response
         """
         self.get_logger().info('Checking if compatible..')
         raise NotImplementedError
@@ -134,18 +136,28 @@ class GenericModel(CognitiveNode):
 
     def calculate_activation(self, perception = None, activation_list=None):
         """
-        Returns the the activation value of the Model
+        Returns the activation value of the Model.
 
-        :param perception: Perception does not influence the activation 
+        :param perception: Perception does not influence the activation.
         :type perception: dict
-        :return: The activation of the instance
+        :param activation_list: List of activation values from other sources, defaults to None.
+        :type activation_list: list
+        :return: The activation of the instance.
         :rtype: float
         """
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
     def predict(self, perception, action):
-        """Performs a prediction according to the model. See child classes"""
+        """
+        Performs a prediction according to the model. See child classes.
+
+        :param perception: Dictionary containing perception data.
+        :type perception: dict
+        :param action: Dictionary containing action data.
+        :type action: dict
+        :raises NotImplementedError: Raised when the method is not implemented.
+        """
         raise NotImplementedError
     
 
@@ -157,20 +169,20 @@ class EpisodicBuffer:
     """    
     def __init__(self, node:CognitiveNode, episode_topic=None, episode_msg=None, max_size=500, inputs=[], outputs=[], **params) -> None:
         """
-        Constructor of the EpisodicBuffer class
+        Constructor of the EpisodicBuffer class.
 
-        :param node: Cognitive node that will contain this episodic buffer
-        :type node: CognitiveNode
+        :param node: Cognitive node that will contain this episodic buffer.
+        :type node: core.cognitive_node.CognitiveNode
         :param episode_topic: Topic where episodes are read.
         :type episode_topic: str
-        :param episode_msg: Message type of the episodes topic
+        :param episode_msg: Message type of the episodes topic.
         :type episode_msg: str
-        :param max_size: Maximum size of the episodic buffer, defaults to 500
-        :type max_size: int, optional
-        :param inputs: List to configure inputs (from the attributes of the episode message) considered in the buffer, defaults to []
-        :type inputs: list, optional
-        :param outputs: List to configure outputs (from the attributes of the episode message) considered in the buffer, defaults to []
-        :type outputs: list, optional
+        :param max_size: Maximum size of the episodic buffer, defaults to 500.
+        :type max_size: int
+        :param inputs: List to configure inputs (from the attributes of the episode message) considered in the buffer, defaults to [].
+        :type inputs: list
+        :param outputs: List to configure outputs (from the attributes of the episode message) considered in the buffer, defaults to [].
+        :type outputs: list
         """        
         self.node=node
         self.inputs=inputs #Fields of the episode msg that are considered inputs (Used for prediction)
@@ -183,9 +195,9 @@ class EpisodicBuffer:
 
     def configure_labels(self, msg):
         """
-        Creates the label list
+        Creates the label list.
 
-        :param msg: Episode message
+        :param msg: Episode message.
         :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
         """        
         
@@ -202,7 +214,7 @@ class EpisodicBuffer:
         """
         Callback that proccesses the episode messages.
 
-        :param msg: Episode message
+        :param msg: Episode message.
         :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
         """        
         if not self.labels:
@@ -211,9 +223,9 @@ class EpisodicBuffer:
 
     def get_sample(self, index):
         """
-        WORK IN PROGRESS: Method to obtain a sample from the buffer
+        WORK IN PROGRESS: Method to obtain a sample from the buffer.
 
-        :param index: Index of the sample to obtain
+        :param index: Index of the sample to obtain.
         :type index: int
         """        
         raise NotImplementedError
@@ -222,7 +234,7 @@ class EpisodicBuffer:
         """
         Adds a new episode to the buffer.
 
-        :param episode: Episode message
+        :param episode: Episode message.
         :type episode: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
         """        
         #TODO Add method so that data external to the episode can be added here. E.g. Novelty, Value...
@@ -237,9 +249,9 @@ class EpisodicBuffer:
 
     def split_data(self):
         """
-        Work in progress
+        Work in progress.
 
-        :raises NotImplementedError
+        :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError
     
@@ -250,9 +262,9 @@ class Learner:
     """    
     def __init__(self, buffer:EpisodicBuffer, **params) -> None:
         """
-        Constructor of the Learner class
+        Constructor of the Learner class.
 
-        :param buffer: Episodic buffer to use
+        :param buffer: Episodic buffer to use.
         :type buffer: generic_model.EpisodicBuffer
         """        
         self.model=None
@@ -261,21 +273,21 @@ class Learner:
     
     def train(self):
         """
-        Placeholder method for training the model
+        Placeholder method for training the model.
 
-        :raises NotImplementedError
+        :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError
     
     def predict(self, perception, action):
         """
-        Placeholder method for predicting an outcome
+        Placeholder method for predicting an outcome.
 
-        :param perception: Perception dictionary
+        :param perception: Perception dictionary.
         :type perception: dict
-        :param action: Candidate action dictionary
+        :param action: Candidate action dictionary.
         :type action: dict
-        :raises NotImplementedError
+        :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError
 

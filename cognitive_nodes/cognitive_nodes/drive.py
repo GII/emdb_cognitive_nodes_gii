@@ -21,14 +21,12 @@ class Drive(CognitiveNode):
 
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
-        Constructor of the Drive class
+        Constructor of the Drive class.
+        Initializes a Drive instance with the given name and registers it in the LTM.
 
-        Initializes a Drive instance with the given name and registers it in the ltm
-
-
-        :param name: The name of the Drive instance
+        :param name: The name of the Drive instance.
         :type name: str
-        :param class_name: The name of the Drive class
+        :param class_name: The name of the Drive class.
         :type class_name: str
         """
         super().__init__(name, class_name, **params)
@@ -71,14 +69,14 @@ class Drive(CognitiveNode):
 
     def set_activation_callback(self, request, response):
         """
-        Needs can modify a drive's activation
+        Needs can modify a drive's activation.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -89,18 +87,17 @@ class Drive(CognitiveNode):
 
     def evaluate(self, perception=None):
         """
-        Get expected valuation for a given perception
+        Get expected valuation for a given perception.
 
-        :param perception: The given normalized perception
+        :param perception: The given normalized perception.
         :type perception: dict
-        :raises NotImplementedError: Evaluate method has to be implemented in a child class
+        :raises NotImplementedError: Evaluate method has to be implemented in a child class.
         """
         raise NotImplementedError
 
     def publish_evaluation_callback(self):
         """
-        Callback for publishing evaluation
-
+        Callback for publishing evaluation.
         """
         self.evaluate()
         if self.evaluation.timestamp.nanosec > 0.0:
@@ -108,14 +105,14 @@ class Drive(CognitiveNode):
 
     def get_success_rate_callback(self, request, response):  # TODO: implement
         """
-        Get a prediction success rate based on a historic of previous predictions
+        Get a prediction success rate based on a historic of previous predictions.
 
-        :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.GetSuccessRate_Request
-        :param response: The response that contains the predicted success rate
-        :type response: cognitive_node_interfaces.srv.GetSuccessRate_Response
-        :return: The response that contains the predicted success rate
-        :rtype: cognitive_node_interfaces.srv.GetSuccessRate_Response
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.GetSuccessRate.Request
+        :param response: The response that contains the predicted success rate.
+        :type response: cognitive_node_interfaces.srv.GetSuccessRate.Response
+        :return: The response that contains the predicted success rate.
+        :rtype: cognitive_node_interfaces.srv.GetSuccessRate.Response
         """
         raise NotImplementedError
         self.get_logger().info("Getting success rate..")
@@ -125,14 +122,14 @@ class Drive(CognitiveNode):
     
     def get_reward_callback(self, request, response):
         """
-        Callback method to calculate the reward obtained 
+        Callback method to calculate the reward obtained. 
 
-        :param request: Request that includes the new perception to check the reward
-        :type request: cognitive_node_interfaces.srv.GetReward_Request
-        :param response: Response that contais the reward
-        :type response: cognitive_node_interfaces.srv.GetReward_Response
-        :return: Response that contais the reward
-        :rtype: cognitive_node_interfaces.srv.GetReward_Response
+        :param request: Request that includes the new perception to check the reward.
+        :type request: cognitive_node_interfaces.srv.GetReward.Request
+        :param response: Response that contais the reward.
+        :type response: cognitive_node_interfaces.srv.GetReward.Response
+        :return: Response that contais the reward.
+        :rtype: cognitive_node_interfaces.srv.GetReward.Response
         """
         reward, timestamp = self.get_reward()
         response.reward = reward
@@ -144,15 +141,22 @@ class Drive(CognitiveNode):
         return response
     
     def get_reward(self):
+        """
+        Returns the latest reward and its timestamp.
+
+        :return: The latest reward and its timestamp.
+        :rtype: Tuple[float, builtin_interfaces.msg.Time]
+        """
+        return self.reward, self.get_clock().now().to_msg()
         return self.reward, self.get_clock().now().to_msg()
 
     def calculate_activation(self, perception=None, activation_list=None):
-        """ "
-        Returns the the activation value of the Drive
+        """
+        Returns the the activation value of the Drive.
 
-        :param perception: The given perception
+        :param perception: The given perception.
         :type perception: dict
-        :return: The activation of the instance
+        :return: The activation of the instance.
         :rtype: float
         """
         self.calculate_activation_max(activation_list)
@@ -169,20 +173,20 @@ class DriveTopicInput(Drive):
     Drive class that reads an input topic to obtain its evaluation value.
     """
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", input_topic=None, input_msg=None, min_eval=0.0, **params):
-        """Constructor of the DriveTopicInput class
+        """Constructor of the DriveTopicInput class.
 
         Initializes a base class Drive instance and creates a subscriptor to the input topic.
 
-        :param name: The name of the drive instance
+        :param name: The name of the drive instance.
         :type name: str
-        :param class_name: The name of the base Drive class, defaults to "cognitive_nodes.drive.Drive"
-        :type class_name: str, optional
-        :param input_topic: Topic where the input will be published
+        :param class_name: The name of the base Drive class.
+        :type class_name: str
+        :param input_topic: Topic where the input will be published.
         :type input_topic: str
-        :param input_msg: Message type of the input topic
+        :param input_msg: Message type of the input topic.
         :type input_msg: ROS2 Interface
-        :param min_eval: Minimum evaluation value as input reaches 1.0, defaults to 0.0
-        :type min_eval: float, optional
+        :param min_eval: Minimum evaluation value as input reaches 1.0, defaults to 0.0.
+        :type min_eval: float
         """        
         super().__init__(name, class_name, **params)
         self.min_eval=min_eval
@@ -194,7 +198,7 @@ class DriveTopicInput(Drive):
     def read_input_callback(self, msg):
         """Reads a message from the input topic and updates the evaluation and reward obtained.
 
-        :param msg: Input data message
+        :param msg: Input data message.
         :type msg: Configurable (Typically std_msgs.msg.Float32)
         """        
         self.input = msg.data
@@ -204,7 +208,8 @@ class DriveTopicInput(Drive):
         self.input_flag = True
 
     def calculate_reward(self):
-        """Calculates the reward depending if the evaluation value increases or decreases.
+        """
+        Calculates the reward depending if the evaluation value increases or decreases.
         """        
         if self.evaluation.evaluation < self.old_evaluation.evaluation:
             self.get_logger().info(f"REWARD DETECTED. Drive: {self.name}, eval: {self.evaluation.evaluation}, old_eval: {self.old_evaluation.evaluation}")
@@ -241,11 +246,11 @@ class DriveTopicInput(Drive):
 class DriveExponential(DriveTopicInput):
     def evaluate(self, perception=None):
         """
-        Evaluates the drive value according to an exponential function
+        Evaluates the drive value according to an exponential function.
 
-        :param perception: The given normalized perception
+        :param perception: The given normalized perception.
         :type perception: dict
-        :return: The valuation of the perception
+        :return: The valuation of the perception.
         :rtype: float
         """
         self.old_evaluation=copy(self.evaluation)

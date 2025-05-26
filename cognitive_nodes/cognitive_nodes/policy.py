@@ -24,11 +24,11 @@ class Policy(CognitiveNode):
 
         :param name: The name of the policy.
         :type name: str
-        :param class_name: The name of the Policy class
+        :param class_name: The name of the Policy class.
         :type class_name: str
-        :param publisher_msg: The publisher message to publicate the execution of the policy
+        :param publisher_msg: The publisher message to publicate the execution of the policy.
         :type publisher: str
-        :param publisher_topic: The publisher topic to publicate the execution of the policy
+        :param publisher_topic: The publisher topic to publicate the execution of the policy.
         :type publisher: str
         """
         
@@ -55,9 +55,11 @@ class Policy(CognitiveNode):
         Calculate the activation level of the policy by obtaining that of its neighboring CNodes
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
 
-        :param perception: Arbitrary perception
+        :param perception: Arbitrary perception.
         :type perception: dict
-        :return: The activation of the Policy
+        :param activation_list: List of activations of the neighbors.
+        :type activation_list: list
+        :return: The activation of the Policy.
         :rtype: float
         """
         if activation_list==None:
@@ -86,29 +88,27 @@ class Policy(CognitiveNode):
         return self.activation
     
     def execute_callback(self, request, response):
-
         """
         Placeholder for the execution of the policy.
 
         :param request: The request to execute the policy.
-        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
-        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
-        :return: The response with the executed policy name.
-        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :raise NotImplementedError: This method should be implemented in subclasses.
         """
         raise NotImplementedError
     
     def set_activation_callback(self, request, response):
         """
-        CNodes can modify a policy's activation
+        CNodes can modify a policy's activation.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
 
         activation = request.activation
@@ -129,11 +129,11 @@ class PolicyAsync(Policy):
 
         :param name: The name of the policy.
         :type name: str
-        :param class_name: The name of the base Policy class
+        :param class_name: The name of the base Policy class.
         :type class_name: str
-        :param publisher_msg: The publisher message to publicate the execution of the policy
+        :param publisher_msg: The publisher message to publicate the execution of the policy.
         :type publisher: str
-        :param publisher_topic: The publisher topic to publicate the execution of the policy
+        :param publisher_topic: The publisher topic to publicate the execution of the policy.
         :type publisher: str
         """        
         super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
@@ -147,11 +147,11 @@ class PolicyAsync(Policy):
         It logs the execution and returns the policy name in the response.
 
         :param request: The request to execute the policy.
-        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
-        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :type response: cognitive_node_interfaces.srv.Execute.Response
         :return: The response with the executed policy name.
-        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
         msg = class_from_classname(self.publisher_msg)()
@@ -170,11 +170,11 @@ class PolicyBlocking(Policy):
 
         :param name: The name of the policy.
         :type name: str
-        :param class_name: The name of the base Policy class
+        :param class_name: The name of the base Policy class.
         :type class_name: str
-        :param service_msg: Message type of the service that executes the policy
+        :param service_msg: Message type of the service that executes the policy.
         :type service_msg: ROS2 message type. Typically cognitive_node_interfaces.srv.Policy
-        :param service_name: Name of the service that executes the policy
+        :param service_name: Name of the service that executes the policy.
         :type service_name: str
         """        
         super().__init__(name, class_name, service_msg, service_name, **params)
@@ -188,11 +188,11 @@ class PolicyBlocking(Policy):
         Makes a service call to the server that handles the execution of the policy.
 
         :param request: The request to execute the policy.
-        :type request: cognitive_node_interfaces.srv.ExecutePolicy_Request
+        :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
-        :type response: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :type response: cognitive_node_interfaces.srv.Execute.Response
         :return: The response with the executed policy name.
-        :rtype: cognitive_node_interfaces.srv.ExecutePolicy_Response
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.policy_service.send_request_async(policy=self.name)

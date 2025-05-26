@@ -24,7 +24,7 @@ import random
 
 class Goal(CognitiveNode):
     """
-    Goal class
+    Goal class.
     """
     def __init__(self, name='goal', class_name = 'cognitive_nodes.goal.Goal', **params):
         """
@@ -32,18 +32,10 @@ class Goal(CognitiveNode):
 
         Initializes a Goal with the given name and registers it in the LTM.
 
-        :param name: The name of the Goal
+        :param name: The name of the Goal.
         :type name: str
-        :param data: More configuration info for the Goal
-        :type data: dict
-        :param class_name: The name of the Goal class
+        :param class_name: The name of the Goal class.
         :type class_name: str
-        :param space_class: The class of the space used to define the Goal
-        :type space_class: str
-        :param space: The space used to define the Goal
-        :type space: cognitive_nodes.space
-        :param robot_service: The ROS service prefix to connect with robot or simulator
-        :type robot_service: str
         """
         super().__init__(name, class_name, **params)
         self.reward = 0.0
@@ -88,14 +80,14 @@ class Goal(CognitiveNode):
 
     def set_activation_callback(self, request, response):
         """
-        Drives can modify a goals's activation
+        Drives can modify a goals's activation.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -105,6 +97,16 @@ class Goal(CognitiveNode):
         return response
     
     def send_goal_space_callback(self, request, response):
+        """
+        Callback that sends the goal space data.
+
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.SendSpace.Request
+        :param response: Response that contains the goal space data.
+        :type response: cognitive_node_interfaces.srv.SendSpace.Response
+        :return: Response containing the goal space data.
+        :rtype: cognitive_node_interfaces.srv.SendSpace.Response
+        """
         response.labels = []
         response.data = []
         response.confidences = []
@@ -113,14 +115,14 @@ class Goal(CognitiveNode):
     
     async def is_reached_callback(self, request, response):
         """
-        Check if the goal has been reached
+        Check if the goal has been reached.
 
-        :param request: Request that includes the new perception to check
-        :type request: cognitive_node_interfaces.srv.IsReached_Request
-        :param response: Response that indicates if the goal is reached or not
-        :type response: cognitive_node_interfaces.srv.IsReached_Response
-        :return: Response that indicates if the goal is reached or not
-        :rtype: cognitive_node_interfaces.srv.IsReached_Response
+        :param request: Request that includes the new perception to check.
+        :type request: cognitive_node_interfaces.srv.IsReached.Request
+        :param response: Response that indicates if the goal is reached or not.
+        :type response: cognitive_node_interfaces.srv.IsReached.Response
+        :return: Response that indicates if the goal is reached or not.
+        :rtype: cognitive_node_interfaces.srv.IsReached.Response
         """
         self.get_logger().info('Checking if is reached..')
         self.old_perception = perception_msg_to_dict(request.old_perception)
@@ -137,14 +139,14 @@ class Goal(CognitiveNode):
     
     async def get_reward_callback(self, request, response):
         """
-        Callback method to calculate the reward obtained 
+        Callback method to calculate the reward obtained. 
 
-        :param request: Request that includes the new perception to check the reward
-        :type request: cognitive_node_interfaces.srv.GetReward_Request
-        :param response: Response that contais the reward
-        :type response: cognitive_node_interfaces.srv.GetReward_Response
-        :return: Response that contais the reward
-        :rtype: cognitive_node_interfaces.srv.GetReward_Response
+        :param request: Request that includes the new perception to check the reward.
+        :type request: cognitive_node_interfaces.srv.GetReward.Request
+        :param response: Response that contais the reward.
+        :type response: cognitive_node_interfaces.srv.GetReward.Response
+        :return: Response that contais the reward.
+        :rtype: cognitive_node_interfaces.srv.GetReward.Response
         """
         self.point_msg=request.perception
         self.old_perception = perception_msg_to_dict(request.old_perception)
@@ -169,8 +171,11 @@ class Goal(CognitiveNode):
         to the required experiment/application. It is a asyncio corrutine so that service
         calls can be awaited.  
 
-        :return: The reward obtained
-        :rtype: float
+        :param old_perception: The previous perception data. Defaults to None.
+        :type old_perception: Any
+        :param perception: The current perception data. Defaults to None.
+        :type perception: Any
+        :raises NotImplementedError: If the method is not overridden in a subclass.
         """
         raise NotImplementedError
 
@@ -183,6 +188,24 @@ class GoalObjectInBoxStandalone(Goal):
     """
 
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, robot_service='simulator', normalize_data=None, **params):
+        """
+        Constructor of the GoalObjectInBoxStandalone class.
+
+        :param name: Name of the goal.
+        :type name: str
+        :param data: Configuration data for the goal.
+        :type data: dict
+        :param class_name: Class name of the goal, defaults to 'cognitive_nodes.goal.Goal'
+        :type class_name: str
+        :param space_class: Class of the space to be used.
+        :type space_class: str
+        :param space: Predefined space object.
+        :type space: object
+        :param robot_service: Name of the robot service.
+        :type robot_service: str
+        :param normalize_data: Normalization data for sensor values
+        :type normalize_data: dict
+        """
         super().__init__(name, class_name, **params)
         self.robot_service = robot_service
 
@@ -208,9 +231,9 @@ class GoalObjectInBoxStandalone(Goal):
 
     def new_from_configuration_file(self, data):
         """
-        Create attributes from the data configuration dictionary
+        Create attributes from the data configuration dictionary.
 
-        :param data: The configuration file
+        :param data: The configuration file.
         :type data: dict
         """
         self.space = class_from_classname(data.get("space"))(ident=self.name + " space")
@@ -222,13 +245,13 @@ class GoalObjectInBoxStandalone(Goal):
 
     def object_too_far(self, distance, angle):
         """
-        Check is an object is too far
+        Check is an object is too far.
 
-        :param distance: Distance of the object relative to the robot
+        :param distance: Distance of the object relative to the robot.
         :type distance: float
-        :param angle: Angle of the object relative to the robot
+        :param angle: Angle of the object relative to the robot.
         :type angle: float
-        :return: Value that indicates if the objet is too far or not
+        :return: Value that indicates if the objet is too far or not.
         :rtype: bool
         """
         too_far = self.too_far_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
@@ -236,11 +259,11 @@ class GoalObjectInBoxStandalone(Goal):
     
     def calculate_closest_position(self, angle):
         """
-        Calculate the closest position from a given cylinder angle
+        Calculate the closest position from a given cylinder angle.
 
-        :param angle: The given angle
+        :param angle: The given angle.
         :type angle: float
-        :return: The closest distance and angle
+        :return: The closest distance and angle.
         :rtype: float, float
         """
         service_name = self.robot_service + '/calculate_closest_position'
@@ -251,9 +274,13 @@ class GoalObjectInBoxStandalone(Goal):
     
     def object_pickable_with_two_hands_request(self, distance, angle):
         """
-        Check of an obkect is pickable with the two hands of the robot
+        Check of an object is pickable with the two hands of the robot.
 
-        :return: A value that indicates if the object is pickable or not
+        :param angle: The distance of the object relative to the robot.
+        :type angle: float
+        :param angle: The angle of the object relative to the robot.
+        :type angle: float
+        :return: A value that indicates if the object is pickable or not.
         :rtype: bool
         """
         pickable = self.pickable_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
@@ -263,9 +290,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if there is an object inside of a box.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is inside or not
+        :return: A value that indicates if the object is inside or not.
         :rtype: bool
         """
         inside = False
@@ -283,9 +308,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if there is an object inside of a box.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is inside or not
+        :return: A value that indicates if the object is inside or not.
         :rtype: bool
         """
         inside = False
@@ -303,9 +326,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if there is an object adjacent to the robot.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is adjacent or not
+        :return: A value that indicates if the object is adjacent or not.
         :rtype: bool
         """
         together = False
@@ -323,9 +344,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object is held with the left hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.perception['ball_in_left_hand'][0]['data']
@@ -334,9 +353,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object is held with the right hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.perception['ball_in_right_hand'][0]['data']
@@ -345,9 +362,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object is held with one hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.object_held_with_left_hand() or self.object_held_with_right_hand()
@@ -356,9 +371,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object was held with one hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object was held or not
+        :return: A value that indicates if the object was held or not.
         :rtype: bool
         """
         if self.old_perception:
@@ -373,9 +386,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object is held with two hands.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return (
@@ -387,9 +398,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object and a box are on the same side.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is in the same side or not
+        :return: A value that indicates if the object is in the same side or not.
         :rtype: bool
         """
         same_side = False
@@ -405,9 +414,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object can be hold with two hands.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object can be hold or not
+        :return: A value that indicates if the object can be hold or not.
         :rtype: bool
         """
         pickable = False
@@ -421,9 +428,7 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if an object was moved towards the robot's reachable area.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object can be moved or not
+        :return: A value that indicates if the object can be moved or not.
         :rtype: bool
         """
         approximated = False
@@ -445,8 +450,6 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check if the held object changed from one hand to another.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
         :return: A value that indicates if the hand changed moved or not
         :rtype: bool
         """
@@ -472,17 +475,22 @@ class GoalObjectInBoxStandalone(Goal):
     
     def get_iteration_callback(self, msg:ControlMsg):
         """
-        Get the iteration of the experiment, if necessary
+        Get the iteration of the experiment, if necessary.
 
-        :return: The iteration of the experiment
-        :rtype: int
+        :param msg: The control message containing the iteration information.
+        :type msg: ControlMsg
         """
         self.iteration=msg.iteration
         # if msg.command == "reset_world":
         #     self.perception = {}
     
     def sensorial_changes(self):
-        """Return false if all perceptions have the same value as the previous step. True otherwise."""
+        """
+        Return false if all perceptions have the same value as the previous step. True otherwise.
+
+        :return: Value that indicates if the percepction values changed or not.
+        :rtype: bool
+        """
         if not self.old_perception and self.perception:
             return True
         else:
@@ -500,11 +508,13 @@ class GoalObjectInBoxStandalone(Goal):
         
     def calculate_activation(self, perception = None, activation_list = None):
         """
-        Returns the the activation value of the goal
+        Returns the the activation value of the goal.
 
-        :param perception: Perception does not influence the activation 
+        :param perception: Perception does not influence the activation.
         :type perception: dict
-        :return: The activation of the goal
+        :param activation_list: List of activations. Not used.
+        :type activation_list: list
+        :return: The activation of the goal.
         :rtype: float
         """
         iteration=self.iteration
@@ -522,7 +532,11 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Calculate the reward for the current sensor values.
 
-        :return: The reward obtained
+        :param old_perception: The previous perception. Not used.
+        :type old_perception: Any
+        :param perception: The current perception. Not used.
+        :type perception: Any
+        :return: The reward obtained.
         :rtype: float
         """
         self.reward = 0.0
@@ -548,6 +562,18 @@ class GoalObjectInBoxStandalone(Goal):
         return self.reward
     
     def denormalize(self, type, value):
+        """
+        Denormalize a normalized value based on the type of measurement.
+
+        :param type: The type of measurement (e.g., 'distance', 'angle', 'diameter').
+        :type type: str
+        :param value: The normalized value to be denormalized.
+        :type value: float
+        :raises Exception: If normalization values are not defined.
+        :raises ValueError: If the type is not recognized.
+        :return: The denormalized value.
+        :rtype: float
+        """
         raw=0
         norm_max=0
         norm_min=0
@@ -583,17 +609,17 @@ class GoalReadPublishedReward(Goal):
     """
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', default_topic=None, default_msg=None, **params):
         """
-        Constructor of the GoalReadPublishedReward class
+        Constructor of the GoalReadPublishedReward class.
 
-        :param name: Name of the node
+        :param name: Name of the node.
         :type name: str
-        :param data: _description_, defaults to None
-        :type data: _type_, optional
-        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
-        :type class_name: str, optional
-        :param default_topic: Topic from where the reward is read
+        :param data: Configuration data for the goal.
+        :type data: dict
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
+        :type class_name: str
+        :param default_topic: Topic from where the reward is read.
         :type default_topic: str
-        :param default_msg: Message type of the reward message
+        :param default_msg: Message type of the reward message.
         :type default_msg: ROS Message (Typically std_msgs.Float32)
         """        
         super().__init__(name, class_name, **params)
@@ -612,9 +638,9 @@ class GoalReadPublishedReward(Goal):
 
     def new_from_configuration_file(self, data):
         """
-        Create attributes from the data configuration dictionary
+        Create attributes from the data configuration dictionary.
 
-        :param data: The configuration file
+        :param data: The configuration file.
         :type data: dict
         """
         self.start = data.get("start")
@@ -628,19 +654,20 @@ class GoalReadPublishedReward(Goal):
         """
         Callback that reads the reward message. Sets a flag that indicates that reward is updated.
 
-        :param msg: Reward message
+        :param msg: Reward message.
         :type msg: ROS Message (Typically std_msgs.Float32)
         """        
         self.reward=msg.data
         self.flag.set()
 
     def get_reward(self, old_perception=None, perception=None):
-        """_summary_
+        """
+        Returns the reward obtained.
 
-        :param old_perception: Unused perception, defaults to None
-        :type old_perception: NoneType, optional
-        :param perception: Unused perception, defaults to None
-        :type perception: NoneType, optional
+        :param old_perception: Unused perception.
+        :type old_perception: Any
+        :param perception: Unused perception.
+        :type perception: Any
         :return: Obtained reward
         :rtype: float
         """        
@@ -662,9 +689,11 @@ class GoalReadPublishedReward(Goal):
         """
         Returns the the activation value of the goal
 
-        :param perception: Perception does not influence the activation 
+        :param perception: Perception does not influence the activation. 
         :type perception: dict
-        :return: The activation of the goal
+        :param activation_list: List of activations. Not used.
+        :type activation_list: list
+        :return: The activation of the goal.
         :rtype: float
         """
         iteration=self.iteration
@@ -686,10 +715,10 @@ class GoalMotiven(Goal):
         """
         Constructor of the GoalActivatePNode class.
 
-        :param name: Name of the node
+        :param name: Name of the node.
         :type name: str
-        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
-        :type class_name: str, optional
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
+        :type class_name: str
         """        
         super().__init__(name, class_name, **params)
         self.drive_inputs = {}
@@ -703,7 +732,7 @@ class GoalMotiven(Goal):
         """
         Reads the neighbors list of the goal and configures inputs for each drive.
 
-        :param neighbors: Dictionary with the information of the node [{'name': <name>, 'node_type': <node_type>}, .... ]
+        :param neighbors: Dictionary with the information of the node [{'name': <name>, 'node_type': <node_type>}, .... ].
         :type neighbors: dict
         """        
         drive_list = [node for node in neighbors if node['node_type']== 'Drive']
@@ -750,12 +779,12 @@ class GoalMotiven(Goal):
         """
         This method extends the base add_neighbor_callback by handling the addition of a Drive node.
 
-        :param request: The request that contains the neighbor info
-        :type request: cognitive_node_interfaces.srv.AddNeighbor_Request
-        :param response: The response that indicates if the neighbor was added
-        :type response: cognitive_node_interfaces.srv.AddNeighbor_Response
-        :return: The response that indicates if the neighbor was added
-        :rtype: cognitive_node_interfaces.srv.AddNeighbor_Response
+        :param request: The request that contains the neighbor info.
+        :type request: cognitive_node_interfaces.srv.AddNeighbor.Request
+        :param response: The response that indicates if the neighbor was added.
+        :type response: cognitive_node_interfaces.srv.AddNeighbor.Response
+        :return: The response that indicates if the neighbor was added.
+        :rtype: cognitive_node_interfaces.srv.AddNeighbor.Response
         """        
         node_name = request.neighbor_name
         node_type = request.neighbor_type
@@ -770,12 +799,12 @@ class GoalMotiven(Goal):
         """
         This method extends the base delete_neighbor_callback by handling the deletion of a Drive node.
 
-        :param request: The request that contains the neighbor info
-        :type request: cognitive_node_interfaces.srv.DeleteNeighbor_Request
-        :param response: The response that indicates if the neighbor was deleted
-        :type response: cognitive_node_interfaces.srv.DeleteNeighbor_Response
-        :return: The response that indicates if the neighbor was deleted
-        :rtype: cognitive_node_interfaces.srv.DeleteNeighbor_Response
+        :param request: The request that contains the neighbor info. 
+        :type request: cognitive_node_interfaces.srv.DeleteNeighbor.Request
+        :param response: The response that indicates if the neighbor was deleted.
+        :type response: cognitive_node_interfaces.srv.DeleteNeighbor.Response
+        :return: The response that indicates if the neighbor was deleted.
+        :rtype: cognitive_node_interfaces.srv.DeleteNeighbor.Response
         """
 
         node_name = request.neighbor_name
@@ -859,10 +888,10 @@ class GoalMotiven(Goal):
         """
         Returns the reward of the goal.
 
-        :param old_perception: Unused perception, defaults to None
-        :type old_perception: NoneType, optional
-        :param perception: Unused perception, defaults to None
-        :type perception: NoneType, optional
+        :param old_perception: Unused perception, defaults to None.
+        :type old_perception: Any
+        :param perception: Unused perception.
+        :type perception: Any.
         :return: Reward of the goal and its timestamp.
         :rtype: tuple (float, builtin_interfaces.msg.Time)
         """        
@@ -879,22 +908,22 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Constructor of the GoalLearnedSpace class.
 
-        :param name: Name of the node
+        :param name: Name of the node.
         :type name: str
-        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'
-        :type class_name: str, optional
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
+        :type class_name: str
         :param space_class: Class of the space.
         :type space_class: str
-        :param space: Provided space object, defaults to None
+        :param space: Provided space object.
         :type space: space.Space, optional
-        :param history_size: Samples to consider for confidence calculation, defaults to 50
-        :type history_size: int, optional
-        :param min_confidence: Minimum confidence to consider Goal as learned, defaults to 0.85
-        :type min_confidence: float, optional
+        :param history_size: Samples to consider for confidence calculation.
+        :type history_size: int
+        :param min_confidence: Minimum confidence to consider Goal as learned.
+        :type min_confidence: float
         :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
-        :param perception: Perception to add when initializing space, defaults to None
-        :type perception: dict, optional
+        :param perception: Perception to add when initializing space.
+        :type perception: dict
         """        
         super().__init__(name, class_name, **params)
         if space_class:
@@ -929,7 +958,7 @@ class GoalLearnedSpace(GoalMotiven):
             self.point_msg:Perception
             i = 0
             for dim in self.point_msg.layout.dim:
-                sensor = dim.object[:-1]
+                sensor = dim.object[:-1]  #TODO: THIS DOES NOT WORK FOR MORE THAN 10 SENSORS!!
                 for label in dim.labels:
                     data_label = str(i) + "-" + sensor + "-" + label
                     self.data_labels.append(data_label)
@@ -967,11 +996,11 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Callback that checks if the space contains a given space.
 
-        :param request: Request that contains the space to check
+        :param request: Request that contains the space to check.
         :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
-        :param response: Response that indicates if the space is contained
+        :param response: Response that indicates if the space is contained.
         :type response: cognitive_node_interfaces.srv.ContainsSpace.Response
-        :return: Response that indicates if the space is contained
+        :return: Response that indicates if the space is contained.
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
         labels=request.labels
@@ -989,7 +1018,7 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Add a new point (or anti-point) to the Goal.
         
-        :param point: The point that is added to the Goal
+        :param point: The point that is added to the Goal.
         :type point: dict
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
@@ -1008,11 +1037,11 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
 
-        :param old_perception: First perception, defaults to None
-        :type old_perception: dict, optional
-        :param perception: Second perception, defaults to None
-        :type perception: dict, optional
-        :return: The reward obtained and its timestamp
+        :param old_perception: First perception. Not used.
+        :type old_perception: dict
+        :param perception: Second perception. Not used.
+        :type perception: dict
+        :return: The reward obtained and its timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """        
         if not compare_perceptions(old_perception, perception):
@@ -1042,9 +1071,9 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Calculate the expected reward of the goal based on the perception and the goal state.
 
-        :param perception: Perception to evaluate
+        :param perception: Perception to evaluate. 
         :type perception: dict
-        :return: Expected reward
+        :return: Expected reward.
         :rtype: float
         """        
         reward_list = []
@@ -1108,7 +1137,7 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Check if there is a drived linked to the goal.
 
-        :return: Value that indicates if there is a linked drive
+        :return: Value that indicates if there is a linked drive.
         :rtype: bool
         """        
         for neighbor in self.neighbors:
@@ -1120,7 +1149,7 @@ class GoalLearnedSpace(GoalMotiven):
         """
         Returns the name of the linked drive.
 
-        :return: Drive name
+        :return: Drive name.
         :rtype: str
         """        
         for neighbor in self.neighbors:

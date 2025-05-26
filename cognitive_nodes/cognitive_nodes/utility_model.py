@@ -12,13 +12,13 @@ class UtilityModel(CognitiveNode):
     """
     def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', **params):
         """
-        Constructor of the Utility Model class
+        Constructor of the Utility Model class.
 
-        Initializes a Utility Model instance with the given name and registers it in the ltm
+        Initializes a Utility Model instance with the given name and registers it in the LTM.
 
-        :param name: The name of the Utility Model instance
+        :param name: The name of the Utility Model instance.
         :type name: str
-        :param class_name: The name of the Utility Model class
+        :param class_name: The name of the Utility Model class.
         :type class_name: str
         """
         super().__init__(name, class_name, **params)
@@ -46,14 +46,14 @@ class UtilityModel(CognitiveNode):
 
     def set_activation_callback(self, request, response):
         """
-        CNodes can modify the utility model's activation
+        C-Nodes can modify the Utility Model's activation.
 
-        :param request: The request that contains the new activation value
-        :type request: cognitive_node_interfaces.srv.SetActivation_Request
-        :param response: The response indicating if the activation was set
-        :type response: cognitive_node_interfaces.srv.SetActivation_Response
-        :return: The response indicating if the activation was set
-        :rtype: cognitive_node_interfaces.srv.SetActivation_Response
+        :param request: The request that contains the new activation value.
+        :type request: cognitive_node_interfaces.srv.SetActivation.Request
+        :param response: The response indicating if the activation was set.
+        :type response: cognitive_node_interfaces.srv.SetActivation.Response
+        :return: The response indicating if the activation was set.
+        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
         """
         activation = request.activation
         self.get_logger().info('Setting activation ' + str(activation) + '...')
@@ -63,14 +63,15 @@ class UtilityModel(CognitiveNode):
     
     def evaluate_callback(self, request, response): # TODO: implement
         """
-        Get expected valuation for a given perception
+        Get expected valuation for a given perception.
+        Dummy, for the moment, as it returns the same value.
 
-        :param request: The request that contains the perception
-        :type request: cognitive_node_interfaces.srv.Evaluate_Request
-        :param response: The response that contains tha valuation of the perception
-        :type response: cognitive_node_interfaces.srv.Evaluate_Response
-        :return: The response that contains the valuation of the perception
-        :rtype: cognitive_node_interfaces.srv.Evaluate_Response
+        :param request: The request that contains the perception.
+        :type request: cognitive_node_interfaces.srv.Evaluate.Request
+        :param response: The response that contains tha valuation of the perception.
+        :type response: cognitive_node_interfaces.srv.Evaluate.Response
+        :return: The response that contains the valuation of the perception.
+        :rtype: cognitive_node_interfaces.srv.Evaluate.Response
         """
         perception = request.perception
         self.get_logger().info('Evaluating for perception ' +str(perception) + '...')
@@ -81,14 +82,15 @@ class UtilityModel(CognitiveNode):
     
     def get_success_rate_callback(self, request, response): # TODO: implement
         """
-        Get a prediction success rate based on a historic of previous predictions
+        Get a prediction success rate based on a historic of previous predictions.
+        Dummy, for the moment, as it returns the same value.
 
-        :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.GetSuccessRate_Request
-        :param response: The response that contains the predicted success rate
-        :type response: cognitive_node_interfaces.srv.GetSuccessRate_Response
-        :return: The response that contains the predicted success rate
-        :rtype: cognitive_node_interfaces.srv.GetSuccessRate_Response
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.GetSuccessRate.Request
+        :param response: The response that contains the predicted success rate.
+        :type response: cognitive_node_interfaces.srv.GetSuccessRate.Response
+        :return: The response that contains the predicted success rate.
+        :rtype: cognitive_node_interfaces.srv.GetSuccessRate.Response
         """
         self.get_logger().info('Getting success rate..')
         # TODO: implement logic
@@ -97,11 +99,12 @@ class UtilityModel(CognitiveNode):
 
     def calculate_activation(self, perception = None): #TODO: Implement logic
         """
-        Returns the the activation value of the Utility Model
+        Returns the the activation value of the Utility Model.
+        Dummy, for the moment, as it returns a random value.
 
-        :param perception: The given percepton
+        :param perception: The given perception.
         :type perception: dict
-        :return: The activation of the instance
+        :return: The activation of the instance.
         :rtype: float
         """
         self.activation = random.random()

@@ -13,7 +13,7 @@ class LTMSubscription:
         """
         Configure the subscription to the LTM.
 
-        :param ltm: LTM id.
+        :param ltm: LTM ID.
         :type ltm: str
         """        
         self.ltm_suscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=self.cbgroup_client)
@@ -58,7 +58,7 @@ class PNodeSuccess(LTMSubscription):
         """
         Method that processes the LTM data and subscribes to the success rate of the P-Nodes.
 
-        :param ltm_dump: Dictionary with the data from the LTM
+        :param ltm_dump: Dictionary with the data from the LTM.
         :type ltm_dump: str
         """        
         pnodes = ltm_dump["PNode"]
