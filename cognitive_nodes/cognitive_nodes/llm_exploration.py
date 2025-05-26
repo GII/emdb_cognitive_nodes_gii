@@ -231,7 +231,7 @@ class PolicyLLMExploration(Policy):
     
 class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     """
-    PolicyLLMExploration Class, represents a policy that selects a policy guided by a LLM and executes it.
+    PolicyLLMExplorationFruitShop Class, represents a policy to explore the Fruit Shop experiment environment with LLMs.
     """
 
     def read_reward(self, reward_list):
@@ -305,6 +305,9 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     
     
 class PolicyLLMExplorationPump(PolicyLLMExploration):
+    """
+    PolicyLLMExplorationPump Class, represents a policy to explore the Pump Panel experiment environment with LLMs.
+    """
     def __init__(self, name='policy_llm_exploration', model = None, client_host = None, temperature = 0.1, num_predict = 8, initial_prompts = [], exp_stages = None, max_episodes = 5, ltm_id = None, **params):
         """
         Constructor of the PolicyLLMExploration class for the Pump Panel experiment.
