@@ -24,26 +24,26 @@ from simulators.pump_panel_sim_discrete import PumpObjects
 
 class DriveLLMExploration(Drive):
     """
-    DriveLLMExploration Class, represents a drive to explore the environment with LLMs
+    DriveLLMExploration Class, represents a drive to explore the environment with LLMs.
     """    
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
         Constructor of the DriveLLMExploration class.
 
-        :param name: The name of the Drive instance
+        :param name: The name of the Drive instance.
         :type name: str
-        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive"
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
         :type class_name: str
         """        
         super().__init__(name, class_name, **params)
 
     def evaluate(self, perception=None):
         """
-        Evaluation that always returns 1.0, as the drive is always .
+        Evaluation that always returns 1.0, as the drive is always.
 
-        :param perception: Unused perception, defaults to None
-        :type perception: dict/NoneType, optional
-        :return: Evaluation of the Drive
+        :param perception: Unused perception, defaults to None.
+        :type perception: dict or NoneType
+        :return: Evaluation of the Drive. It always returns 1.0.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
         self.evaluation.evaluation = 1.0
@@ -59,6 +59,20 @@ class PolicyLLMExploration(Policy):
 
         :param name: Name of the node
         :type name: str
+        :param model: The model to be used by the LLM.
+        :type model: str
+        :param client_host: Host of the LLM client.
+        :type client_host: str
+        :param temperature: Temperature for the LLM.
+        :type temperature: float
+        :param num_predict: Number of tokens to answer by the LLM.
+        :type num_predict: int
+        :param initial_prompts: Initial prompts to be used by the LLM.
+        :type initial_prompts: list
+        :param exp_stages: Stages of the experiment to change the initial prompt.
+        :type exp_stages: list
+        :param max_episodes: Maximum number of episodes to be sent to the LLM.
+        :type max_episodes: int
         :param ltm_id: Id of the LTM that includes the nodes
         :type ltm_id: str
         """
@@ -82,9 +96,6 @@ class PolicyLLMExploration(Policy):
     def request_ltm(self):
         """
         Requests data from the LTM.
-
-        :return: LTM dump
-        :rtype: dict
         """        
         # Call get_node service from LTM
         service_name = "/" + str(self.LTM_id) + "/get_node"
@@ -97,9 +108,6 @@ class PolicyLLMExploration(Policy):
     def configure_policies(self):
         """
         Creates a list of eligible policies to be executed and shuffles it.
-
-        :param ltm_cache: LTM cache
-        :type ltm_cache: dict
         """
         ltm_cache = self.request_ltm()        
         policies = list(ltm_cache["Policy"].keys())
@@ -108,6 +116,15 @@ class PolicyLLMExploration(Policy):
     
 
     def read_reward(self, reward_list):
+        """
+        Reads the reward from the reward list. The reward is True if any of the keys in the reward list contains "goal" and its value is 1.0.
+        A child class could be implemented to read the reward in a different way.
+
+        :param reward_list: Dictionary with the reward list.
+        :type reward_list: dict
+        :return: True if any of the keys in the reward list contains "goal" and its value is 1.0, otherwise False.
+        :rtype: bool
+        """
         reward = False
         for key, value in reward_list.items():
             if "goal" in key and value == 1.0:
@@ -115,6 +132,12 @@ class PolicyLLMExploration(Policy):
         return reward
 
     def control_callback(self, msg:ControlMsg):
+        """
+        Callback that processes the control message. It updates the initial prompt based on the current iteration and resets the episodes if the command is 'reset_world'.
+
+        :param msg: Message containing the control information.
+        :type msg: cognitive_processes_interfaces.msg.ControlMsg
+        """
         self.iteration = msg.iteration
         command = msg.command
         if command == 'reset_world':
@@ -129,6 +152,12 @@ class PolicyLLMExploration(Policy):
                     self.initial_prompt = self.initial_prompts[-1]
         
     def episodes_callback(self, msg:EpisodeMsg):
+        """
+        Callback that processes the episode message.
+        
+        :param msg: Message containing the episode information.
+        :type msg: cognitive_processes_interfaces.msg.EpisodeMsg
+        """
         old_perception_msg = msg.old_perception
         old_perception = perception_msg_to_dict(old_perception_msg)
         policy = msg.policy
@@ -142,6 +171,12 @@ class PolicyLLMExploration(Policy):
             self.episodes.pop(0)
     
     def send_to_LLM(self):
+        """
+        Sends the initial prompt and the episodes to the LLM, and returns the generated text.
+
+        :return: The generated text from the LLM.
+        :rtype: str
+        """
         #TODO: Add the posibility of using OpenAI API.
         messages = [self.initial_prompt]
         for episode in self.episodes:
@@ -156,6 +191,16 @@ class PolicyLLMExploration(Policy):
         return text
     
     async def execute_callback(self, request, response):
+        """
+        Callback that processes the request to execute a policy. It sends the perception to the LLM, receives the policy to execute, and executes it.
+
+        :param request: Request to execute a policy, containing the perception.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Response that contain the executed policy.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Response that contains the executed policy.
+        :rtype:  cognitive_node_interfaces.srv.Execute.Response
+        """
         self.get_logger().info("Sending request to LLM...")
         if not self.episodes:
             self.episodes = [[None, None, perception_msg_to_dict(request.perception), False]]
@@ -173,6 +218,14 @@ class PolicyLLMExploration(Policy):
         return response
     
     def format_episode(self, episode):
+        """
+        Formats the episode into a YAML string that can be sent to the LLM.
+        This method should be implemented in child classes to format the episode in a specific way.
+
+        :param episode: List containing the old perception, action, new perception, and reward.
+        :type episode: list
+        :raises NotImplementedError: This method should be implemented in child classes.
+        """
         raise NotImplementedError
 
     
@@ -182,6 +235,13 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     """
 
     def read_reward(self, reward_list):
+        """
+        Reads the reward from the reward list, taking into account the stages of the Fruit Shop experiment.
+        :param reward_list: Dictionary with the reward list.
+        :type reward_list: dict
+        :return: True if there is a reward, False otherwise.
+        :rtype: bool
+        """
         reward = False
 
         if self.iteration <= self.exp_stages[0] or (self.iteration > self.exp_stages[1] and self.iteration <= self.exp_stages[2]):
@@ -197,6 +257,15 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
     
         
     def format_episode(self, episode):
+        """
+        Formats the episode into a YAML string that can be sent to the LLM.
+        Specific for the Fruit Shop experiment.
+
+        :param episode: List containing the old perception, action, new perception, and reward.
+        :type episode: list
+        :raises NotImplementedError: This method should be implemented in child classes.
+        """
+        
         old_perception, action, new_perception, reward = episode
         
         if old_perception and action:
@@ -234,12 +303,41 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
 
         return yaml.dump(formatted_episode, default_flow_style=False, sort_keys=False)
     
+    
 class PolicyLLMExplorationPump(PolicyLLMExploration):
     def __init__(self, name='policy_llm_exploration', model = None, client_host = None, temperature = 0.1, num_predict = 8, initial_prompts = [], exp_stages = None, max_episodes = 5, ltm_id = None, **params):
+        """
+        Constructor of the PolicyLLMExploration class for the Pump Panel experiment.
+
+        :param name: Name of the node
+        :type name: str
+        :param model: The model to be used by the LLM.
+        :type model: str
+        :param client_host: Host of the LLM client.
+        :type client_host: str
+        :param temperature: Temperature for the LLM.
+        :type temperature: float
+        :param num_predict: Number of tokens to answer by the LLM.
+        :type num_predict: int
+        :param initial_prompts: Initial prompts to be used by the LLM.
+        :type initial_prompts: list
+        :param exp_stages: Stages of the experiment to change the initial prompt.
+        :type exp_stages: list
+        :param max_episodes: Maximum number of episodes to be sent to the LLM.
+        :type max_episodes: int
+        :param ltm_id: Id of the LTM that includes the nodes
+        :type ltm_id: str
+        """
         super().__init__(name, model, client_host, temperature, num_predict, initial_prompts, exp_stages, max_episodes, ltm_id, **params)
         self.objects = list(PumpObjects.__members__.keys())
 
     def episodes_callback(self, msg:EpisodeMsg):
+        """
+        Callback that processes the episode message foor the Pump Panel experiment.
+        
+        :param msg: Message containing the episode information.
+        :type msg: cognitive_processes_interfaces.msg.EpisodeMsg
+        """
         old_perception_msg = msg.old_perception
         old_perception = perception_msg_to_dict(old_perception_msg)
         policy = msg.policy
@@ -260,6 +358,15 @@ class PolicyLLMExplorationPump(PolicyLLMExploration):
             self.episodes.pop(0)
 
     def format_episode(self, episode):
+        """
+        Formats the episode into a YAML string that can be sent to the LLM.
+        Specific for the Pump Panel experiment.
+
+        :param episode: List containing the old perception, action, new perception, and reward.
+        :type episode: list
+        :raises NotImplementedError: This method should be implemented in child classes.
+        """
+
         old_perception, action, param, new_perception, reward = episode
         if old_perception and action:
             formatted_episode = {
@@ -331,6 +438,14 @@ class PolicyLLMExplorationPump(PolicyLLMExploration):
 
     
     def process_response(self, response):
+        """
+        Processes the response from the LLM to extract the policy and parameter.
+
+        :param response: The response from the LLM, which is expected to be a string containing a JSON-like structure.
+        :type response: str
+        :return: A tuple containing the policy and parameter. If the response does not contain a valid policy, it returns None for both.
+        :rtype: tuple
+        """
         match = re.search(r'{.*}', response, re.DOTALL)
         if match:
             policy_str = match.group(0)
@@ -353,6 +468,17 @@ class PolicyLLMExplorationPump(PolicyLLMExploration):
 
 
     async def execute_callback(self, request, response:Execute.Response):
+        """
+        Callback that processes the request to execute a policy. It sends the perception to the LLM, receives the policy to execute, and executes it.
+        Specific for the Pump Panel experiment.
+
+        :param request: Request to execute a policy, containing the perception.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Response that contain the executed policy.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Response that contains the executed policy.
+        :rtype:  cognitive_node_interfaces.srv.Execute.Response
+        """
         self.get_logger().info("Sending request to LLM...")
         if not self.episodes:
             self.episodes = [[None, None, None, perception_msg_to_dict(request.perception), False]]
