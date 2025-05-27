@@ -71,8 +71,8 @@ class Perception(CognitiveNode):
         :type perception: dict
         :param activation_list: List of activations. Not used in this case.
         :type activation_list: list
-        :return: The activation of the instance.
-        :rtype: float
+        :return: The activation of the instance and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation

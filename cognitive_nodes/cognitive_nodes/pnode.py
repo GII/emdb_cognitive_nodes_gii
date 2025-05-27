@@ -159,8 +159,9 @@ class PNode(CognitiveNode):
         :type perception: dict
         :param activation_list: The list of activations to be used for the calculation.
         :type activation_list: list
-        :return: If there is space, returns the activation of the P-Node. If not, returns 0.
-        :rtype: float
+        :return: If there is space, returns the activation of the P-Node. If not, returns 0. 
+            It also returs the timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list!=None:
             perception={}

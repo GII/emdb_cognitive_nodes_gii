@@ -59,8 +59,8 @@ class Policy(CognitiveNode):
         :type perception: dict
         :param activation_list: List of activations of the neighbors.
         :type activation_list: list
-        :return: The activation of the Policy.
-        :rtype: float
+        :return: The activation of the Policy and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list==None:
             cnodes = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] == "CNode"]

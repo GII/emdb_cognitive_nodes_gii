@@ -514,8 +514,8 @@ class GoalObjectInBoxStandalone(Goal):
         :type perception: dict
         :param activation_list: List of activations. Not used.
         :type activation_list: list
-        :return: The activation of the goal.
-        :rtype: float
+        :return: The activation of the goal and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         iteration=self.iteration
         if self.end:
@@ -693,8 +693,8 @@ class GoalReadPublishedReward(Goal):
         :type perception: dict
         :param activation_list: List of activations. Not used.
         :type activation_list: list
-        :return: The activation of the goal.
-        :rtype: float
+        :return: The activation of the goal and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         iteration=self.iteration
         if self.end:

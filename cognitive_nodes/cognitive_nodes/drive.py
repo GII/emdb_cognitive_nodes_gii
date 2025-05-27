@@ -156,8 +156,8 @@ class Drive(CognitiveNode):
 
         :param perception: The given perception.
         :type perception: dict
-        :return: The activation of the instance.
-        :rtype: float
+        :return: The activation of the instance and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
         """
         self.calculate_activation_max(activation_list)
         self.activation.activation=self.activation.activation*self.evaluation.evaluation
@@ -250,8 +250,8 @@ class DriveExponential(DriveTopicInput):
 
         :param perception: The given normalized perception.
         :type perception: dict
-        :return: The valuation of the perception.
-        :rtype: float
+        :return: The valuation of the perception and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
         """
         self.old_evaluation=copy(self.evaluation)
         if self.input>=0:

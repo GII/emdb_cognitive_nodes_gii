@@ -38,7 +38,7 @@ class CNode(CognitiveNode):
         :type perception: dict
         :param activation_list: Dictionary with the activation of multiple nodes. 
         :type activation_list: dict
-        :return: The activation of the C-Node.
+        :return: The activation of the C-Node and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list==None:

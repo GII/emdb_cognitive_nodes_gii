@@ -77,7 +77,7 @@ class DriveEffectanceInternal(Drive, PNodeSuccess):
         """
         Calculates drive evaluation. If any P-Node is above the minimum confidence, drive evaluation is 1.0.
 
-        :return: Drive evaluation.
+        :return: Drive evaluation and its timestamp.
         :rtype: cognitive_node_interfaces.Evaluation
         """        
         max_pnode= max(self.pnode_evaluation.values(), default=0.0)
@@ -178,7 +178,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         """
         Calculates drive evaluation. If any new effect has been found, drive evaluation is 1.0.
 
-        :return: Drive evaluation.
+        :return: Drive evaluation and its timestamp.
         :rtype: cognitive_node_interfaces.Evaluation
         """   
         self.evaluation.evaluation=1.0 if self.new_effects else 0.0
