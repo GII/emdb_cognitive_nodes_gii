@@ -10,7 +10,7 @@ The following intrinsic motivations are implemented:
 - Effectance
 - Prospection
 
-Each of these mechanisms contributes to the autonomous creation and organization of knowledge nodes, such as goals and P-Nodes, which are stored and managed by the architecture's Long-term Memory (LTM).
+Each of these mechanisms contributes to the autonomous creation and organization of knowledge nodes, such as goals and P-Nodes, which are stored and managed by the architecture's Long-Term Memory (LTM).
 
 <div style="width:55%; margin:auto; text-align:center;">
 
