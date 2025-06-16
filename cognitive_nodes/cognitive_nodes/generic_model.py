@@ -120,9 +120,9 @@ class GenericModel(CognitiveNode):
     
     def is_compatible_callback(self, request, response): # TODO: implement
         """
-        Check if the Model is compatible with the current avaliable perceptions.
+        Check if the Model is compatible with the current available perceptions.
 
-        :param request: The request that contains the current avaliable perceptions.
+        :param request: The request that contains the current available perceptions.
         :type request: cognitive_node_interfaces.srv.IsCompatible.Request
         :param response: The response indicating if the Model is compatible or not.
         :type response: cognitive_node_interfaces.srv.IsCompatible.Response
