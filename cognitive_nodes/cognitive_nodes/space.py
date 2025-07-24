@@ -724,33 +724,50 @@ class ANNSpace(PointBasedSpace):
                 print(e)
         '''
 
-        # Define train values
-        output_activation = "sigmoid"
-        optimizer = tf.optimizers.Adam()
-        loss = tf.losses.BinaryCrossentropy()
-        metrics = ["accuracy"]
         # self.n_splits = 5
         self.batch_size = 50
         self.epochs = 50
         self.max_data = 400
         self.first_data = 0
         # Define the Neural Network's model
-        self.model = tf.keras.Sequential(
-            [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)), #TODO Adapt to state space dimensions
-                tf.keras.layers.Dense(64, activation="relu"),
-                tf.keras.layers.Dense(32, activation="relu"),
-                tf.keras.layers.Dense(1, activation=output_activation),
-            ]
-        )
-
-        # Compile the model
-        self.model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        self.model = None
 
         # Initialize variables
         self.there_are_points = False
         self.there_are_antipoints = False
         super().__init__(**kwargs)
+
+    def build_model(self, input_shape):
+        """
+        Build the model with the given input shape.
+
+        :param input_shape: The shape of the input data.
+        :type input_shape: tuple
+        """
+        # Define train values
+        output_activation = "sigmoid"
+        optimizer = tf.optimizers.Adam()
+        loss = tf.losses.BinaryCrossentropy()
+        metrics = ["accuracy"]
+
+        # Build the model
+        model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(input_shape,)),
+        tf.keras.layers.Dense(128, activation="relu"),
+        tf.keras.layers.Dense(64, activation="relu"),
+        tf.keras.layers.Dense(32, activation="relu"),
+        tf.keras.layers.Dense(1, activation=output_activation),
+        ])
+
+        # Compile the model
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+        # Log the model summary for debugging purposes
+        self.logger.debug(f"Model summary for {self.ident}:")
+        model.summary(print_fn=self.logger.debug)
+
+        # Return the compiled model  
+        return model
 
     def add_point(self, perception, confidence):
         """
@@ -775,6 +792,19 @@ class ANNSpace(PointBasedSpace):
             candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
             self.copy_perception(candidate_point, 0, perception)
             point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
+            
+            # If the model is not built yet, build it
+            if self.model is None:
+                input_shape = point.shape[1]  # Get the number of features from the point
+                self.model = self.build_model(input_shape)
+
+            # Catch diff between point and model input shape
+            if point.shape[1] != self.model.input_shape[1]:
+                self.logger.error(
+                    f"Point shape {point.shape} does not match model input shape {self.model.input_shape}"
+                )
+                raise RuntimeError("LTM operation cannot continue :-(")    
+
             prediction = (self.model.call(point)[0][0]*2)-1 #Pass from [0,1] to [-1, 1]
             pos = super().add_point(perception, confidence)
 
