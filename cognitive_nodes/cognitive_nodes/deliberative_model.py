@@ -1,29 +1,26 @@
 import rclpy
-from rclpy.node import Node
-from collections import deque
 
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, msg_to_dict
 from cognitive_node_interfaces.srv import SetActivation, Predict, GetSuccessRate, IsCompatible
+from cognitive_nodes.episodic_buffer import EpisodicBuffer
 
 
-import random
-
-class GenericModel(CognitiveNode):
+class DeliberativeModel(CognitiveNode):
     """
-    Generic Model class
+    Deliberative Model class, this class is a generic model that can be used to implement different types of deliberative models. 
     """
-    def __init__(self, name='model', class_name = 'cognitive_nodes.generic_model.GenericModel', node_type="generic_model", **params):
+    def __init__(self, name='model', class_name = 'cognitive_nodes.deliberative_model.DeliberativeModel', node_type="deliberative_model", prediction_srv_type=None, **params):
         """
-        Constructor of the Generic Model class.
+        Constructor of the Deliberative Model class.
 
-        Initializes a Generic instance with the given name.
+        Initializes a Deliberative instance with the given name.
 
-        :param name: The name of the Generic Model instance.
+        :param name: The name of the Deliberative Model instance.
         :type name: str
-        :param class_name: The name of the GenericModel class.
+        :param class_name: The name of the DeliberativeModel class.
         :type class_name: str
-        :param node_type: The type of the node, defaults to "generic_model".
+        :param node_type: The type of the node, defaults to "deliberative_model".
         :type node_type: str
         """
         super().__init__(name, class_name, **params)
@@ -41,8 +38,12 @@ class GenericModel(CognitiveNode):
         )
 
         # N: Predict Service
+        if prediction_srv_type is not None:
+            prediction_srv_type = class_from_classname(prediction_srv_type)
+        else:
+            raise ValueError("prediction_srv_type must be provided and be a valid class name.")
         self.predict_service = self.create_service(
-            Predict,
+            prediction_srv_type,
             node_type+ "/" + str(name) + '/predict',
             self.predict_callback,
             callback_group=self.cbgroup_server
@@ -160,100 +161,6 @@ class GenericModel(CognitiveNode):
         """
         raise NotImplementedError
     
-
-class EpisodicBuffer:
-    """
-    Class that creates a buffer of episodes to be used as a STM and learn models. 
-
-    WORK IN PROGRESS
-    """    
-    def __init__(self, node:CognitiveNode, episode_topic=None, episode_msg=None, max_size=500, inputs=[], outputs=[], **params) -> None:
-        """
-        Constructor of the EpisodicBuffer class.
-
-        :param node: Cognitive node that will contain this episodic buffer.
-        :type node: core.cognitive_node.CognitiveNode
-        :param episode_topic: Topic where episodes are read.
-        :type episode_topic: str
-        :param episode_msg: Message type of the episodes topic.
-        :type episode_msg: str
-        :param max_size: Maximum size of the episodic buffer, defaults to 500.
-        :type max_size: int
-        :param inputs: List to configure inputs (from the attributes of the episode message) considered in the buffer, defaults to [].
-        :type inputs: list
-        :param outputs: List to configure outputs (from the attributes of the episode message) considered in the buffer, defaults to [].
-        :type outputs: list
-        """        
-        self.node=node
-        self.inputs=inputs #Fields of the episode msg that are considered inputs (Used for prediction)
-        self.outputs=outputs #Fields of the episode msg that are considered outputs (Predicted), or a post calculated value (e.g. Value)
-        self.io_list=inputs+outputs
-        self.labels=[]
-        self.is_input=[]
-        self.data=deque(maxlen=max_size)
-        self.episode_subscription=node.create_subscription(class_from_classname(episode_msg), episode_topic, self.episode_callback, callback_group=node.cbgroup_activation)
-
-    def configure_labels(self, msg):
-        """
-        Creates the label list.
-
-        :param msg: Episode message.
-        :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
-        """        
-        
-        for io_list, is_input_flag in [(self.inputs, True), (self.outputs, False)]:
-            for io in io_list:
-                io_dict = getattr(msg, io)
-                for group in io_dict:
-                    dims = io_dict[group][0]
-                    for dim in dims:
-                        self.labels.append(f"{io}:{group}:{dim}")
-                        self.is_input.append(is_input_flag)
-
-    def episode_callback(self, msg):
-        """
-        Callback that proccesses the episode messages.
-
-        :param msg: Episode message.
-        :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
-        """        
-        if not self.labels:
-            self.configure_labels(msg)
-        self.process_sample(msg)
-
-    def get_sample(self, index):
-        """
-        WORK IN PROGRESS: Method to obtain a sample from the buffer.
-
-        :param index: Index of the sample to obtain.
-        :type index: int
-        """        
-        raise NotImplementedError
-
-    def process_sample(self, episode):
-        """
-        Adds a new episode to the buffer.
-
-        :param episode: Episode message.
-        :type episode: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
-        """        
-        #TODO Add method so that data external to the episode can be added here. E.g. Novelty, Value...
-        new=[]
-        for label in self.labels:
-            io, group, dim = tuple(label.split(':'))
-            data_msg=getattr(episode, io) 
-            data=msg_to_dict(data_msg)
-            new.append(data[group][0][dim])
-        self.data.appendleft(new)
-            
-
-    def split_data(self):
-        """
-        Work in progress.
-
-        :raises NotImplementedError: Not implemented yet.
-        """        
-        raise NotImplementedError
     
     
 class Learner:
@@ -269,7 +176,6 @@ class Learner:
         """        
         self.model=None
         self.buffer=buffer
-        self.training_data=[]
     
     def train(self):
         """
@@ -291,18 +197,33 @@ class Learner:
         """        
         raise NotImplementedError
 
-    
 
-def main(args=None):
-    rclpy.init(args=args)
+class Evaluator:
+    """
+    Class that evaluates the success rate of a model based on its predictions.
+    """    
+    def __init__(self, node:CognitiveNode, learner:Learner,  buffer:EpisodicBuffer, **params) -> None:
+        """
+        Constructor of the Learner class.
 
-    generic_model = GenericModel()
+        :param node: Cognitive node that uses this model.
+        :type node: CognitiveNode
+        :param learner: Learner instance to use for predictions.
+        :type learner: Learner
+        :param buffer: Episodic buffer to use.
+        :type buffer: generic_model.EpisodicBuffer
+        """
+        self.node = node
+        self.learner = learner
+        self.buffer = buffer
+        self.learner = learner
 
-    rclpy.spin(generic_model)
+    def evaluate(self):
+        """
+        Placeholder method for evaluating the model's success rate.
 
-    generic_model.destroy_node()
-    rclpy.shutdown()
+        :raises NotImplementedError: Not implemented yet.
+        """
+        raise NotImplementedError
 
 
-if __name__ == '__main__':
-    main()

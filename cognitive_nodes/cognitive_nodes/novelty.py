@@ -10,11 +10,12 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy, PolicyBlocking
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg
+from core.utils import actuation_dict_to_msg, perception_msg_to_dict
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
 from cognitive_node_interfaces.srv import Execute, Predict
+from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 
 
 class DriveNovelty(Drive):
@@ -396,7 +397,10 @@ class PolicyRandomAction(PolicyBlocking):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         self.randomize_actuation()
         actuation_msg=actuation_dict_to_msg(self.actuation)
-        await self.world_model_client.send_request_async(perception=request.perception, actuation=actuation_msg)
+        input_episode = EpisodeMsg()
+        input_episode.old_perception = request.perception
+        input_episode.action.actuation = actuation_msg
+        result = await self.world_model_client.send_request_async(input_episodes=[input_episode])
         actuation_msg=actuation_dict_to_msg(self.denormalize_actuation(self.actuation, self.actuation_config))
         await self.policy_service.send_request_async(action=actuation_msg)
         response.policy=self.name

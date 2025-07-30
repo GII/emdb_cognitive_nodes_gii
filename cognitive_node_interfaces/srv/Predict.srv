@@ -1,5 +1,4 @@
-cognitive_node_interfaces/Perception perception
-cognitive_node_interfaces/Actuation actuation
-string policy
+cognitive_node_interfaces/Episode[] input_episodes
 ---
-Perception prediction
+cognitive_node_interfaces/Episode[] output_episodes
+bool valid
