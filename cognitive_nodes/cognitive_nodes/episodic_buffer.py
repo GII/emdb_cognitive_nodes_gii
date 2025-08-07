@@ -2,6 +2,7 @@ import rclpy
 import pandas as pd
 import numpy as np
 from collections import deque
+from copy import deepcopy
 
 from core.cognitive_node import CognitiveNode
 from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj
@@ -58,21 +59,24 @@ class EpisodicBuffer:
         :param episode: Episode object.
         :type episode: cognitive_node_interfaces.msg.Episode
         """
+        self.node.get_logger().info(f"Configuring labels for episodic buffer: {episode}")
         self.input_labels.clear()
         self.output_labels.clear()
         self._extract_labels(self.inputs, episode, self.input_labels)
         self._extract_labels(self.outputs, episode, self.output_labels)
+        self.node.get_logger().info(f"Configuration finished - Input labels: {self.input_labels}, Output labels: {self.output_labels}")
 
     def add_episode(self, episode: Episode):
-        if not self.input_labels or not self.output_labels:
+        self.node.get_logger().info(f"DEBUG - Input labels: {self.input_labels}, Output labels: {self.output_labels} / Inputs: {self.inputs}, Outputs: {self.outputs}")
+        if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
             self.configure_labels(episode)
         if self.rng.uniform() < self.train_split:
             # Add to main buffer
-            self.main_buffer.append(episode)
+            self.main_buffer.append(deepcopy(episode))
             self.new_sample_count_main += 1
         else:
             # Add to secondary buffer
-            self.secondary_buffer.append(episode)
+            self.secondary_buffer.append(deepcopy(episode))
             self.new_sample_count_secondary += 1
         
     def remove_episode(self, index=None, remove_from_main=True):
@@ -134,29 +138,6 @@ class EpisodicBuffer:
 
     #### GETTERS / SETTERS ####
 
-    def get_sample(self, index, main=True):
-        """
-        WORK IN PROGRESS: Method to obtain a sample from the buffer.
-
-        :param index: Index of the sample to obtain.
-        :type index: int
-        :param main: Whether to get the sample from the main buffer or secondary buffer.
-        :type main: bool
-        :return: The requested sample.
-        :rtype: list
-        """
-        if main:
-            return self.main_buffer[index]
-        else:
-            return self.secondary_buffer[index]
-
-    def get_dataset(self):
-        """
-        Returns the dataset as numpy arrays.
-        """
-        features_train, t_train, features_test, t_test = self.get_dataframes()
-        return features_train.to_numpy(), t_train.to_numpy(), features_test.to_numpy(), t_test.to_numpy()
-    
     def get_input_labels(self):
         """
         Returns the input labels of the episodic buffer.
@@ -175,23 +156,47 @@ class EpisodicBuffer:
         """
         return self.output_labels
 
-    def get_train_samples(self):
+    def get_sample(self, index, main=True):
+        """
+        WORK IN PROGRESS: Method to obtain a sample from the buffer.
+
+        :param index: Index of the sample to obtain.
+        :type index: int
+        :param main: Whether to get the sample from the main buffer or secondary buffer.
+        :type main: bool
+        :return: The requested sample.
+        :rtype: list
+        """
+        if main:
+            return self.main_buffer[index]
+        else:
+            return self.secondary_buffer[index]
+
+    def get_dataset(self, shuffle=False):
+        """
+        Returns the dataset as numpy arrays.
+        If shuffle=True, shuffles the arrays before returning.
+        """
+        x_train, y_train = self._get_samples_from_buffer(self.main_buffer, shuffle=shuffle)
+        x_test, y_test = self._get_samples_from_buffer(self.secondary_buffer, shuffle=shuffle)
+        return x_train, y_train, x_test, y_test
+
+
+    def get_train_samples(self, shuffle=False):
         """
         Returns the training samples as lists of input and output dicts.
         :return: (inputs, outputs) where each is a numpy array
+        If shuffle=True, shuffles the arrays before returning.
         """
-        inputs = self.buffer_to_matrix(self.main_buffer, self.input_labels)
-        outputs = self.buffer_to_matrix(self.main_buffer, self.output_labels)
-        return inputs, outputs
+        return self._get_samples_from_buffer(self.main_buffer, shuffle=shuffle)
 
-    def get_test_samples(self):
+    def get_test_samples(self, shuffle=False):
         """
         Returns the test samples as lists of input and output dicts.
         :return: (inputs, outputs) where each is a numpy array
+        If shuffle=True, shuffles the arrays before returning.
         """
-        inputs = self.buffer_to_matrix(self.secondary_buffer, self.input_labels)
-        outputs = self.buffer_to_matrix(self.secondary_buffer, self.output_labels)
-        return inputs, outputs
+        return self._get_samples_from_buffer(self.secondary_buffer, shuffle=shuffle)
     
     def get_dataframes(self):
         """
@@ -332,11 +337,21 @@ class EpisodicBuffer:
         :return: Buffer of episodes created from the matrix.
         :rtype: list
         """
-        buffer = []
-        for row in matrix:
-            episode = EpisodicBuffer.vector_to_episode(row, labels)
-            buffer.append(episode)
+        buffer = [EpisodicBuffer.vector_to_episode(row, labels) for row in matrix]
         return buffer
+
+    def _get_samples_from_buffer(self, buffer, shuffle=False):
+        """
+        Internal helper to get (inputs, outputs) numpy arrays from a buffer.
+        If shuffle=True, shuffles the arrays before returning.
+        """
+        inputs = self.buffer_to_matrix(buffer, self.input_labels)
+        outputs = self.buffer_to_matrix(buffer, self.output_labels)
+        if shuffle:
+            idx = self.rng.permutation(inputs.shape[0])
+            inputs = inputs[idx]
+            outputs = outputs[idx]
+        return inputs, outputs
 
     @staticmethod
     def _extract_labels(io_list, episode, label_list):
@@ -403,6 +418,17 @@ class TestEpisodicBuffer(CognitiveNode):
             self.get_logger().info(f"Targets Train: \n {y_train}")
             self.get_logger().info(f"Features Test: \n {x_test}")
             self.get_logger().info(f"Targets Test: \n {y_test}")
+
+
+
+class TraceBuffer(EpisodicBuffer):
+    """
+    Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
+
+    Work in progress, this class is not fully implemented yet.
+    """
+    def __init__(self, node, main_size, secondary_size, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
+        super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
 
 
 def test_episodic_buffer(args=None):

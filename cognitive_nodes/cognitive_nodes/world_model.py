@@ -21,7 +21,7 @@ class WorldModel(DeliberativeModel):
     """
     World Model class: A static world model that is always active
     """
-    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', episodes_topic=None, **params):
+    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', episodes_topic=None, prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
         """
         Constructor of the World Model class.
 
@@ -32,14 +32,14 @@ class WorldModel(DeliberativeModel):
         :param class_name: The name of the World Model class.
         :type class_name: str
         """
-        super().__init__(name, class_name, node_type="world_model", **params)
+        super().__init__(name, class_name, node_type="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params)
         self.episodic_buffer=None
         self.learner=None
         self.confidence_evaluator=None
         self.activation.activation = 1.0
 
-    def predict(self, perception: Perception, action: Actuation) -> Perception:
-        return perception, True  # Default implementation, should be overridden by subclasses
+    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+        return super().predict(input_episodes)
 
 
 class WorldModelLearned(WorldModel):
@@ -81,9 +81,24 @@ class WorldModelLearned(WorldModel):
             outputs = ["perception"],
         )
 
-        self.learner = ANNWorldModel(self.episodic_buffer)
+        self.learner = ANNWorldModel(self, self.episodic_buffer)
 
         self.confidence_evaluator = EvaluatorWorldModel(self, self.learner, self.episodic_buffer)
+
+    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        predictions = self.learner.predict(input_data)
+        if predictions is None:
+            for episode in input_episodes:
+                episode.perception = episode.old_perception  # If the model is not configured, return the old perception
+            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+        else:
+            self.get_logger().debug(f"Predictions: {predictions}")
+            self.get_logger().debug(f"Output labels: {self.episodic_buffer.output_labels}")
+            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+        self.get_logger().info(f"Prediction made: {len(predicted_episodes)} episodes")
+        return predicted_episodes
+    
 
     def episode_callback(self, msg: EpisodeMsg):
             """
@@ -100,7 +115,7 @@ class WorldModelLearned(WorldModel):
             # If the main buffer is full, train the learner
             if self.episodic_buffer.new_sample_count_main >= self.episodic_buffer.main_size:
                 self.get_logger().info("Training the learner with the new episodes")
-                x_train, y_train = self.episodic_buffer.get_train_samples()
+                x_train, y_train = self.episodic_buffer.get_train_samples(shuffle=True)
                 self.learner.train(x_train, y_train)
                 self.episodic_buffer.reset_new_sample_count(main=True, secondary=False)
                 self.get_logger().info("Learner trained with new episodes")
@@ -112,37 +127,13 @@ class WorldModelLearned(WorldModel):
                 self.episodic_buffer.reset_new_sample_count(main=False, secondary=True)
                 self.get_logger().info("Learner evaluated with new episodes")
 
-    def predict_callback(self, request, response): 
-        """
-        Gets the prediction of the world model based on the input episodes.
-
-        :param request: The request that contains the timestamp and the policy.
-        :type request: cognitive_node_interfaces.srv.Predict.Request
-        :param response: The response that included the obtained perception.
-        :type response: cognitive_node_interfaces.srv.Predict.Response
-        :return: The response that included the obtained perception.
-        :rtype: cognitive_node_interfaces.srv.Predict.Response
-        """
-        self.get_logger().info('Predicting ...')
-        buffer = episode_msg_list_to_obj_list(request.input_episodes)
-        self.get_logger().info(f"Input buffer: {buffer}")
-        input_data = self.episodic_buffer.buffer_to_matrix(buffer, self.episodic_buffer.input_labels)
-        predictions = self.learner.predict(input_data)
-        if predictions is None:
-            predicted_episodes = buffer  # If the model is not configured, return the input episodes
-        else:
-            self.get_logger().info(f"Predictions: {predictions}")
-            self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
-        response.output_episodes = episode_obj_list_to_msg_list(predicted_episodes)
-        self.get_logger().info(f"Prediction made: {predicted_episodes}")
-        return response
+    
 
 class ANNWorldModel(Learner):
-    def __init__(self, buffer, **params):
-        super().__init__(buffer, **params)
-
-        self.batch_size = 50
+    def __init__(self, node, buffer, **params):
+        super().__init__(node, buffer, **params)
+        tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
+        self.batch_size = 32
         self.epochs = 50
         self.output_activation = 'relu'
         self.hidden_activation = 'relu'
@@ -182,7 +173,11 @@ class ANNWorldModel(Learner):
         self.model.compile(optimizer=self.optimizer, loss='mse', metrics=['mae'])
         self.configured = True               
     
-    def train(self, x_train, y_train, epochs=100, batch_size=32, verbose=1):
+    def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):
+        if not epochs:
+            epochs = self.epochs
+        if not batch_size:
+            batch_size = self.batch_size
         if not self.configured:
             self.configure_model(x_train.shape[1], y_train.shape[1])
         self.model.fit(
@@ -258,7 +253,7 @@ class Sim2DWorldModel(WorldModel):
         :type class_name: str
         """        
         super().__init__(name, class_name, **params)
-        self.learner=Sim2D(actuation_config, perception_config, self.get_logger())
+        self.learner=Sim2D(self, actuation_config, perception_config, self.get_logger())
     
     def predict(self, perception, action):
         """
@@ -280,7 +275,7 @@ class Sim2D(Learner):
     Sim2D class: A class that mimics a model that learned the dynamics of a 2D simulator.
     Actually it uses the same simulator as the environment to predict the next perception.
     """    
-    def __init__(self, actuation_config, perception_config, logger:RcutilsLogger, **params):
+    def __init__(self, node, actuation_config, perception_config, logger:RcutilsLogger, **params):
         """
         Constructor of the Sim2D class.
 
@@ -291,11 +286,13 @@ class Sim2D(Learner):
         :param logger: Logger object from the parent node.
         :type logger: RcutilsLogger
         """        
-        super().__init__(None, **params)
+        super().__init__(node, None, **params)
         self.model=SimpleScenario(visualize=False)
         self.actuation_config=actuation_config
         self.perception_config=perception_config
         self.logger=logger
+
+    
 
     def predict(self, perception: Perception, action: Actuation) -> Perception:  
         """

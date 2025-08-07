@@ -8,14 +8,16 @@ class Episode:
     """
     Episode class used as STM (Short Term Memory) for the cognitive architecture.
     """
-    def __init__(self, old_perception={}, parent_policy='', action=None, perception={}, reward_list={}) -> None:
-        self.old_perception=old_perception
+    def __init__(self, old_perception=None, parent_policy='', action=None, perception=None, reward_list=None) -> None:
+
+
+        self.old_perception=old_perception if old_perception is not None else {}
         self.old_ltm_state={}
         self.parent_policy=parent_policy
         self.action=action if action is not None else Action()
-        self.perception=perception
+        self.perception=perception if perception is not None else {}
         self.ltm_state={}
-        self.reward_list=reward_list
+        self.reward_list=reward_list if reward_list is not None else {}
 
     def __repr__(self):
         return f"Episode(old_perception={self.old_perception}, parent_policy={self.parent_policy}, action={self.action}, perception={self.perception}, reward_list={self.reward_list})"

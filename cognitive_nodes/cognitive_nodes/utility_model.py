@@ -1,16 +1,20 @@
 import rclpy
+import numpy as np
 from rclpy.node import Node
 
-from core.cognitive_node import CognitiveNode
-from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRate
+from cognitive_nodes.episode import Episode
+from cognitive_nodes.episodic_buffer import EpisodicBuffer
+from cognitive_processes.deliberation import Deliberation
 
-import random
+from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, Evaluator
+from cognitive_node_interfaces.srv import Execute
 
-class UtilityModel(CognitiveNode):
+
+class UtilityModel(DeliberativeModel):
     """
     Utility Model class
     """
-    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', **params):
+    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions = 5, ltm_id="", **params):
         """
         Constructor of the Utility Model class.
 
@@ -21,83 +25,26 @@ class UtilityModel(CognitiveNode):
         :param class_name: The name of the Utility Model class.
         :type class_name: str
         """
-        super().__init__(name, class_name, **params)
-        
-        # N: Set Activation Service
-        self.set_activation_service = self.create_service(
-            SetActivation,
-            'utility_model/' + str(name) + '/set_activation',
-            self.set_activation_callback
+        super().__init__(name, class_name, prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", **params)
+        self.setup_model(max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
+        self.execute_service = self.create_service(
+            Execute,
+            'utility_model/' + str(name) + '/execute',
+            self.execute_callback,
+            callback_group=self.cbgroup_server
         )
 
-        # N: Evaluate Service
-        self.evaluate_service = self.create_service(
-            Evaluate,
-            'utility_model/' + str(name) + '/evaluate',
-            self.evaluate_callback
-        )
-
-        # N: Get Success Rate Service
-        self.get_success_rate_service = self.create_service(
-            GetSuccessRate,
-            'utility_model/' + str(name) + '/get_success_rate',
-            self.get_success_rate_callback
-        )
-
-    def set_activation_callback(self, request, response):
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
         """
-        C-Nodes can modify the Utility Model's activation.
+        Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
+        """
+        self.episodic_buffer = EpisodicBuffer(self, main_size=200, secondary_size=50, inputs=['perception'], outputs=[])
+        self.learner = DefaultUtilityModelLearner(self.episodic_buffer, **params)
+        self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
+        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
 
-        :param request: The request that contains the new activation value.
-        :type request: cognitive_node_interfaces.srv.SetActivation.Request
-        :param response: The response indicating if the activation was set.
-        :type response: cognitive_node_interfaces.srv.SetActivation.Response
-        :return: The response indicating if the activation was set.
-        :rtype: cognitive_node_interfaces.srv.SetActivation.Response
-        """
-        activation = request.activation
-        self.get_logger().info('Setting activation ' + str(activation) + '...')
-        self.activation = activation
-        response.set = True
-        return response
-    
-    def evaluate_callback(self, request, response): # TODO: implement
-        """
-        Get expected valuation for a given perception.
-        Dummy, for the moment, as it returns the same value.
 
-        :param request: The request that contains the perception.
-        :type request: cognitive_node_interfaces.srv.Evaluate.Request
-        :param response: The response that contains tha valuation of the perception.
-        :type response: cognitive_node_interfaces.srv.Evaluate.Response
-        :return: The response that contains the valuation of the perception.
-        :rtype: cognitive_node_interfaces.srv.Evaluate.Response
-        """
-        perception = request.perception
-        self.get_logger().info('Evaluating for perception ' +str(perception) + '...')
-        # TODO: implement logic
-        valuation = 3.0
-        response.valuation = valuation
-        return response
-    
-    def get_success_rate_callback(self, request, response): # TODO: implement
-        """
-        Get a prediction success rate based on a historic of previous predictions.
-        Dummy, for the moment, as it returns the same value.
-
-        :param request: Empty request.
-        :type request: cognitive_node_interfaces.srv.GetSuccessRate.Request
-        :param response: The response that contains the predicted success rate.
-        :type response: cognitive_node_interfaces.srv.GetSuccessRate.Response
-        :return: The response that contains the predicted success rate.
-        :rtype: cognitive_node_interfaces.srv.GetSuccessRate.Response
-        """
-        self.get_logger().info('Getting success rate..')
-        # TODO: implement logic
-        response.success_rate = 0.5
-        return response
-
-    def calculate_activation(self, perception = None): #TODO: Implement logic
+    def calculate_activation(self, perception = None, activation_list=None):
         """
         Returns the the activation value of the Utility Model.
         Dummy, for the moment, as it returns a random value.
@@ -107,10 +54,160 @@ class UtilityModel(CognitiveNode):
         :return: The activation of the instance.
         :rtype: float
         """
-        self.activation = random.random()
-        if self.activation_topic:
-            self.publish_activation(self.activation)
-        return self.activation
+        if activation_list:
+            self.calculate_activation_max(activation_list)
+        else:
+            self.activation.activation=0.0
+            self.activation.timestamp=self.get_clock().now().to_msg()
+
+    def predict(self, input_episodes: list[Episode]) -> list[float]:
+            input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+            expected_utilities = self.learner.predict(input_data)
+            self.get_logger().info(f"Predictions: {expected_utilities}")
+            return expected_utilities
+    
+    def execute_callback(self, request, response):
+        """
+        Callback for the execute service.
+        Executes the action and returns the response.
+
+        :param request: The request from the service.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: The response to be sent back.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: The response with the executed action.
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
+        """
+        self.get_logger().info(f"Executing deliberation: {self.name}")
+        self.deliberation.start_flag.set()
+        self.deliberation.finished_flag.wait()
+        self.deliberation.finished_flag.clear()
+        self.get_logger().info(f"Deliberation finished: {self.name}")
+        response.policy = self.name
+        return response
+
+class NoveltyUtilityModel(UtilityModel):
+    """
+    Novelty Utility Model class
+    This model is used to compute the novelty of the episodes.
+    It inherits from the UtilityModel class.
+    """
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
+    
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
+        self.episodic_buffer = EpisodicBuffer(self, main_size=40, secondary_size=0, inputs=['perception'], outputs=[])
+        self.learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
+        self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
+        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
+
+class HardCodedUtilityModel(UtilityModel):
+    """
+    Hard Coded Utility Model class
+    This model is used to compute the utility of the episodes based on hard coded values.
+    It inherits from the UtilityModel class.
+    """
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
+
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
+        self.episodic_buffer = EpisodicBuffer(self, main_size=10, secondary_size=0, inputs=['perception'], outputs=[])
+        self.learner = DefaultUtilityEvaluator(self, self.episodic_buffer, **params)
+        self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
+        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
+    
+    def predict(self, input_episodes: list[Episode]) -> list[float]:
+        "Work in progress"
+        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        predictions = self.learner.predict(input_data)
+        if predictions is None:
+            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+        else:
+            self.get_logger().info(f"Predictions: {predictions}")
+            self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
+            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+        self.get_logger().info(f"Prediction made: {predicted_episodes}")
+        return predicted_episodes
+
+
+##### LEARNERS: Place here the Learner classes that implement the learning algorithms for the Utility Model.
+
+
+class DefaultUtilityModelLearner(Learner):
+    """ Default Utility Model class, used when no specific utility model is defined.
+    This model does not perform any learning or prediction, it simply returns a constant value.
+    """
+    def __init__(self, node:UtilityModel, buffer, **params):
+        super().__init__(node, buffer, **params)
+
+
+    def train(self):
+        return None
+    
+    def predict(self, x):
+        output_len = x.shape[0]
+        y = np.ones((output_len))
+        return y
+    
+class NoveltyUtilityModelLearner(Learner):
+    """ Default Utility Model class, used when no specific utility model is defined.
+    This model does not perform any learning or prediction, it simply returns a constant value.
+    """
+    def __init__(self, node:UtilityModel, buffer, **params):
+        super().__init__(node, buffer, **params)
+
+
+    def train(self):
+        return None
+    
+    def predict(self, x):
+        previous_episodes, _ = self.buffer.get_train_samples()
+        # Compute novelty based on previous episodes
+        novelty = self.compute_novelty(previous_episodes, x)
+        return novelty
+    
+    def compute_novelty(self, previous_episodes, candidate_episodes):
+        # previous_episodes: (N, D), candidate_episodes: (M, D)
+        if previous_episodes is None or len(previous_episodes) == 0:
+            # If no previous episodes, all candidates are maximally novel
+            return np.ones(candidate_episodes.shape[0])
+        # Compute pairwise distances (M, N)
+        dists = np.linalg.norm(candidate_episodes[:, None, :] - previous_episodes[None, :, :], axis=2)
+        # For each candidate, get the minimum distance to any previous episode
+        min_dists = np.min(dists, axis=1)
+        # Normalize to 0-1
+        if np.max(min_dists) == np.min(min_dists):
+            # Avoid division by zero; all values are the same
+            return np.ones_like(min_dists)
+        normalized = (min_dists - np.min(min_dists)) / (np.max(min_dists) - np.min(min_dists))
+        return normalized
+    
+    
+
+
+
+##### EVALUATORS: Place here the Evaluator classes that implement the evaluation algorithms for the Utility Model.
+
+class DefaultUtilityEvaluator(Evaluator):
+    """ Default Utility Evaluator class, used when no specific utility evaluator is defined.
+    This evaluator does not perform any evaluation, it simply returns a constant value.
+    """
+    def __init__(self, node: UtilityModel, learner:DefaultUtilityModelLearner, buffer: None, **params):
+        super().__init__(node, learner, buffer, **params)
+        self.model_confidence = 1.0
+
+    def evaluate(self):
+        """
+        Evaluates the input episodes and returns a list of evaluated episodes.
+
+        :param input_episodes: List of input episodes to evaluate.
+        :type input_episodes: list
+        :return: List of evaluated episodes.
+        :rtype: list
+        """
+        return self.model_confidence
+
+
 
 
 def main(args=None):

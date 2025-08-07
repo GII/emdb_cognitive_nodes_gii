@@ -708,7 +708,7 @@ class ANNSpace(PointBasedSpace):
         Init attributes when a new object is created.
         """
         #GPU USAGE TEST
-        tf.config.set_visible_devices([], 'GPU') #Temporary disable of GPU
+        tf.config.set_visible_devices([], 'GPU') #TODO: Handle GPU usage properly
         '''
         #tf.debugging.set_log_device_placement(True) #Detailed log in every TF operation
         gpus = tf.config.list_physical_devices('GPU')

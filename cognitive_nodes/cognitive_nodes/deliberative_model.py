@@ -1,10 +1,11 @@
 import rclpy
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, msg_to_dict
 from cognitive_node_interfaces.srv import SetActivation, Predict, GetSuccessRate, IsCompatible
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
-
+from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list
 
 class DeliberativeModel(CognitiveNode):
     """
@@ -86,7 +87,7 @@ class DeliberativeModel(CognitiveNode):
         response.set = True
         return response
     
-    def predict_callback(self, request, response): # TODO: implement
+    def predict_callback(self, request, response):
         """
         Get predicted perception values for the last perceptions not newer than a given
         timestamp and for a given policy.
@@ -98,9 +99,11 @@ class DeliberativeModel(CognitiveNode):
         :return: The response that included the obtained perception.
         :rtype: cognitive_node_interfaces.srv.Predict.Response
         """
-        self.get_logger().info('Predicting ...')
-        response.prediction = self.predict(request.perception, request.actuation)
-        self.get_logger().info(f"Prediction made: {msg_to_dict(response.prediction)}")
+        self.get_logger().info('Predicting ...') 
+        input_episodes = episode_msg_list_to_obj_list(request.input_episodes)
+        output_episodes = self.predict(input_episodes)
+        response.output_episodes = episode_obj_list_to_msg_list(output_episodes)
+        self.get_logger().info(f"Prediction made... ")
         return response
     
     def get_success_rate_callback(self, request, response): # TODO: implement
@@ -149,17 +152,17 @@ class DeliberativeModel(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    def predict(self, perception, action):
-        """
-        Performs a prediction according to the model. See child classes.
-
-        :param perception: Dictionary containing perception data.
-        :type perception: dict
-        :param action: Dictionary containing action data.
-        :type action: dict
-        :raises NotImplementedError: Raised when the method is not implemented.
-        """
-        raise NotImplementedError
+    def predict(self, input_episodes: list[Episode]) -> list:
+        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        predictions = self.learner.predict(input_data)
+        if predictions is None:
+            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+        else:
+            self.get_logger().info(f"Predictions: {predictions}")
+            self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
+            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+        self.get_logger().info(f"Prediction made: {predicted_episodes}")
+        return predicted_episodes
     
     
     
@@ -167,13 +170,14 @@ class Learner:
     """
     Class that wraps around a learning model (Linear Classifier, ANN, SVM...)
     """    
-    def __init__(self, buffer:EpisodicBuffer, **params) -> None:
+    def __init__(self, node:CognitiveNode, buffer:EpisodicBuffer, **params) -> None:
         """
         Constructor of the Learner class.
 
         :param buffer: Episodic buffer to use.
         :type buffer: generic_model.EpisodicBuffer
         """        
+        self.node = node
         self.model=None
         self.buffer=buffer
     
@@ -185,7 +189,7 @@ class Learner:
         """        
         raise NotImplementedError
     
-    def predict(self, perception, action):
+    def predict(self, x):
         """
         Placeholder method for predicting an outcome.
 

@@ -103,7 +103,7 @@ class Need(CognitiveNode):
         :return: Response that indicates if the need is satisfied or not.
         :rtype: cognitive_node_interfaces.srv.IsSatisfied.Response
         """
-        self.get_logger().info('Calculating satisfaction..')
+        self.get_logger().debug('Calculating satisfaction..')
         response.satisfied = self.calculate_satisfaction()
         response.need_type = self.need_type
         if Time.from_msg(self.drive_evaluation.timestamp).nanoseconds > Time.from_msg(request.timestamp).nanoseconds:
