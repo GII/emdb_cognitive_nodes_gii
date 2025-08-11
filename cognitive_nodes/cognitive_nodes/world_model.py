@@ -87,7 +87,7 @@ class WorldModelLearned(WorldModel):
 
     def predict(self, input_episodes: list[Episode]) -> list[Episode]:
         input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
-        predictions = self.learner.predict(input_data)
+        predictions = self.learner.call(input_data)
         if predictions is None:
             for episode in input_episodes:
                 episode.perception = episode.old_perception  # If the model is not configured, return the old perception
@@ -187,8 +187,8 @@ class ANNWorldModel(Learner):
             batch_size=batch_size,
             verbose=verbose
             )
-    
-    def predict(self, x):
+
+    def call(self, x):
         if not self.configured:
             return None
         return self.model.predict(x)
@@ -239,7 +239,7 @@ class Sim2DWorldModel(WorldModel):
     """
     Sim2DWorldModel class: A fixed world model of a 2D simulator. It uses the SimpleScenario simulator to predict the next perception.
     """    
-    def __init__(self, name='world_model', actuation_config=None, perception_config=None, class_name='cognitive_nodes.world_model.WorldModel', **params):
+    def __init__(self, name='world_model', wm_actuation_config=None, wm_perception_config=None, class_name='cognitive_nodes.world_model.WorldModel', **params):
         """
         Constructor of the Sim2DWorldModel class.
 
@@ -253,21 +253,11 @@ class Sim2DWorldModel(WorldModel):
         :type class_name: str
         """        
         super().__init__(name, class_name, **params)
-        self.learner=Sim2D(self, actuation_config, perception_config, self.get_logger())
-    
-    def predict(self, perception, action):
-        """
-        Predicts the next perception according to a perception and an action.
+        self.learner=Sim2D(self, wm_actuation_config, wm_perception_config, self.get_logger())
 
-        :param perception: The start perception.
-        :type perception: cognitive_node_interfaces.msg.Perception
-        :param action: The action performed.
-        :type action: cognitive_node_interfaces.msg.Actuation
-        :return: The predicted perception.
-        :rtype: cognitive_node_interfaces.msg.Perception
-        """        
-        prediction=self.learner.predict(perception, action)
-        return prediction
+    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+        predicted_episodes = [Episode(perception=self.learner.call(episode.old_perception, episode.action.actuation)) for episode in input_episodes]
+        return predicted_episodes
 
     
 class Sim2D(Learner):
@@ -287,14 +277,15 @@ class Sim2D(Learner):
         :type logger: RcutilsLogger
         """        
         super().__init__(node, None, **params)
-        self.model=SimpleScenario(visualize=False)
+        self.model=SimpleScenario(visualize=True)
+        self.changed_grippers = False
         self.actuation_config=actuation_config
         self.perception_config=perception_config
         self.logger=logger
 
     
 
-    def predict(self, perception: Perception, action: Actuation) -> Perception:  
+    def call(self, perception, action) -> Perception:  
         """
         Predicts the next perception according to a perception and an action.
 
@@ -306,11 +297,12 @@ class Sim2D(Learner):
         :rtype: cognitive_node_interfaces.msg.Perception
         """        
         """"""
-        perc_dict=self.denormalize(perception_msg_to_dict(perception), self.perception_config)
-        act_dict=self.denormalize(actuation_msg_to_dict(action), self.actuation_config)
+        self.logger.debug(f"DEBUG SIM2D: Perception: {perception} --- Action: {action}")
+        perc_dict=self.denormalize(perception, self.perception_config)
+        act_dict=self.denormalize(action, self.actuation_config)
         
-        self.logger.info(f"DEBUG: Perception {perc_dict}")
-        self.logger.info(f"DEBUG: Action: {act_dict}")
+        self.logger.debug(f"DEBUG: Perception {perc_dict}")
+        self.logger.debug(f"DEBUG: Action: {act_dict}")
 
         angle_l = act_dict["left_arm"][0]["angle"]
         angle_r = act_dict["right_arm"][0]["angle"]
@@ -333,41 +325,54 @@ class Sim2D(Learner):
         self.model.apply_action(angle_l, angle_r, vel_l, vel_r, gripper_l, gripper_r)
 
         #GRASP OBJECT IF GRIPPER IS CLOSE
-        grippers_close = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.ROBOT)
-        self.logger.info(f"DEBUG - {[ent.name for ent in grippers_close]}")
-        if grippers_close and not self.changed_grippers: #If grippers are close, change hands
-            self.logger.info(f"DEBUG - Checking if changing grippers is possible")
+        grippers_close = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=250), EntityType.ROBOT)
+        self.logger.debug(f"DEBUG - {[ent.name for ent in grippers_close]}")
+        if grippers_close and not self.changed_grippers and (self.model.robots[0].catched_object or self.model.robots[1].catched_object): #If grippers are close, change hands
+            self.logger.debug(f"DEBUG - Checking if changing grippers is possible")
             #Ball in left gripper
             if self.model.robots[0].catched_object and not self.model.robots[1].catched_object:
                 gripper_l=False
                 self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                self.model.objects[0].set_pos(*self.model.robots[1].get_pos()) #Move the ball to the right gripper
                 gripper_r=True
                 self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
                 self.changed_grippers=True
+                self.logger.debug(f"DEBUG - Change from left to right gripper")
 
-            #Ball in right gripper, optionale grippers
-            self.logger.info(f"DEBUG - Checking if objects are close to gripper")
+            #Ball in right gripper
+            if self.model.robots[1].catched_object and not self.model.robots[0].catched_object:
+                gripper_r=False
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                self.model.objects[0].set_pos(*self.model.robots[0].get_pos()) #Move the ball to the left gripper
+                gripper_l=True
+                self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+                self.changed_grippers=True
+                self.logger.debug(f"DEBUG - Change from right to left gripper")
+            
+        if not grippers_close: #Check if objects are close to the grippers
+            self.logger.debug(f"DEBUG - Checking if objects are close to gripper")
             self.changed_grippers=False
             close_l_obj = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.BALL)
             close_r_obj = self.model.filter_entities(self.model.get_close_entities(self.model.robots[1], threshold=50), EntityType.BALL)
             if close_l_obj:
-                self.logger.info(f"DEBUG - Objects {[obj.name for obj in close_l_obj]} detected close to left gripper")
+                self.logger.debug(f"DEBUG - Objects {[obj.name for obj in close_l_obj]} detected close to left gripper")
                 gripper_l = True
             if close_r_obj:
-                self.logger.info(f"DEBUG - Objects {[obj.name for obj in close_r_obj]} detected close to right gripper")
+                self.logger.debug(f"DEBUG - Objects {[obj.name for obj in close_r_obj]} detected close to right gripper")
                 gripper_r = True
         
             #RELEASE OBJECT IF OVER BOX
             left_over_box = self.model.filter_entities(self.model.get_close_entities(self.model.robots[0], threshold=50), EntityType.BOX)
             right_over_box = self.model.filter_entities(self.model.get_close_entities(self.model.robots[1], threshold=50), EntityType.BOX)
             if left_over_box:
-                self.logger.info(f"DEBUG - Boxes {[box.name for box in left_over_box]} detected close to left gripper")
+                self.logger.debug(f"DEBUG - Boxes {[box.name for box in left_over_box]} detected close to left gripper")
                 gripper_l = False
             if right_over_box:
-                self.logger.info(f"DEBUG - Boxes {[box.name for box in right_over_box]} detected close to right gripper")
+                self.logger.debug(f"DEBUG - Boxes {[box.name for box in right_over_box]} detected close to right gripper")
                 gripper_r = False
             
             self.model.apply_action(gripper_left=gripper_l, gripper_right=gripper_r)
+
 
         #Read predicted perceptions
         left_arm=self.model.baxter_left.get_pos()
@@ -395,7 +400,7 @@ class Sim2D(Learner):
         perc_dict["ball"][0]["x"] = float(ball[0])
         perc_dict["ball"][0]["y"] = float(ball[1])
 
-        return perception_dict_to_msg(self.normalize(perc_dict, self.perception_config))
+        return self.normalize(perc_dict, self.perception_config)
 
     def denormalize(self, input_dict, config):
         """

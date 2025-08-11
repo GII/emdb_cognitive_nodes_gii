@@ -154,7 +154,7 @@ class DeliberativeModel(CognitiveNode):
 
     def predict(self, input_episodes: list[Episode]) -> list:
         input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
-        predictions = self.learner.predict(input_data)
+        predictions = self.learner.call(input_data)
         if predictions is None:
             predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
         else:
@@ -189,7 +189,7 @@ class Learner:
         """        
         raise NotImplementedError
     
-    def predict(self, x):
+    def call(self, x):
         """
         Placeholder method for predicting an outcome.
 

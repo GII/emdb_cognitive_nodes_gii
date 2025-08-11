@@ -1,6 +1,7 @@
 import rclpy
 import numpy as np
 from rclpy.node import Node
+from math import isclose
 
 from cognitive_nodes.episode import Episode
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
@@ -62,7 +63,7 @@ class UtilityModel(DeliberativeModel):
 
     def predict(self, input_episodes: list[Episode]) -> list[float]:
             input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
-            expected_utilities = self.learner.predict(input_data)
+            expected_utilities = self.learner.call(input_data)
             self.get_logger().info(f"Predictions: {expected_utilities}")
             return expected_utilities
     
@@ -109,25 +110,51 @@ class HardCodedUtilityModel(UtilityModel):
     """
     def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, ltm_id="", **params):
         super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
+        self.get_logger().info("HardCodedUtilityModel initialized")
 
     def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
         self.episodic_buffer = EpisodicBuffer(self, main_size=10, secondary_size=0, inputs=['perception'], outputs=[])
-        self.learner = DefaultUtilityEvaluator(self, self.episodic_buffer, **params)
-        self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
+        self.learner = None
+        self.confidence_evaluator = None
         self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
     
     def predict(self, input_episodes: list[Episode]) -> list[float]:
         "Work in progress"
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
-        predictions = self.learner.predict(input_data)
-        if predictions is None:
-            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+        distances = []
+        for episode in input_episodes:
+            perception = episode.perception
+            ball_position = np.array([perception['ball'][0]['x'], perception['ball'][0]['y']])
+            box_position = np.array([perception['box'][0]['x'], perception['box'][0]['y']])
+            left_arm_position = np.array([perception['left_arm'][0]['x'], perception['left_arm'][0]['y']])
+            right_arm_position = np.array([perception['right_arm'][0]['x'], perception['right_arm'][0]['y']])
+            left_gripper = bool(perception['ball_in_left_hand'][0]['data'])
+            right_gripper = bool(perception['ball_in_right_hand'][0]['data'])
+            if left_gripper or right_gripper:
+                if left_gripper and box_position[0] < 0.5:
+                    distances.append(np.linalg.norm(box_position - left_arm_position))
+                elif right_gripper and box_position[0] > 0.5:
+                    distances.append(np.linalg.norm(box_position - right_arm_position))
+                else:
+                    distances.append(np.linalg.norm(left_arm_position - right_arm_position) + 1)
+            elif isclose(np.linalg.norm(ball_position - left_arm_position), 0) or isclose(np.linalg.norm(ball_position - right_arm_position), 0):
+                distances.append(0.0) # In this condition, the ball should be inside of the box
+            else:
+                distances.append(np.linalg.norm(ball_position - left_arm_position) + np.linalg.norm(ball_position - right_arm_position) + 1)
+            self.get_logger().debug(f"Ball position: {ball_position}, Box position: {box_position}, Left arm position: {left_arm_position}, Right arm position: {right_arm_position}, Left gripper: {left_gripper}, Right gripper: {right_gripper}")
+            self.get_logger().debug(f"Distance calculated: {distances[-1]}")
+
+        # Normalize distances to a range of 0 to 1
+        distances = np.array(distances)
+        if np.max(distances) == np.min(distances):
+            # Avoid division by zero; all values are the same
+            normalized_distances = np.ones_like(distances)
         else:
-            self.get_logger().info(f"Predictions: {predictions}")
-            self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
-        self.get_logger().info(f"Prediction made: {predicted_episodes}")
-        return predicted_episodes
+            normalized_distances = (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+
+        # Convert normalized distances to utilities (1 - distance)
+        utilities = 1 - normalized_distances
+        self.get_logger().info(f"Prediction made: {utilities}")
+        return utilities
 
 
 ##### LEARNERS: Place here the Learner classes that implement the learning algorithms for the Utility Model.
@@ -144,14 +171,14 @@ class DefaultUtilityModelLearner(Learner):
     def train(self):
         return None
     
-    def predict(self, x):
+    def call(self, x):
         output_len = x.shape[0]
         y = np.ones((output_len))
         return y
     
 class NoveltyUtilityModelLearner(Learner):
     """ Default Utility Model class, used when no specific utility model is defined.
-    This model does not perform any learning or prediction, it simply returns a constant value.
+    This model provides higher utility to states not visited previously.
     """
     def __init__(self, node:UtilityModel, buffer, **params):
         super().__init__(node, buffer, **params)
@@ -159,8 +186,8 @@ class NoveltyUtilityModelLearner(Learner):
 
     def train(self):
         return None
-    
-    def predict(self, x):
+
+    def call(self, x):
         previous_episodes, _ = self.buffer.get_train_samples()
         # Compute novelty based on previous episodes
         novelty = self.compute_novelty(previous_episodes, x)
