@@ -4,11 +4,12 @@ from rclpy.node import Node
 from math import isclose
 
 from cognitive_nodes.episode import Episode
-from cognitive_nodes.episodic_buffer import EpisodicBuffer
+from cognitive_nodes.episodic_buffer import EpisodicBuffer, TraceBuffer
 from cognitive_processes.deliberation import Deliberation
 
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, Evaluator
 from cognitive_node_interfaces.srv import Execute
+import pandas as pd
 
 
 class UtilityModel(DeliberativeModel):
@@ -39,7 +40,7 @@ class UtilityModel(DeliberativeModel):
         """
         Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
         """
-        self.episodic_buffer = EpisodicBuffer(self, main_size=200, secondary_size=50, inputs=['perception'], outputs=[])
+        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
         self.learner = DefaultUtilityModelLearner(self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
         self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
@@ -113,7 +114,7 @@ class HardCodedUtilityModel(UtilityModel):
         self.get_logger().info("HardCodedUtilityModel initialized")
 
     def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
-        self.episodic_buffer = EpisodicBuffer(self, main_size=10, secondary_size=0, inputs=['perception'], outputs=[])
+        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
         self.learner = None
         self.confidence_evaluator = None
         self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
@@ -155,6 +156,24 @@ class HardCodedUtilityModel(UtilityModel):
         utilities = 1 - normalized_distances
         self.get_logger().info(f"Prediction made: {utilities}")
         return utilities
+    
+    def execute_callback(self, request, response):
+        response = super().execute_callback(request, response)
+        if self.episodic_buffer.n_traces == 20:
+            x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
+
+            # TODO: Create a send space method
+            # #self.get_logger().info(f"DEBUG - SAVING DATASET Training data shapes - x: {x_train.shape}, y: {y_train.shape}")
+            # # Use input_labels for feature column names
+            # feature_columns = self.episodic_buffer.input_labels
+            # columns = feature_columns + ['y_train']
+            # data = np.hstack((x_train, y_train.reshape(-1, 1)))
+            # df = pd.DataFrame(data, columns=columns)
+            # df.to_csv('utility_model_dataset.csv', index=False)
+        return response
+    
+
+    
 
 
 ##### LEARNERS: Place here the Learner classes that implement the learning algorithms for the Utility Model.

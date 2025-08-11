@@ -82,7 +82,7 @@ class EpisodicBuffer:
     def remove_episode(self, index=None, remove_from_main=True):
         if remove_from_main:
             if index is not None:
-                self.main_buffer.remove(self.main_buffer[index])
+                self.main_buffer.remove(self.main_buffer[index]) 
             else:
                 self.main_buffer.popleft()
         else:
@@ -346,10 +346,18 @@ class EpisodicBuffer:
         If shuffle=True, shuffles the arrays before returning.
         """
         inputs = self.buffer_to_matrix(buffer, self.input_labels)
-        outputs = self.buffer_to_matrix(buffer, self.output_labels)
+        if self.output_labels:
+            outputs = self.buffer_to_matrix(buffer, self.output_labels)
+        else:
+            outputs = []
         if shuffle:
-            idx = self.rng.permutation(inputs.shape[0])
-            inputs = inputs[idx]
+            inputs, outputs = self._shuffle_dataset(inputs, outputs)
+        return inputs, outputs
+
+    def _shuffle_dataset(self, inputs, outputs):
+        idx = self.rng.permutation(inputs.shape[0])
+        inputs = inputs[idx]
+        if len(outputs) > 0:
             outputs = outputs[idx]
         return inputs, outputs
 
@@ -371,6 +379,78 @@ class EpisodicBuffer:
                             label_list.append(f"{io}:{group}:{dim}")
                     else:
                         label_list.append(f"{io}:{group}")
+
+class TraceBuffer(EpisodicBuffer):
+    """
+    Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
+
+    Work in progress, this class is not fully implemented yet.
+    """
+    def __init__(self, node, main_size, secondary_size=0, max_traces=10, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
+        super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
+        self.traces_buffer = deque(maxlen=None)
+        self.max_traces = max_traces
+        self.n_traces = 0
+        self.n_antitraces = 0
+        self.new_traces = 0
+        self.min_utility_fraction = 0.01
+
+    def add_episode(self, episode, reward):
+        if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
+            self.configure_labels(episode)
+        self.main_buffer.append(deepcopy(episode))
+        self.new_sample_count_main += 1
+
+        if reward > 0:
+            utility_trace = self.evaluate_trace(reward)
+            self.traces_buffer.append(list(zip(self.main_buffer, utility_trace)))
+            self.n_traces += 1
+            self.new_traces += 1
+            self.clear()
+        elif self.new_sample_count_main == self.main_size:
+            self.traces_buffer.append(list(zip(self.main_buffer, np.zeros(self.main_size))))
+            self.n_antitraces += 1
+            self.new_traces += 1
+            self.clear()
+        if self.n_traces + self.n_antitraces >= self.max_traces:
+            trace=self.traces_buffer.popleft()
+            if trace[-1][1] > 0:
+                self.n_traces -= 1
+            else:
+                self.n_antitraces -= 1
+
+    def evaluate_trace(self, reward):
+        n = len(self.main_buffer)
+        if n == 0:
+            return []
+        min_val = reward * self.min_utility_fraction
+        full_length = self.main_size
+        if full_length == 1 or n == 1:
+            return [reward]
+        # Compute the value at the position of the last element in a full-length trace
+        start_val = min_val + (reward - min_val) * (full_length - n) / (full_length - 1)
+        # Interpolate from start_val to reward over n steps
+        values = [start_val + (reward - start_val) * i / (n - 1) for i in range(n)]
+        return values
+    
+    def get_dataset(self, shuffle=True):
+        flattened_traces = [item for trace in self.traces_buffer for item in trace]
+        buffer, utilities = zip(*flattened_traces) if flattened_traces else ([], [])
+        utilities = np.array(utilities)
+        states, _ = self._get_samples_from_buffer(buffer, shuffle=False)
+        x_train, y_train = self._shuffle_dataset(states, utilities) if shuffle else (states, utilities)
+        return x_train, y_train
+    
+    def reset_new_sample_count(self, main=True, secondary=True):
+            """
+            Resets the new sample count for the trace buffer.
+
+            :param main: Unused in this class, defaults to True.
+            :type main: bool
+            :param secondary: Unused in this class, defaults to True.
+            :type secondary: bool
+            """
+            self.new_traces = 0
 
 class TestEpisodicBuffer(CognitiveNode):
     """
@@ -418,18 +498,6 @@ class TestEpisodicBuffer(CognitiveNode):
             self.get_logger().info(f"Targets Train: \n {y_train}")
             self.get_logger().info(f"Features Test: \n {x_test}")
             self.get_logger().info(f"Targets Test: \n {y_test}")
-
-
-
-class TraceBuffer(EpisodicBuffer):
-    """
-    Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
-
-    Work in progress, this class is not fully implemented yet.
-    """
-    def __init__(self, node, main_size, secondary_size, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
-        super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
-
 
 def test_episodic_buffer(args=None):
     rclpy.init(args=args)
