@@ -2,11 +2,8 @@ import rclpy
 from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
-import tensorflow as tf
-from keras._tf_keras.keras.optimizers import Adam
-from keras import layers, metrics, losses, Sequential
 
-from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, Evaluator
+from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from simulators.scenarios_2D import SimpleScenario, EntityType
 from cognitive_node_interfaces.msg import Perception, Actuation, SuccessRate
@@ -81,7 +78,7 @@ class WorldModelLearned(WorldModel):
             outputs = ["perception"],
         )
 
-        self.learner = ANNWorldModel(self, self.episodic_buffer)
+        self.learner = ANNLearner(self, self.episodic_buffer)
 
         self.confidence_evaluator = EvaluatorWorldModel(self, self.learner, self.episodic_buffer)
 
@@ -128,81 +125,12 @@ class WorldModelLearned(WorldModel):
                 self.get_logger().info("Learner evaluated with new episodes")
 
     
-
-class ANNWorldModel(Learner):
-    def __init__(self, node, buffer, **params):
-        super().__init__(node, buffer, **params)
-        tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
-        self.batch_size = 32
-        self.epochs = 50
-        self.output_activation = 'relu'
-        self.hidden_activation = 'relu'
-        self.hidden_layers = [128]
-        self.learning_rate = 0.001
-        self.optimizer = Adam(learning_rate=self.learning_rate)
-        self.configured = False
-
-    def configure_model(self, input_length, output_length):
-        """
-        Configure the ANN model with the given input shape, output shape, and labels.
-
-        :param input_shape: The shape of the input data.
-        :type input_shape: int
-        :param output_shape: The shape of the output data.
-        :type output_shape: int
-        """
-        self.model = Sequential()
-        
-        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
-          #TODO: THIS MIGHT REQUIRE TO USE THE FUNCTIONAL API INSTEAD OF SEQUENTIAL
-        # --- Inputs ---
-        # object_input = layers.Input(shape=(), dtype=tf.int32, name="object_id")
-        # numeric_input = layers.Input(shape=(num_numeric_features,), dtype=tf.float32, name="numeric_features")
-
-        # --- Embedding Layer ---
-        #embedding_layer = layers.Embedding(input_dim=num_objects, output_dim=embedding_dim)
-        #embedded_object = embedding_layer(object_input)  # shape: (batch_size, embedding_dim)
-
-        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
-
-        self.model.add(layers.Input(shape=(input_length,)))
-        for units in self.hidden_layers:
-            self.model.add(layers.Dense(units, activation=self.hidden_activation))
-        self.model.add(layers.Dropout(0.2))  # Add dropout for regularization
-        self.model.add(layers.Dense(output_length, activation=self.output_activation))
-        self.model.compile(optimizer=self.optimizer, loss='mse', metrics=['mae'])
-        self.configured = True               
-    
-    def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):
-        if not epochs:
-            epochs = self.epochs
-        if not batch_size:
-            batch_size = self.batch_size
-        if not self.configured:
-            self.configure_model(x_train.shape[1], y_train.shape[1])
-        self.model.fit(
-            x_train,
-            y_train,
-            epochs=epochs,
-            batch_size=batch_size,
-            verbose=verbose
-            )
-
-    def call(self, x):
-        if not self.configured:
-            return None
-        return self.model.predict(x)
-    
-    def evaluate(self, x_test, y_test):
-        if not self.configured:
-            return None
-        return self.model.evaluate(x_test, y_test, verbose=0)[1]
     
 class EvaluatorWorldModel(Evaluator):
     """
     EvaluatorWorldModel class: Evaluates the success rate of the world model based on its predictions.
     """
-    def __init__(self, node:WorldModelLearned, learner:ANNWorldModel,  buffer:EpisodicBuffer, **params) -> None:
+    def __init__(self, node:WorldModelLearned, learner:ANNLearner,  buffer:EpisodicBuffer, **params) -> None:
         """
         Constructor of the EvaluatorWorldModel class.
 
@@ -277,7 +205,7 @@ class Sim2D(Learner):
         :type logger: RcutilsLogger
         """        
         super().__init__(node, None, **params)
-        self.model=SimpleScenario(visualize=True)
+        self.model=SimpleScenario(visualize=False)
         self.changed_grippers = False
         self.actuation_config=actuation_config
         self.perception_config=perception_config

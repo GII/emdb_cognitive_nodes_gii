@@ -7,7 +7,7 @@ from cognitive_nodes.episode import Episode
 from cognitive_nodes.episodic_buffer import EpisodicBuffer, TraceBuffer
 from cognitive_processes.deliberation import Deliberation
 
-from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, Evaluator
+from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_node_interfaces.srv import Execute
 import pandas as pd
 
@@ -113,8 +113,8 @@ class HardCodedUtilityModel(UtilityModel):
         super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
         self.get_logger().info("HardCodedUtilityModel initialized")
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
-        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50,**params):
+        self.episodic_buffer =  TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
         self.learner = None
         self.confidence_evaluator = None
         self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
@@ -172,9 +172,50 @@ class HardCodedUtilityModel(UtilityModel):
             # df.to_csv('utility_model_dataset.csv', index=False)
         return response
     
+class LearnedUtilityModel(UtilityModel):
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, train_traces = 5, max_traces=50, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, train_traces=train_traces, max_traces=max_traces, **params)
+        self.train_traces = train_traces
+        self.max_traces = max_traces
+        self.get_logger().info(f"Utility Model created: {self.name}")
 
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50,**params):
+        """
+        Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
+        """
+        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
+        self.learner = ANNLearner(self, self.episodic_buffer, **params)
+        self.alternative_learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
+        self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
+        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
     
-
+    def predict(self, input_episodes: list[Episode]) -> list[float]:
+            input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+            predictions = self.learner.call(input_data)
+            if predictions is None:
+                predictions = self.alternative_learner.call(input_data)
+            self.get_logger().info(f"Prediction made: {len(predictions)} episodes")
+            self.get_logger().info(f"Predictions: {predictions}")
+            return predictions
+    
+    def execute_callback(self, request, response):
+        response = super().execute_callback(request, response)
+        self.get_logger().info(f"DEBUG: Total traces: {self.episodic_buffer.n_traces+self.episodic_buffer.n_antitraces}, New traces: {self.episodic_buffer.new_traces}, Total P-Traces: {self.episodic_buffer.n_traces}. Train traces: {self.train_traces} {self.episodic_buffer.min_traces}")
+        if self.episodic_buffer.new_traces > self.train_traces:
+            if not self.learner.configured:
+                # TODO: Create a send space method
+                #self.get_logger().info(f"DEBUG - SAVING DATASET Training data shapes - x: {x_train.shape}, y: {y_train.shape}")
+                # Use input_labels for feature column names
+                x_train, y_train = self.episodic_buffer.get_dataset(shuffle=False)
+                feature_columns = self.episodic_buffer.input_labels
+                columns = feature_columns + ['y_train']
+                data = np.hstack((x_train, y_train.reshape(-1, 1)))
+                df = pd.DataFrame(data, columns=columns)
+                df.to_csv(f'utility_model_dataset.csv', index=False)
+            x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
+            self.learner.train(x_train, y_train)
+            self.episodic_buffer.reset_new_sample_count()
+        return response
 
 ##### LEARNERS: Place here the Learner classes that implement the learning algorithms for the Utility Model.
 
@@ -227,10 +268,6 @@ class NoveltyUtilityModelLearner(Learner):
             return np.ones_like(min_dists)
         normalized = (min_dists - np.min(min_dists)) / (np.max(min_dists) - np.min(min_dists))
         return normalized
-    
-    
-
-
 
 ##### EVALUATORS: Place here the Evaluator classes that implement the evaluation algorithms for the Utility Model.
 

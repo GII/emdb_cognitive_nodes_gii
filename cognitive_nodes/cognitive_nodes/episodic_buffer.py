@@ -383,10 +383,8 @@ class EpisodicBuffer:
 class TraceBuffer(EpisodicBuffer):
     """
     Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
-
-    Work in progress, this class is not fully implemented yet.
     """
-    def __init__(self, node, main_size, secondary_size=0, max_traces=10, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
+    def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_p_traces=1, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
         super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
         self.traces_buffer = deque(maxlen=None)
         self.max_traces = max_traces
@@ -394,6 +392,7 @@ class TraceBuffer(EpisodicBuffer):
         self.n_antitraces = 0
         self.new_traces = 0
         self.min_utility_fraction = 0.01
+        self.min_traces = min_p_traces
 
     def add_episode(self, episode, reward):
         if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
@@ -401,23 +400,44 @@ class TraceBuffer(EpisodicBuffer):
         self.main_buffer.append(deepcopy(episode))
         self.new_sample_count_main += 1
 
+        #Add corresponding trace
         if reward > 0:
             utility_trace = self.evaluate_trace(reward)
             self.traces_buffer.append(list(zip(self.main_buffer, utility_trace)))
             self.n_traces += 1
             self.new_traces += 1
             self.clear()
-        elif self.new_sample_count_main == self.main_size:
+        elif self.new_sample_count_main == self.main_size and self.n_traces > self.min_traces:
             self.traces_buffer.append(list(zip(self.main_buffer, np.zeros(self.main_size))))
             self.n_antitraces += 1
             self.new_traces += 1
             self.clear()
-        if self.n_traces + self.n_antitraces >= self.max_traces:
-            trace=self.traces_buffer.popleft()
-            if trace[-1][1] > 0:
-                self.n_traces -= 1
+        elif self.new_sample_count_main == self.main_size:
+            self.clear()
+
+        # Check if the number of traces exceeds the maximum allowed
+        if self.n_traces + self.n_antitraces > self.max_traces:
+            # Count number of traces in buffer
+            # The trace is a list of episodes, the utility of the last episode is checked to determine if a trace is successful
+            trace_indices = [i for i, t in enumerate(self.traces_buffer) if t[-1][1] > 0] 
+            antitrace_indices = [i for i, t in enumerate(self.traces_buffer) if t[-1][1] <= 0]
+            # If only one trace remains, do not remove it; remove an antitrace if possible
+            if self.n_traces <= self.min_traces and self.traces_buffer[0][-1][1] > 0:
+                # Only one trace left, remove an antitrace if available
+                if self.n_antitraces > 0 and len(antitrace_indices) > 0:
+                    idx = antitrace_indices[0]
+                    self.traces_buffer.rotate(-idx)
+                    trace = self.traces_buffer.popleft()
+                    self.traces_buffer.rotate(idx)
+                    self.n_antitraces -= 1
+                # else, do not remove the last trace
             else:
-                self.n_antitraces -= 1
+                # Remove the oldest trace or antitrace as usual
+                trace = self.traces_buffer.popleft()
+                if trace[-1][1] > 0:
+                    self.n_traces -= 1
+                else:
+                    self.n_antitraces -= 1
 
     def evaluate_trace(self, reward):
         n = len(self.main_buffer)

@@ -1,6 +1,11 @@
 import rclpy
 from rclpy.impl.rcutils_logger import RcutilsLogger
 
+import tensorflow as tf
+from keras._tf_keras.keras.optimizers import Adam
+from keras._tf_keras.keras.losses import Loss
+from keras import layers, metrics, losses, Sequential
+
 from core.cognitive_node import CognitiveNode
 from core.utils import class_from_classname, msg_to_dict
 from cognitive_node_interfaces.srv import SetActivation, Predict, GetSuccessRate, IsCompatible
@@ -200,7 +205,107 @@ class Learner:
         :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError
+    
 
+class ANNLearner(Learner):
+    def __init__(self, node, buffer, **params):
+        super().__init__(node, buffer, **params)
+        tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
+        self.batch_size = 32
+        self.epochs = 50
+        self.output_activation = 'relu'
+        self.hidden_activation = 'relu'
+        self.hidden_layers = [128]
+        self.learning_rate = 0.001
+        self.optimizer = Adam(learning_rate=self.learning_rate)
+        self.configured = False
+
+    def configure_model(self, input_length, output_length):
+        """
+        Configure the ANN model with the given input shape, output shape, and labels.
+
+        :param input_shape: The shape of the input data.
+        :type input_shape: int
+        :param output_shape: The shape of the output data.
+        :type output_shape: int
+        """
+        self.model = Sequential()
+        
+        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
+          #TODO: THIS MIGHT REQUIRE TO USE THE FUNCTIONAL API INSTEAD OF SEQUENTIAL
+        # --- Inputs ---
+        # object_input = layers.Input(shape=(), dtype=tf.int32, name="object_id")
+        # numeric_input = layers.Input(shape=(num_numeric_features,), dtype=tf.float32, name="numeric_features")
+
+        # --- Embedding Layer ---
+        #embedding_layer = layers.Embedding(input_dim=num_objects, output_dim=embedding_dim)
+        #embedded_object = embedding_layer(object_input)  # shape: (batch_size, embedding_dim)
+
+        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
+
+        self.model.add(layers.Input(shape=(input_length,)))
+        for units in self.hidden_layers:
+            self.model.add(layers.Dense(units, activation=self.hidden_activation))
+        self.model.add(layers.Dropout(0.2))  # Add dropout for regularization
+        self.model.add(layers.Dense(output_length, activation=self.output_activation))
+        self.model.compile(optimizer=self.optimizer, loss=AsymmetricMSE(underestimation_penalty=3.0), metrics=['mae'])
+        self.configured = True               
+    
+    def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):
+        # Ensure x_train and y_train are at least 2D
+        if len(x_train.shape) == 1:
+            x_train = x_train.reshape(-1, 1)
+        if len(y_train.shape) == 1:
+            y_train = y_train.reshape(-1, 1)
+
+        input_size = x_train.shape[1]
+        output_size = y_train.shape[1]
+        
+        if not epochs:
+            epochs = self.epochs
+        if not batch_size:
+            batch_size = self.batch_size
+        if not self.configured:
+            self.configure_model(x_train.shape[1], y_train.shape[1])
+        self.model.fit(
+            x_train,
+            y_train,
+            epochs=epochs,
+            batch_size=batch_size,
+            verbose=verbose
+            )
+
+    def call(self, x):
+        if not self.configured:
+            return None
+        return self.model.predict(x)
+    
+    def evaluate(self, x_test, y_test):
+        if not self.configured:
+            return None
+        return self.model.evaluate(x_test, y_test, verbose=0)[1]
+
+class AsymmetricMSE(Loss):
+    def __init__(self, underestimation_penalty=1.0, overestimation_penalty=1.0, name="asymmetric_mse"):
+        """
+        underestimation_penalty: float, multiplier applied when y_pred < y_true
+        overestimation_penalty: float, multiplier applied when y_pred > y_true
+        """
+        super().__init__(name=name)
+        self.underestimation_penalty = underestimation_penalty
+        self.overestimation_penalty = overestimation_penalty
+
+    def call(self, y_true, y_pred):
+        error = y_pred - y_true
+        weight = tf.where(error < 0, self.underestimation_penalty, self.overestimation_penalty)
+        return tf.reduce_mean(weight * tf.square(error))
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "underestimation_penalty": self.underestimation_penalty
+        })
+        return config
 
 class Evaluator:
     """
