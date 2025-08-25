@@ -185,7 +185,8 @@ class Learner:
         self.node = node
         self.model=None
         self.buffer=buffer
-    
+        self.configured=False
+
     def train(self):
         """
         Placeholder method for training the model.

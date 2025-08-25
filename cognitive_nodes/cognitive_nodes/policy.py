@@ -6,8 +6,8 @@ import numpy
 
 from std_msgs.msg import Int64
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import SetActivation, Execute
-from cognitive_node_interfaces.srv import GetActivation
+from cognitive_node_interfaces.srv import GetActivation, SetActivation, Execute
+from cognitive_node_interfaces.msg import Episode
 
 from core.utils import perception_dict_to_msg, class_from_classname
 
@@ -47,7 +47,10 @@ class Policy(CognitiveNode):
             self.execute_callback,
             callback_group=self.cbgroup_server
         )
-    
+
+        episodes_topic = getattr(self, "Control", {}).get("episodes_topic", "")
+        self.episode_publisher = self.create_publisher(Episode, episodes_topic, 0)
+        
         self.configure_activation_inputs(self.neighbors) 
 
     async def calculate_activation(self, perception=None, activation_list=None):

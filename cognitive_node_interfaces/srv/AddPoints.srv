@@ -1,0 +1,4 @@
+Perception[] points
+float32[] confidences
+---
+bool added

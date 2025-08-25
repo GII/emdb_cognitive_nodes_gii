@@ -1,10 +1,12 @@
-from collections import deque
 import rclpy
+import numpy as np
 from rclpy.time import Time
+from collections import deque
+
 from core.cognitive_node import CognitiveNode
 from cognitive_nodes.space import PointBasedSpace
 from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
-from cognitive_node_interfaces.srv import AddPoint, SendSpace, ContainsSpace
+from cognitive_node_interfaces.srv import AddPoint, AddPoints, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
 
 class PNode(CognitiveNode):
@@ -36,6 +38,8 @@ class PNode(CognitiveNode):
         self.added_point = False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
             name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
+        self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(
+            name) + '/add_points', self.add_points_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
             name) + '/send_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
         self.contains_space_service = self.create_service(ContainsSpace, 'pnode/' + str(
@@ -113,6 +117,7 @@ class PNode(CognitiveNode):
 
     def add_point_callback(self, request, response):
         """
+        DEPRECATED: SEE add_points_callback
         Callback method for adding a point (or anti-point) to a specific P-Node.
 
         :param request: The request that contains the point that is added and its confidence.
@@ -129,6 +134,28 @@ class PNode(CognitiveNode):
         self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
         response.added = True
 
+        return response
+    
+    def add_points_callback(self, request, response):
+        """
+        Callback method for adding a point (or anti-point) to a specific P-Node.
+
+        :param request: The request that contains the list of points that are added and their confidence.
+        :type request: cognitive_node_interfaces.srv.AddPoints.Request
+        :param response: The response indicating if the points were added to the P-Node.
+        :type respone: core_interfaces.srv.AddPoints.Response
+        :return: The response indicating if the points were added to the P-Node.
+        :rtype: cognitive_node_interfaces.srv.AddPoints.Response
+        """
+        if request.points:
+            self.point_msg = request.points[0]
+            for point, confidence in zip(request.points, request.confidences):
+                point_dict = perception_msg_to_dict(point)
+                self.add_point(point_dict, confidence)
+            response.added = True
+            self.get_logger().info(f'Added: {len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
+        else:
+            response.added = False
         return response
     
     def add_point(self, point, confidence):

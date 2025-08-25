@@ -1,14 +1,17 @@
 import rclpy
+import threading
 import numpy as np
 from rclpy.node import Node
 from math import isclose
+from rclpy.executors import SingleThreadedExecutor
 
-from cognitive_nodes.episode import Episode
+from core.utils import class_from_classname
+from cognitive_nodes.episode import Episode, episode_msg_to_obj, episode_msg_list_to_obj_list
 from cognitive_nodes.episodic_buffer import EpisodicBuffer, TraceBuffer
 from cognitive_processes.deliberation import Deliberation
 
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
-from cognitive_node_interfaces.srv import Execute
+from cognitive_node_interfaces.srv import Execute, AddTrace
 import pandas as pd
 
 
@@ -28,6 +31,7 @@ class UtilityModel(DeliberativeModel):
         :type class_name: str
         """
         super().__init__(name, class_name, prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", **params)
+        self.configure_activation_inputs(self.neighbors)
         self.setup_model(max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
         self.execute_service = self.create_service(
             Execute,
@@ -41,10 +45,16 @@ class UtilityModel(DeliberativeModel):
         Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
         """
         self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
-        self.learner = DefaultUtilityModelLearner(self.episodic_buffer, **params)
+        self.learner = DefaultUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
         self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
+        self.spin_deliberation()
 
+    def spin_deliberation(self):
+        self.deliberation_executor = SingleThreadedExecutor()
+        self.deliberation_executor.add_node(self.deliberation)
+        self.deliberation_thread = threading.Thread(target=self.deliberation_executor.spin)
+        self.deliberation_thread.start()
 
     def calculate_activation(self, perception = None, activation_list=None):
         """
@@ -56,7 +66,7 @@ class UtilityModel(DeliberativeModel):
         :return: The activation of the instance.
         :rtype: float
         """
-        if activation_list:
+        if activation_list and self.learner.configured:
             self.calculate_activation_max(activation_list)
         else:
             self.activation.activation=0.0
@@ -94,14 +104,16 @@ class NoveltyUtilityModel(UtilityModel):
     This model is used to compute the novelty of the episodes.
     It inherits from the UtilityModel class.
     """
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
-    
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
-        self.episodic_buffer = EpisodicBuffer(self, main_size=40, secondary_size=0, inputs=['perception'], outputs=[])
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
+        
+
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50, **params):
+        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
         self.learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
-        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
+        self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, exploration_process=True, **params)
+        self.spin_deliberation()
 
 class HardCodedUtilityModel(UtilityModel):
     """
@@ -109,15 +121,16 @@ class HardCodedUtilityModel(UtilityModel):
     This model is used to compute the utility of the episodes based on hard coded values.
     It inherits from the UtilityModel class.
     """
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, **params)
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
         self.get_logger().info("HardCodedUtilityModel initialized")
 
     def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50,**params):
         self.episodic_buffer =  TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
-        self.learner = None
+        self.learner = DefaultUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = None
-        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
+        self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
+        self.spin_deliberation()
     
     def predict(self, input_episodes: list[Episode]) -> list[float]:
         "Work in progress"
@@ -173,21 +186,38 @@ class HardCodedUtilityModel(UtilityModel):
         return response
     
 class LearnedUtilityModel(UtilityModel):
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, train_traces = 5, max_traces=50, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, train_traces=train_traces, max_traces=max_traces, **params)
-        self.train_traces = train_traces
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
+        self.min_traces = min_traces
         self.max_traces = max_traces
+        self.trace_service = self.create_service(
+            AddTrace,
+            'utility_model/' + str(name) + '/add_trace',
+            self.add_trace_callback,
+            callback_group=self.cbgroup_server
+        )
+        episodes_topic = self.Control["episodes_topic"]
+        episodes_msg = self.Control["episodes_msg"]
+        self.episode_subscription = self.create_subscription(
+            class_from_classname(episodes_msg),
+            episodes_topic,
+            self.episode_callback,
+            0,
+            callback_group=self.cbgroup_server
+        )
+
         self.get_logger().info(f"Utility Model created: {self.name}")
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50,**params):
+    def setup_model(self, max_iterations, candidate_actions, ltm_id, min_traces=1, max_traces=50, max_antitraces=10, **params):
         """
         Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
         """
-        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
+        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_traces=min_traces, max_antitraces=max_antitraces, inputs=['perception'], outputs=[])
         self.learner = ANNLearner(self, self.episodic_buffer, **params)
         self.alternative_learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
-        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
+        self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
+        self.spin_deliberation()
     
     def predict(self, input_episodes: list[Episode]) -> list[float]:
             input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
@@ -200,8 +230,8 @@ class LearnedUtilityModel(UtilityModel):
     
     def execute_callback(self, request, response):
         response = super().execute_callback(request, response)
-        self.get_logger().info(f"DEBUG: Total traces: {self.episodic_buffer.n_traces+self.episodic_buffer.n_antitraces}, New traces: {self.episodic_buffer.new_traces}, Total P-Traces: {self.episodic_buffer.n_traces}. Train traces: {self.train_traces} {self.episodic_buffer.min_traces}")
-        if self.episodic_buffer.new_traces > self.train_traces:
+        self.get_logger().info(f"Total traces: {self.episodic_buffer.n_traces}, Total antitraces: {self.episodic_buffer.n_antitraces} New traces: {self.episodic_buffer.new_traces}, Min traces: {self.min_traces} {self.episodic_buffer.min_traces}")
+        if self.episodic_buffer.new_traces > self.min_traces:
             if not self.learner.configured:
                 # TODO: Create a send space method
                 #self.get_logger().info(f"DEBUG - SAVING DATASET Training data shapes - x: {x_train.shape}, y: {y_train.shape}")
@@ -216,6 +246,29 @@ class LearnedUtilityModel(UtilityModel):
             self.learner.train(x_train, y_train)
             self.episodic_buffer.reset_new_sample_count()
         return response
+    
+    def episode_callback(self, msg):
+        if not msg.parent_policy: # Parent policy is empty if no specific Utility Model/Policy is being executed
+            episode = episode_msg_to_obj(msg)
+            linked_goals = self.deliberation.get_linked_goals()
+            rewards = [episode.reward_list[goal] for goal in linked_goals if goal in episode.reward_list]
+            self.get_logger().info(f"New episode received with rewards: {episode.reward_list}, linked goals: {linked_goals}")
+            self.episodic_buffer.add_episode(episode, max(rewards, default=0.0))
+            if any(rewards):
+                self.get_logger().info(f"New trace added to episodic buffer. Total traces: {self.episodic_buffer.n_traces}, Min traces: {self.episodic_buffer.min_traces}")
+                self.deliberation.update_pnodes_reward_basis(episode.old_perception, episode.perception, self.name, episode.reward_list, self.deliberation.LTM_cache)
+                if self.episodic_buffer.new_traces > self.min_traces:
+                    x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
+                    self.learner.train(x_train, y_train)
+                    self.episodic_buffer.reset_new_sample_count()
+
+    def add_trace_callback(self, request, response):
+        episodes = episode_msg_list_to_obj_list(request.episodes)
+        rewards = request.rewards
+        for episode, reward in zip(episodes, rewards):
+            self.episodic_buffer.add_episode(episode, reward)
+        response.added = True
+        return response
 
 ##### LEARNERS: Place here the Learner classes that implement the learning algorithms for the Utility Model.
 
@@ -226,6 +279,7 @@ class DefaultUtilityModelLearner(Learner):
     """
     def __init__(self, node:UtilityModel, buffer, **params):
         super().__init__(node, buffer, **params)
+        self.configured=True
 
 
     def train(self):
@@ -242,6 +296,7 @@ class NoveltyUtilityModelLearner(Learner):
     """
     def __init__(self, node:UtilityModel, buffer, **params):
         super().__init__(node, buffer, **params)
+        self.configured=True
 
 
     def train(self):
