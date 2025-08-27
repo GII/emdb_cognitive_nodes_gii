@@ -365,6 +365,90 @@ class FruitShopPerception(Perception):
         self.publish_msg.timestamp=self.get_clock().now().to_msg()
         self.perception_publisher.publish(self.publish_msg)
 
+
+
+class BartenderPerception(Perception):
+    """Bartender Perception class"""
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class.
+        Initializes a Perception instance with the given name and registers it in the LTM.
+        
+        :param name: The name of the Perception instance.
+        :type name: str
+        :param class_name: The name of the Perception class.
+        :type class_name: str
+        :param default_msg: The msg of the default subscription.
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription.
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values.
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+
+    def process_and_send_reading(self):
+        """
+        Method that processes the sensor values received.
+        """
+        sensor = {}
+        value = []
+        if isinstance(self.reading.data, list):
+            if "bottles" in self.name:
+                for perception in self.reading.data:
+                    distance = (
+                    perception.distance - self.normalize_values["distance_min"]
+                    ) / (
+                        self.normalize_values["distance_max"]
+                        - self.normalize_values["distance_min"]
+                    )
+                    angle = (perception.angle - self.normalize_values["angle_min"]) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    state = perception.state/(self.normalize_values["n_id"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    state = 0.98 if isclose(state, 1.0) else state
+                    id = perception.id
+                    value.append(
+                        dict(
+                            distance=distance,
+                            angle=angle,
+                            state=state,
+                            id=id
+                        )
+                    )
+            elif "glass" in self.name:
+                for perception in self.reading.data:
+                    distance = (
+                    perception.distance - self.normalize_values["distance_min"]
+                    ) / (
+                        self.normalize_values["distance_max"]
+                        - self.normalize_values["distance_min"]
+                    )
+                    angle = (perception.angle - self.normalize_values["angle_min"]) / (
+                        self.normalize_values["angle_max"]
+                        - self.normalize_values["angle_min"]
+                    )
+                    
+                    state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+
+                    
+                    value.append(
+                        dict(
+                            distance = distance,
+                            angle = angle,
+                            state = state
+                        )
+                    )
+        else:
+            value.append(dict(data=self.reading.data))
+        
+        sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
+        sensor_msg = perception_dict_to_msg(sensor)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
         
 
 
