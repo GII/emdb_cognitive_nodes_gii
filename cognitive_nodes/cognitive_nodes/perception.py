@@ -406,9 +406,9 @@ class BartenderPerception(Perception):
                         self.normalize_values["angle_max"]
                         - self.normalize_values["angle_min"]
                     )
-                    state = perception.state/(self.normalize_values["n_id"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
                     state = 0.98 if isclose(state, 1.0) else state
-                    id = perception.id
+                    id = perception.id/(self.normalize_values["n_ids"] - 1) # Normalize 0,1,2 states between 0 and 1
                     value.append(
                         dict(
                             distance=distance,
