@@ -6,6 +6,9 @@ from simulators.scenarios_2D import SimpleScenario, EntityType
 from cognitive_node_interfaces.msg import Perception, Actuation
 from core.utils import actuation_dict_to_msg, actuation_msg_to_dict, perception_dict_to_msg, perception_msg_to_dict
 from rclpy.impl.rcutils_logger import RcutilsLogger
+from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
+from rclpy.time import Time
+
 
 
 class WorldModel(GenericModel):
@@ -66,6 +69,76 @@ class Sim2DWorldModel(WorldModel):
         """        
         prediction=self.learner.predict(perception, action)
         return prediction
+    
+
+class SimBartender(WorldModel):
+    """SimBartender class: A fixed world model of a bartender simulation."""
+    def __init__(self, name='world_model', actuation_config=None, perception_config=None, class_name='cognitive_nodes.world_model.WorldModel', **params):
+        """
+        Constructor of the SimBartender class.
+
+        :param name: The name of the World Model instance.
+        :type name: str
+        :param actuation_config: Dictionary with the parameters of the actuation.
+        :type actuation_config: dict
+        :param perception_config: Dictionary with the parameters of the perception.
+        :type perception_config: dict
+        :param class_name: Name of the base WorldModel class, defaults to 'cognitive_nodes.world_model.WorldModel'.
+        :type class_name: str
+        """
+        super().__init__(name, class_name, **params)
+    
+    def calculate_activation(self, perception = None, activation_list=None):
+        """
+        Returns the activation value of the Model.
+
+        :param perception: Perception does not influence the activation.
+        :type perception: dict
+        :param activation_list: List of activation values from other sources, defaults to None.
+        :type activation_list: list
+        :return: The activation of the instance and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
+        """
+        self.activation.timestamp = self.get_clock().now().to_msg()
+        return self.activation
+    
+    def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
+        """
+        Adds perceptions to the activation inputs list.
+
+        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}.
+        :type node: dict
+        """    
+        name=node['name']
+        node_type=node['node_type']
+        if node_type == "Perception":
+            subscriber=self.create_subscription(PerceptionStamped, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
+            data=Perception()
+            updated=False
+            timestamp=Time()
+            new_input=dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
+            self.activation_inputs[name]=new_input
+            self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
+
+
+    def read_activation_callback(self, msg: PerceptionStamped):
+        """
+        Callback method that reads a perception and stores it in the activation inputs list.
+
+        :param msg: PerceptionStamped message that contains the perception and its timestamp.
+        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        """        
+        perception_dict=perception_msg_to_dict(msg=msg.perception)
+        if len(perception_dict)>1:
+            self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
+        if len(perception_dict)==1:
+            node_name=list(perception_dict.keys())[0]
+            if node_name in self.activation_inputs:
+                self.activation_inputs[node_name]['data']=perception_dict[node_name]
+                self.activation_inputs[node_name]['updated']=True
+                self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
+        else:
+            self.get_logger().warn("Empty perception recieved in P-Node. No activation calculated")
 
     
 class Sim2D(Learner):
