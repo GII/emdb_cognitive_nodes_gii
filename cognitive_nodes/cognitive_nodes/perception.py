@@ -431,13 +431,28 @@ class BartenderPerception(Perception):
                     )
                     
                     state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    state = 0.98 if isclose(state, 1.0) else state
 
-                    
                     value.append(
                         dict(
                             distance = distance,
                             angle = angle,
                             state = state
+                        )
+                    )
+            elif "client" in self.name:
+                # TODO: Implement distance and angle
+                for perception in self.reading.data:
+                    id = perception.id/(self.normalize_values["n_ids"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    id = 0.98 if isclose(id, 1.0) else id
+                    preference = perception.preference/(self.normalize_values["n_preferences"] - 1) # Normalize 0,1,2 states between 0 and 1
+                    preference = 0.98 if isclose(preference, 1.0) else preference
+
+
+                    value.append(
+                        dict(
+                            id=id,
+                            preference=preference
                         )
                     )
         else:
