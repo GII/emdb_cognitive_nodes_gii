@@ -5,6 +5,8 @@ Cognitive Nodes
 Here you can find a description of all the scripts to implement the different cognitive nodes, 
 their specific topics and services, and the documentation of their methods.
 
+The API reference of the base class CognitiveNode can be found in the `core API Reference <https://docs.pillar-robots.eu/projects/emdb_core/en/latest/core/API.html#cognitive-node>`_
+
 ++++++++++
 Perception
 ++++++++++
