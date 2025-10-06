@@ -1,3 +1,4 @@
+import threading
 import numpy as np
 from math import isclose
 from copy import deepcopy
@@ -19,8 +20,8 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         self.missing_world_model = False
         self.LTM_cache = {}
         self.unlinked_drives = []
-        self.configure_ltm_subscription(self.LTM_id)
-        self.configure_episode_subscription(episode_topic=episode_topic, episode_msg=episode_msg)
+        self.configure_ltm_subscription(self.LTM_id, self.cbgroup_server)
+        self.configure_episode_subscription(episode_topic=episode_topic, episode_msg=episode_msg, callback_group=self.cbgroup_server)
         self.default_class = {}
         self.default_params = {}
         self.setup_connectors()
@@ -33,7 +34,6 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         :type ltm_dump: dict
         """
         self.get_logger().info("Reading nodes from LTM: " + self.LTM_id + "...")
-        
         #Add missing elements from LTM to LTM Cache
         for node_type in ltm_dump.keys():
             if self.LTM_cache.get(node_type, None) is None:
@@ -59,16 +59,10 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         # Check if there are any drives not linked to goals
         self.unlinked_drives = self.get_unlinked_drives()
 
-    def read_activation_callback(self, msg):
-        super().read_activation_callback(msg)
-        # Process world model activations
-        updated_activations = all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs)) 
-        if updated_activations:
-            world_model_activations = [not isclose(activation["data"].activation, 0.0) for activation in self.activation_inputs.values() if activation["node_type"] == "WorldModel"]
-            if not any(world_model_activations):
-                self.missing_world_model = True
-            else:
-                self.missing_world_model = False
+        world_models = self.LTM_cache.get("WorldModel", None)
+        if world_models is None or not world_models:
+            self.get_logger().info("No World Model found in LTM.")
+            self.missing_world_model = True
 
     def get_unlinked_drives(self):
             """
@@ -181,6 +175,20 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
         if timestamp_evaluation<timestamp_activation:
             self.activation.timestamp = self.evaluation.timestamp
         return self.activation     
+    
+    def read_activation_callback(self, msg):
+        super().read_activation_callback(msg)
+        # Process world model activations
+        updated_activations = all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs)) 
+        self.get_logger().debug(f"Updated activations: {updated_activations}")
+        if updated_activations:
+            world_model_activations = [not isclose(activation["data"].activation, 0.0) for activation in self.activation_inputs.values() if activation["node_type"] == "WorldModel"]
+            if not any(world_model_activations):
+                self.get_logger().debug("No active World Model found. New World Model to be created.")
+                self.missing_world_model = True
+            else:
+                self.get_logger().debug("Active World Model found.")
+                self.missing_world_model = False
 
 
 class ModelCreationPolicy(Policy, ModelCreationMixin):
@@ -272,7 +280,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         name = self.generate_node_name("WorldModel")
         classname = self.default_class.get("WorldModel", "cognitive_nodes.world_model.WorldModel") 
         creation_response = await self.create_node_client(name=name, class_name=classname, parameters=self.default_params.get("WorldModel", {}))
-        if creation_response.success:
+        if creation_response.created:
             self.get_logger().info(f"{classname}: {name} created successfully.")
             return name
         else:
@@ -344,4 +352,17 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=episode_obj_list_to_msg_list(trace), rewards=rewards)
         if not trace_success.added:
             self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
-        
+
+    def read_activation_callback(self, msg):
+        super().read_activation_callback(msg)
+        # Process world model activations
+        updated_activations = all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs)) 
+        self.get_logger().debug(f"Updated activations: {updated_activations}")
+        if updated_activations:
+            world_model_activations = [not isclose(activation["data"].activation, 0.0) for activation in self.activation_inputs.values() if activation["node_type"] == "WorldModel"]
+            if not any(world_model_activations):
+                self.get_logger().debug("No active World Model found. New World Model to be created.")
+                self.missing_world_model = True
+            else:
+                self.get_logger().debug("Active World Model found.")
+                self.missing_world_model = False

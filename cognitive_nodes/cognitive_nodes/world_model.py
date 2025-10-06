@@ -36,7 +36,10 @@ class WorldModel(DeliberativeModel):
         self.activation.activation = 1.0
 
     def predict(self, input_episodes: list[Episode]) -> list[Episode]:
-        return super().predict(input_episodes)
+        self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the input episodes.")
+        #self.get_logger().info(f"DEBUG input episodes - {input_episodes}")
+        output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
+        return output_episodes
 
 
 class WorldModelLearned(WorldModel):

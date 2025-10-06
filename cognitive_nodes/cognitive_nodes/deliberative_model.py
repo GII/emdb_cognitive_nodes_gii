@@ -209,15 +209,15 @@ class Learner:
     
 
 class ANNLearner(Learner):
-    def __init__(self, node, buffer, **params):
+    def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, **params):
         super().__init__(node, buffer, **params)
         tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
-        self.batch_size = 32
-        self.epochs = 50
-        self.output_activation = 'relu'
-        self.hidden_activation = 'relu'
-        self.hidden_layers = [128]
-        self.learning_rate = 0.001
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.output_activation = output_activation
+        self.hidden_activation = hidden_activation
+        self.hidden_layers = hidden_layers
+        self.learning_rate = learning_rate
         self.optimizer = Adam(learning_rate=self.learning_rate)
         self.configured = False
 
@@ -246,10 +246,15 @@ class ANNLearner(Learner):
 
         self.model.add(layers.Input(shape=(input_length,)))
         for units in self.hidden_layers:
-            self.model.add(layers.Dense(units, activation=self.hidden_activation))
-        self.model.add(layers.Dropout(0.2))  # Add dropout for regularization
+            self.model.add(layers.Dense(units,
+                                    activation=self.hidden_activation,
+                                    kernel_initializer="he_normal",
+                                    kernel_regularizer=tf.keras.regularizers.l2(1e-5)))
+            self.model.add(layers.BatchNormalization())   # stabilizes training
+            self.model.add(layers.Dropout(0.1))           # mild dropout
         self.model.add(layers.Dense(output_length, activation=self.output_activation))
-        self.model.compile(optimizer=self.optimizer, loss=AsymmetricMSE(underestimation_penalty=3.0), metrics=['mae'])
+        #self.model.compile(optimizer=self.optimizer, loss=AsymmetricMSE(underestimation_penalty=3.0), metrics=['mae'])
+        self.model.compile(optimizer=self.optimizer, loss="mse", metrics=['mae'])
         self.configured = True               
     
     def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):

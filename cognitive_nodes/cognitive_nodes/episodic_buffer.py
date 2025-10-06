@@ -21,19 +21,7 @@ class EpisodicBuffer:
     def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params) -> None:
         """
         Constructor of the EpisodicBuffer class.
-
-        :param node: Cognitive node that will contain this episodic buffer.
-        :type node: core.cognitive_node.CognitiveNode
-        :param episode_topic: Topic where episodes are read.
-        :type episode_topic: str
-        :param episode_msg: Message type of the episodes topic.
-        :type episode_msg: str
-        :param max_size: Maximum size of the episodic buffer, defaults to 500.
-        :type max_size: int
-        :param inputs: List to configure inputs (from the attributes of the episode message) considered in the buffer, defaults to [].
-        :type inputs: list
-        :param outputs: List to configure outputs (from the attributes of the episode message) considered in the buffer, defaults to [].
-        :type outputs: list
+        
         """        
         self.node=node
         self.train_split=train_split # Percentage of samples used for training
@@ -66,18 +54,47 @@ class EpisodicBuffer:
         self._extract_labels(self.outputs, episode, self.output_labels)
         self.node.get_logger().info(f"Configuration finished - Input labels: {self.input_labels}, Output labels: {self.output_labels}")
 
+    def update_labels(self, episode: Episode):
+        """
+        Updates the label list based on the given episode.
+
+        :param episode: Episode object.
+        :type episode: cognitive_node_interfaces.msg.Episode
+        """
+        self.node.get_logger().info(f"Updating labels for episodic buffer: {episode}")
+        new_input_labels = []
+        new_output_labels = []
+        self._extract_labels(self.inputs, episode, new_input_labels)
+        self._extract_labels(self.outputs, episode, new_output_labels)
+        # Add new input labels and log warnings
+        new_inputs = set(new_input_labels) - set(self.input_labels)
+        if new_inputs:
+            self.input_labels.extend(new_inputs)
+            self.node.get_logger().warning(f"New input labels {new_inputs} added to episodic buffer.")
+
+        # Add new output labels and log warnings
+        new_outputs = set(new_output_labels) - set(self.output_labels)
+        if new_outputs:
+            self.output_labels.extend(new_outputs)
+            self.node.get_logger().warning(f"New output labels {new_outputs} added to episodic buffer.")
+
+
     def add_episode(self, episode: Episode):
-        self.node.get_logger().info(f"DEBUG - Input labels: {self.input_labels}, Output labels: {self.output_labels} / Inputs: {self.inputs}, Outputs: {self.outputs}")
-        if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
-            self.configure_labels(episode)
-        if self.rng.uniform() < self.train_split:
-            # Add to main buffer
-            self.main_buffer.append(deepcopy(episode))
-            self.new_sample_count_main += 1
+        if self.empty_episode(episode, self.inputs, self.outputs):
+            self.node.get_logger().warning("The episode is empty, not adding to buffer.")
         else:
-            # Add to secondary buffer
-            self.secondary_buffer.append(deepcopy(episode))
-            self.new_sample_count_secondary += 1
+            if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
+                self.configure_labels(episode)
+            else:
+                self.update_labels(episode)
+            if self.rng.uniform() < self.train_split:
+                # Add to main buffer
+                self.main_buffer.append(deepcopy(episode))
+                self.new_sample_count_main += 1
+            else:
+                # Add to secondary buffer
+                self.secondary_buffer.append(deepcopy(episode))
+                self.new_sample_count_secondary += 1
         
     def remove_episode(self, index=None, remove_from_main=True):
         if remove_from_main:
@@ -248,11 +265,28 @@ class EpisodicBuffer:
                 else:
                     value = episode.action.actuation[instance[1]][0][instance[2]]
             elif instance[0] == "reward_list":
-                value = episode.reward_list[instance[1]]
+                value = episode.reward_list.get(instance[1], 0.0)
             else:
-                value = getattr(episode, instance[0])[instance[1]][0][instance[2]]
+                value = getattr(episode, instance[0])[instance[1]][0].get(instance[2], np.nan)
             vector[label] = value
         return vector
+    
+    @staticmethod
+    def empty_episode(episode: Episode, inputs, outputs):
+        """
+        Checks if an episode is empty.
+        """
+        empty = False
+        vector = {}
+        instances = inputs + outputs
+        for instance in instances:
+            if instance == "action":
+                if not episode.action.actuation and not episode.action.policy_id:
+                    return True
+            else:
+                if not getattr(episode, instance):
+                    return True
+        return empty
     
     @staticmethod
     def episode_to_vector(episode: Episode, labels):
@@ -424,7 +458,8 @@ class TraceBuffer(EpisodicBuffer):
         # Compute the value at the position of the last element in a full-length trace
         start_val = min_val + (reward - min_val) * (full_length - n) / (full_length - 1)
         # Interpolate from start_val to reward over n steps
-        values = [start_val + (reward - start_val) * i / (n - 1) for i in range(n)]
+        values = [start_val + (reward - start_val) * i / (n - 1) for i in range(n-1)]
+        values.append(reward)
         return values
     
     def get_dataset(self, shuffle=True):
