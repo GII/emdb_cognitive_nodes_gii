@@ -36,7 +36,9 @@ It is not a cognitive node as such.
 
 - **P-Nodes (pNq):** They correspond to one of the types of equivalence classes the architecture works with. In this case perceptual equivalence classes. That is, they are a way to operationally discretize the mostly continuous and high-dimensional perceptual space. These classes arise from operational needs when working in continuous domains. They may correspond to meta-knowledge in terms, for instance, of indicating the area in state space where a World Model is known to be valid. Another example is related to contextual classes. In this case, perceptions corresponding to the same perceptual equivalence class, and thus represented by the same P-node, have in common that by applying the same action in the same domain, the same perceptual situation Pt+1 is reached.
 
-- **Drives (Dx):** Drives can be defined as a function that provides a measure of how desirable the satisfaction of a motivational desire is. Drives are directly related with **Needs**, which represent a desired internal state of the robot.
+- **Robot Purposes:** These provide a representation of a purpose to the robot. These can refer to internal purposes (Needs) or user purposes (Missions).
+
+- **Drives (Dx):** Drives can be defined as a function that provides a measure of how desirable the satisfaction of a motivational desire is.
 
 - **Goals (Gs):** They correspond to another one of the perceptual equivalence classes the architecture considers. Goals represent areas in the state space that, when reached, lead to the reduction of the value of at least one of the drives that are part of the robot’s motivational system (that is, they are implicitly rewarded areas). As a consequence, and as reward is usually domain dependent, they are dependent on the domain of operation, i.e. the same area of the state space can be a goal in one domain and not in others. Goals provide utility/reward, which is associated with the amount of reduction of the drive whose value decreased when reaching them.
 
