@@ -47,7 +47,7 @@ class UtilityModel(DeliberativeModel):
         self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
         self.learner = DefaultUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
-        self.deliberation = Deliberation(self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
+        self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
         self.spin_deliberation()
 
     def spin_deliberation(self):
@@ -172,23 +172,12 @@ class HardCodedUtilityModel(UtilityModel):
     
     def execute_callback(self, request, response):
         response = super().execute_callback(request, response)
-        if self.episodic_buffer.n_traces == 20:
-            x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
-
-            # TODO: Create a send space method
-            # #self.get_logger().info(f"DEBUG - SAVING DATASET Training data shapes - x: {x_train.shape}, y: {y_train.shape}")
-            # # Use input_labels for feature column names
-            # feature_columns = self.episodic_buffer.input_labels
-            # columns = feature_columns + ['y_train']
-            # data = np.hstack((x_train, y_train.reshape(-1, 1)))
-            # df = pd.DataFrame(data, columns=columns)
-            # df.to_csv('utility_model_dataset.csv', index=False)
         return response
     
 class LearnedUtilityModel(UtilityModel):
     def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
         super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
-        self.min_traces = min_traces
+        self.min_traces = float(min_traces)
         self.max_traces = max_traces
         self.trace_service = self.create_service(
             AddTrace,
@@ -223,6 +212,7 @@ class LearnedUtilityModel(UtilityModel):
             input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
             predictions = self.learner.call(input_data)
             if predictions is None:
+                self.get_logger().warn("Learner not configured, using alternative learner for predictions")
                 predictions = self.alternative_learner.call(input_data)
             self.get_logger().info(f"Prediction made: {len(predictions)} episodes")
             self.get_logger().info(f"Predictions: {predictions}")
@@ -232,16 +222,6 @@ class LearnedUtilityModel(UtilityModel):
         response = super().execute_callback(request, response)
         self.get_logger().info(f"Total traces: {self.episodic_buffer.n_traces}, Total antitraces: {self.episodic_buffer.n_antitraces} New traces: {self.episodic_buffer.new_traces}, Min traces: {self.min_traces} {self.episodic_buffer.min_traces}")
         if self.episodic_buffer.new_traces > self.min_traces:
-            if not self.learner.configured:
-                # TODO: Create a send space method
-                #self.get_logger().info(f"DEBUG - SAVING DATASET Training data shapes - x: {x_train.shape}, y: {y_train.shape}")
-                # Use input_labels for feature column names
-                x_train, y_train = self.episodic_buffer.get_dataset(shuffle=False)
-                feature_columns = self.episodic_buffer.input_labels
-                columns = feature_columns + ['y_train']
-                data = np.hstack((x_train, y_train.reshape(-1, 1)))
-                df = pd.DataFrame(data, columns=columns)
-                df.to_csv(f'utility_model_dataset.csv', index=False)
             x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
             self.learner.train(x_train, y_train)
             self.episodic_buffer.reset_new_sample_count()
@@ -261,6 +241,9 @@ class LearnedUtilityModel(UtilityModel):
                     x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True)
                     self.learner.train(x_train, y_train)
                     self.episodic_buffer.reset_new_sample_count()
+        elif msg.parent_policy == "reset_world":
+            self.get_logger().info("World reset detected, clearing buffer")
+            self.episodic_buffer.clear()
 
     def add_trace_callback(self, request, response):
         episodes = episode_msg_list_to_obj_list(request.episodes)

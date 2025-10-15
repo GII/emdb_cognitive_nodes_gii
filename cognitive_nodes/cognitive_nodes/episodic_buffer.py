@@ -18,7 +18,7 @@ class EpisodicBuffer:
 
     WORK IN PROGRESS
     """    
-    def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params) -> None:
+    def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=1.0, inputs=[], outputs=[], random_seed=0, **params) -> None:
         """
         Constructor of the EpisodicBuffer class.
         
@@ -240,7 +240,7 @@ class EpisodicBuffer:
             self.new_sample_count_secondary = 0
 
     @property
-    def main_size(self):
+    def main_max_size(self):
         """Returns the max size of the main buffer."""
         return self.main_buffer.maxlen
 
@@ -248,6 +248,16 @@ class EpisodicBuffer:
     def secondary_size(self):
         """Returns the max size of the secondary buffer."""
         return self.secondary_buffer.maxlen
+    
+    @property
+    def main_size(self):
+        """Returns the current size of the main buffer."""
+        return len(self.main_buffer)
+
+    @property
+    def secondary_size(self):
+        """Returns the current size of the secondary buffer."""
+        return len(self.secondary_buffer)
     
     # HELPER METHODS
 
@@ -263,11 +273,13 @@ class EpisodicBuffer:
                 if instance[1] == 'policy':
                     value = episode.action.policy_id
                 else:
-                    value = episode.action.actuation[instance[1]][0][instance[2]]
+                    value = episode.action.actuation.get(instance[1], [{}])[0].get(instance[2], 0.0)
             elif instance[0] == "reward_list":
                 value = episode.reward_list.get(instance[1], 0.0)
+            elif instance[0] == "parent_policy":
+                value = episode.parent_policy
             else:
-                value = getattr(episode, instance[0])[instance[1]][0].get(instance[2], np.nan)
+                value = getattr(episode, instance[0]).get(instance[1], [{}])[0].get(instance[2], np.nan)
             vector[label] = value
         return vector
     
@@ -276,18 +288,18 @@ class EpisodicBuffer:
         """
         Checks if an episode is empty.
         """
-        empty = False
+        empty = True
         vector = {}
         instances = inputs + outputs
         for instance in instances:
             if instance == "action":
-                if not episode.action.actuation and not episode.action.policy_id:
-                    return True
+                if episode.action.actuation or episode.action.policy_id:
+                    empty = False
             else:
-                if not getattr(episode, instance):
-                    return True
+                if getattr(episode, instance):
+                    empty = False
         return empty
-    
+
     @staticmethod
     def episode_to_vector(episode: Episode, labels):
         """
@@ -398,15 +410,18 @@ class EpisodicBuffer:
     @staticmethod
     def _extract_labels(io_list, episode, label_list):
         for io in io_list:
-            io_dict = getattr(episode, io)
-            if isinstance(io_dict, Action):
-                for group, dims_list in io_dict.actuation.items():
+            io_obj = getattr(episode, io)
+            if isinstance(io_obj, Action):
+                for group, dims_list in io_obj.actuation.items():
                     dims = dims_list[0]
                     for dim in dims:
                         label_list.append(f"{io}:{group}:{dim}")
                 label_list.append(f"{io}:policy:id")
+            elif isinstance(io_obj, str):
+                label_list.append(io)
+            
             else:
-                for group, dims_list in io_dict.items():
+                for group, dims_list in io_obj.items():
                     if isinstance(dims_list, list):
                         dims = dims_list[0]
                         for dim in dims:
@@ -418,13 +433,13 @@ class TraceBuffer(EpisodicBuffer):
     """
     Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
     """
-    def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_traces=1, max_antitraces=5, train_split=0.8, inputs=[], outputs=[], random_seed=0, **params):
+    def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_traces=1, max_antitraces=5, train_split=1.0, inputs=[], outputs=[], random_seed=0, **params):
         super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
         self.traces_buffer = deque(maxlen=max_traces)
         self.antitraces_buffer = deque(maxlen=max_antitraces)
         self.new_traces = 0
         self.min_utility_fraction = 0.01
-        self.min_traces = min_traces
+        self.min_traces = float(min_traces)
 
     def add_episode(self, episode, reward):
         if type(episode) is not Episode:
@@ -439,12 +454,12 @@ class TraceBuffer(EpisodicBuffer):
             utility_trace = self.evaluate_trace(reward)
             self.traces_buffer.append(list(zip(self.main_buffer, utility_trace)))
             self.new_traces += 1
+            self.node.get_logger().info(f"Adding trace with {self.main_size} episodes")
             self.clear()
-        elif self.new_sample_count_main == self.main_size and self.n_traces > self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
-            self.antitraces_buffer.append(list(zip(self.main_buffer, np.zeros(self.main_size))))
+        elif self.new_sample_count_main == self.main_max_size and self.n_traces > self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
+            self.node.get_logger().info("Adding antitrace")
+            self.antitraces_buffer.append(list(zip(self.main_buffer, np.zeros(self.main_max_size))))
             self.new_traces += 1
-            self.clear()
-        elif self.new_sample_count_main == self.main_size: # If the buffer is full but not enough traces, just clear
             self.clear()
 
     def evaluate_trace(self, reward):
@@ -452,7 +467,7 @@ class TraceBuffer(EpisodicBuffer):
         if n == 0:
             return []
         min_val = reward * self.min_utility_fraction
-        full_length = self.main_size
+        full_length = self.main_max_size
         if full_length == 1 or n == 1:
             return [reward]
         # Compute the value at the position of the last element in a full-length trace
@@ -463,8 +478,7 @@ class TraceBuffer(EpisodicBuffer):
         return values
     
     def get_dataset(self, shuffle=True):
-        all_traces = self.traces_buffer + self.antitraces_buffer
-        flattened_traces = [item for trace in all_traces for item in trace]
+        flattened_traces = [item for trace in self.traces_buffer for item in trace]
         buffer, utilities = zip(*flattened_traces) if flattened_traces else ([], [])
         utilities = np.array(utilities)
         states, _ = self._get_samples_from_buffer(buffer, shuffle=False)

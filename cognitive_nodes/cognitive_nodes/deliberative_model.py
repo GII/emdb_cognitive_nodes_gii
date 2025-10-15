@@ -209,7 +209,7 @@ class Learner:
     
 
 class ANNLearner(Learner):
-    def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, **params):
+    def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, model_file=None, **params):
         super().__init__(node, buffer, **params)
         tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
         self.batch_size = batch_size
@@ -220,6 +220,9 @@ class ANNLearner(Learner):
         self.learning_rate = learning_rate
         self.optimizer = Adam(learning_rate=self.learning_rate)
         self.configured = False
+        self.model_file = model_file
+        if self.model_file is not None:
+            self.configure_model(0,0) # Load model from file
 
     def configure_model(self, input_length, output_length):
         """
@@ -230,32 +233,37 @@ class ANNLearner(Learner):
         :param output_shape: The shape of the output data.
         :type output_shape: int
         """
-        self.model = Sequential()
-        
-        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
-          #TODO: THIS MIGHT REQUIRE TO USE THE FUNCTIONAL API INSTEAD OF SEQUENTIAL
-        # --- Inputs ---
-        # object_input = layers.Input(shape=(), dtype=tf.int32, name="object_id")
-        # numeric_input = layers.Input(shape=(num_numeric_features,), dtype=tf.float32, name="numeric_features")
+        if self.model_file is None:
+            self.model = Sequential()
+            
+            ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
+            # TODO: THIS MIGHT REQUIRE TO USE THE FUNCTIONAL API INSTEAD OF SEQUENTIAL
+            # --- Inputs ---
+            # object_input = layers.Input(shape=(), dtype=tf.int32, name="object_id")
+            # numeric_input = layers.Input(shape=(num_numeric_features,), dtype=tf.float32, name="numeric_features")
 
-        # --- Embedding Layer ---
-        #embedding_layer = layers.Embedding(input_dim=num_objects, output_dim=embedding_dim)
-        #embedded_object = embedding_layer(object_input)  # shape: (batch_size, embedding_dim)
+            # --- Embedding Layer ---
+            #embedding_layer = layers.Embedding(input_dim=num_objects, output_dim=embedding_dim)
+            #embedded_object = embedding_layer(object_input)  # shape: (batch_size, embedding_dim)
 
-        ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
+            ## TODO: USE THE LABELS TO SEPARATE THE INPUTS INTO REGUAR INPUTS AND THE POLICY ID INPUT, THEN CONCATNATE ##
 
-        self.model.add(layers.Input(shape=(input_length,)))
-        for units in self.hidden_layers:
-            self.model.add(layers.Dense(units,
-                                    activation=self.hidden_activation,
-                                    kernel_initializer="he_normal",
-                                    kernel_regularizer=tf.keras.regularizers.l2(1e-5)))
-            self.model.add(layers.BatchNormalization())   # stabilizes training
-            self.model.add(layers.Dropout(0.1))           # mild dropout
-        self.model.add(layers.Dense(output_length, activation=self.output_activation))
-        #self.model.compile(optimizer=self.optimizer, loss=AsymmetricMSE(underestimation_penalty=3.0), metrics=['mae'])
-        self.model.compile(optimizer=self.optimizer, loss="mse", metrics=['mae'])
-        self.configured = True               
+            self.model.add(layers.Input(shape=(input_length,)))
+            for units in self.hidden_layers:
+                self.model.add(layers.Dense(units,
+                                        activation=self.hidden_activation,
+                                        kernel_initializer="he_normal",
+                                        kernel_regularizer=tf.keras.regularizers.l2(1e-5)))
+                self.model.add(layers.BatchNormalization())   # stabilizes training
+                self.model.add(layers.Dropout(0.1))           # mild dropout
+            self.model.add(layers.Dense(output_length, activation=self.output_activation))
+            #self.model.compile(optimizer=self.optimizer, loss=AsymmetricMSE(underestimation_penalty=3.0), metrics=['mae'])
+            self.model.compile(optimizer=self.optimizer, loss="mse", metrics=['mae'])
+            self.configured = True
+        else:
+            self.node.get_logger().info(f"Loading model from {self.model_file}")
+            self.model = tf.keras.models.load_model(self.model_file, custom_objects={"AsymmetricMSE": AsymmetricMSE})
+            self.configured = True               
     
     def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):
         # Ensure x_train and y_train are at least 2D
