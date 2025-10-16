@@ -1,0 +1,6 @@
+Perception old_perception
+string parent_policy
+Action action
+Perception perception
+cognitive_processes_interfaces/RewardList reward_list
+builtin_interfaces/Time timestamp

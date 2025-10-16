@@ -17,7 +17,7 @@ from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
 from cognitive_node_interfaces.srv import Execute, Predict
-from cognitive_processes_interfaces.msg import Episode as EpisodeMsg
+from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators.pump_panel_sim_discrete import PumpObjects
 
@@ -154,7 +154,7 @@ class PolicyLLMExploration(Policy):
         """
         Callback that processes the episode message.
         :param msg: Message containing the episode information.
-        :type msg: cognitive_processes_interfaces.msg.EpisodeMsg
+        :type msg: cognitive_node_interfaces.msg.Episode
         """
         old_perception_msg = msg.old_perception
         old_perception = perception_msg_to_dict(old_perception_msg)

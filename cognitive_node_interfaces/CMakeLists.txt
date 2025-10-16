@@ -13,11 +13,14 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(cognitive_processes_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Action.msg"  
   "msg/Activation.msg"
   "msg/Actuation.msg"
   "msg/Evaluation.msg"
+  "msg/Episode.msg"
   "msg/ObjectLayout.msg"
   "msg/ObjectParameters.msg"
   "msg/Perception.msg"
@@ -26,6 +29,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Value.msg"
   "srv/Action.srv"
   "srv/AddPoint.srv"
+  "srv/AddPoints.srv"
+  "srv/AddTrace.srv"
   "srv/AddNeighbor.srv"
   "srv/ContainsSpace.srv"
   "srv/DeleteNeighbor.srv"
@@ -44,12 +49,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/IsSatisfied.srv"
   "srv/Policy.srv"
   "srv/Predict.srv"
+  "srv/PredictUtility.srv"
   "srv/SendSpace.srv"
   "srv/SetActivation.srv"
   "srv/SetActivationTopic.srv"
   "srv/SetInputs.srv"
   "srv/SetWeight.srv"
-  DEPENDENCIES builtin_interfaces
+  DEPENDENCIES builtin_interfaces cognitive_processes_interfaces
 )
 
 

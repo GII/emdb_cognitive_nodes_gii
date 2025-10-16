@@ -103,7 +103,7 @@ class RobotPurpose(CognitiveNode):
         :return: Response that indicates if the robot purpose is satisfied or not.
         :rtype: cognitive_node_interfaces.srv.IsSatisfied.Response
         """
-        self.get_logger().info('Calculating satisfaction..')
+        self.get_logger().debug('Calculating satisfaction..')
         response.satisfied = self.calculate_satisfaction()
         response.purpose_type = self.purpose_type
         response.terminal = self.terminal

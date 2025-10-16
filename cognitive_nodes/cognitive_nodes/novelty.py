@@ -9,11 +9,12 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy, PolicyBlocking
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg
+from core.utils import actuation_dict_to_msg, perception_msg_to_dict
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
 from cognitive_node_interfaces.srv import Execute, Predict
+from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 
 
 class DriveNovelty(Drive):
@@ -359,27 +360,6 @@ class PolicyRandomAction(PolicyBlocking):
                     raise TypeError("Actuation parameter is of unknown type")
                 self.get_logger().info(f"DEBUG: {actuator}, {param} : {self.actuation[actuator][0][param]}")
 
-    
-    def denormalize_actuation(self, actuation, actuation_config):
-        """
-        Denormalizes the actuation values.
-
-        :param actuation: Actuation values to denormalize.
-        :type actuation: dict
-        :param actuation_config: Actuation configuration.
-        :type actuation_config: dict
-        :return: Denormalized actuation.
-        :rtype: dict
-        """        
-        act=deepcopy(actuation)
-        for actuator in act:
-            for param in act[actuator][0]:
-                if actuation_config[actuator][param]["type"]=="float":
-                    bounds=actuation_config[actuator][param]["bounds"]
-                    value=act[actuator][0][param]
-                    act[actuator][0][param]=bounds[0]+(value*(bounds[1]-bounds[0]))
-        return act
-
 
     async def execute_callback(self, request, response):
         """
@@ -395,8 +375,11 @@ class PolicyRandomAction(PolicyBlocking):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         self.randomize_actuation()
         actuation_msg=actuation_dict_to_msg(self.actuation)
-        await self.world_model_client.send_request_async(perception=request.perception, actuation=actuation_msg)
-        actuation_msg=actuation_dict_to_msg(self.denormalize_actuation(self.actuation, self.actuation_config))
+        input_episode = EpisodeMsg()
+        input_episode.old_perception = request.perception
+        input_episode.action.actuation = actuation_msg
+        result = await self.world_model_client.send_request_async(input_episodes=[input_episode])
+        actuation_msg=actuation_dict_to_msg(self.actuation)
         await self.policy_service.send_request_async(action=actuation_msg)
         response.policy=self.name
         response.action=actuation_dict_to_msg(self.actuation)

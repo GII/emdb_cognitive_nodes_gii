@@ -148,7 +148,6 @@ class Drive(CognitiveNode):
         :rtype: Tuple[float, builtin_interfaces.msg.Time]
         """
         return self.reward, self.get_clock().now().to_msg()
-        return self.reward, self.get_clock().now().to_msg()
 
     def calculate_activation(self, perception=None, activation_list=None):
         """

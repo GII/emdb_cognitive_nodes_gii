@@ -104,7 +104,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :type class_name: str
         :param episodes_topic: Topic from where to read the episodes.
         :type episodes_topic: str
-        :param episodes_msg: Message type of the episodes topic (most cases: cognitive_processes_interfaces.msg.Episode).
+        :param episodes_msg: Message type of the episodes topic (most cases: cognitive_node_interfaces.msg.Episode).
         :type episodes_msg: str
         :raises Exception: Raises exception if no episode topic was provided.
         """        
@@ -125,7 +125,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         Callback that processes an episode message.
 
         :param msg: Episode message.
-        :type msg: ROS Message (most cases: cognitive_processes_interfaces.msg.Episode)
+        :type msg: ROS Message (most cases: cognitive_node_interfaces.msg.Episode)
         """        
         perception=perception_msg_to_dict(msg.perception)
         old_perception=perception_msg_to_dict(msg.old_perception)

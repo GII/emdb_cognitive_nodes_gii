@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'test_episodic_buffer = cognitive_nodes.deliberative_model:test_episodic_buffer'
         ],
     },
 )
