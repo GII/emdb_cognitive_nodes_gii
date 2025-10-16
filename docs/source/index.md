@@ -9,10 +9,9 @@ There are two ROS 2 packages in this repository:
 - **cognitive_nodes:** Implementations of the cognitive nodes.
 - **cognitive_nodes_interfaces:** Services and messages definitions.
 
-We can find five sections in this documentation:
+We can find four sections in this documentation:
 
-- [Concepts:](concepts/concepts.md) Theorical concepts about the cognitive nodes into the cognitive architecture.
-- [Intrinsic Motivations:](concepts/intrinsic_motivations.md) Theorical explanation of the intrinsic motivations implemented in the cognitive architecture. 
+- [Concepts:](concepts/concepts.md) Theoretical concepts about the cognitive nodes into the cognitive architecture and explanation of the intrinsic motivations implemented in the cognitive architecture.
 - [Cognitive Nodes API documentation:](cognitive_nodes/cn_api_documentation.rst) API of the cognitive nodes implemented by the GII.
 - [Intrinsic Motivations API documentation:](cognitive_nodes/im_api_documentation.rst) API of the intrinsic motivations implemented by the GII.
 - [Auxiliary Scripts API documentation:](cognitive_nodes/as_api_documentation.rst) API of the auxiliary scripts used in the cognitive nodes.

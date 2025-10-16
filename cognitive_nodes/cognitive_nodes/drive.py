@@ -69,7 +69,7 @@ class Drive(CognitiveNode):
 
     def set_activation_callback(self, request, response):
         """
-        Needs can modify a drive's activation.
+        Robot purposes can modify a drive's activation.
 
         :param request: The request that contains the new activation value.
         :type request: cognitive_node_interfaces.srv.SetActivation.Request
