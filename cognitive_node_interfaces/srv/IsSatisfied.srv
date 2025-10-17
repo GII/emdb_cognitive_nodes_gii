@@ -1,5 +1,6 @@
 builtin_interfaces/Time timestamp
 ---
-string need_type
+string purpose_type
+bool terminal
 bool updated
 bool satisfied

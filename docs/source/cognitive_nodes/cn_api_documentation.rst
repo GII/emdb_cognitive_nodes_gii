@@ -5,11 +5,13 @@ Cognitive Nodes
 Here you can find a description of all the scripts to implement the different cognitive nodes, 
 their specific topics and services, and the documentation of their methods.
 
+The API reference of the base class CognitiveNode can be found in the `core API Reference <https://docs.pillar-robots.eu/projects/emdb_core/en/latest/core/API.html#cognitive-node>`_
+
 ++++++++++
 Perception
 ++++++++++
 
-Python script to implement the Perception cognitive node, which is responsible for processing sensory inputs and generating perceptions.
+Python module that implements the Perception cognitive node, which is responsible for processing sensory inputs and generating perceptions.
 
 **Specific topics**
 
@@ -28,7 +30,7 @@ Python script to implement the Perception cognitive node, which is responsible f
 P-Node
 ++++++++++
 
-Python script to implement the P-Node cognitive node, which represent perceptual equivalence classes (discretizations of continuous perceptual space) 
+Python module that implements the P-Node cognitive node, which represent perceptual equivalence classes (discretizations of continuous perceptual space) 
 used to operationally group perceptions that lead to the same outcome under identical actions.
 
 **Spacific topics**
@@ -49,19 +51,19 @@ used to operationally group perceptions that lead to the same outcome under iden
 
 
 ++++++++++
-Need
+RobotPurpose
 ++++++++++
 
-Python script to implement the Needs and Missions of the cognitive architecture, which represent the desired motivational state of the system.
+Python module that implements the Needs and Missions of the cognitive architecture, which represent the desired motivational state of the system.
 Needs represent intrinsic motivations, while Missions represent extrinsic motivations.
 
 **Specific services**
 
-/need/id/set_activation => Purposes can modify a need's or mission's activation.
+/robot_purpose/id/set_activation => Service to set the activation of the robot purpose.
 
-/need/id/get_satisfaction => Obtain the satisfaction value of a need (1.0 if satisfied, 0.0 if not).
+/robot_purpose/id/get_satisfaction => Obtain the satisfaction value of a need (1.0 if satisfied, 0.0 if not).
 
-.. automodule:: cognitive_nodes.need
+.. automodule:: cognitive_nodes.robot_purpose
     :members:
     :show-inheritance:
 
@@ -69,7 +71,7 @@ Needs represent intrinsic motivations, while Missions represent extrinsic motiva
 Drive
 ++++++++++
 
-Python script to implement the Drives, which are defined as a fuction that provides a measure (evaluation) of how desirable the satisfaction of a motivational desire (Need or Mission) is.
+Python module that implements the Drives, which are defined as a fuction that provides a measure (evaluation) of how desirable the satisfaction of a motivational desire (Need or Mission) is.
 
 **Specific topics**
 
@@ -95,7 +97,7 @@ Python script to implement the Drives, which are defined as a fuction that provi
 Goal
 ++++++++++
 
-Python script to implement the Goal cognitive node, which represents an area in the state space that, when reached, lead to the reduction of at least one
+Python module that implements the Goal cognitive node, which represents an area in the state space that, when reached, lead to the reduction of at least one
 of the drives that are part of the robot's motivational system. That is, it is implicitly a rewarded area.
 
 **Spacific topics**
@@ -124,7 +126,7 @@ World model
 
 (**WORK IN PROGRESS**)
 
-Python script to implement the World Model cognitive node, which is represent the behavior of the domain in which the robot is operating.
+Python module that implements the World Model cognitive node, which is represent the behavior of the domain in which the robot is operating.
 They are usually instantiated as a predictor of the perceptual situation Pt+1 that will result from the application of an action when in 
 a perceptual state Pt.
 
@@ -152,7 +154,7 @@ Utiliy model
 
 (**WORK IN PROGRESS**)
 
-Python script to implement the Utility Model cognitive node, which estimates the expected utility of perceptual states with respect to a goal, 
+Python module that implements the Utility Model cognitive node, which estimates the expected utility of perceptual states with respect to a goal, 
 based on the probability of achieving it and the potential reward.
 
 **Specific services**
@@ -174,7 +176,7 @@ timestamp and for a given policy.
 Policy
 ++++++++++++
 
-Python script to implement the Policy cognitive node, which is a reactive decision structure in the form of a procedural componen that provides the 
+Python module that implements the Policy cognitive node, which is a reactive decision structure in the form of a procedural componen that provides the 
 action to apply when at a given perceptual point.
 
 **Specific services**
@@ -192,7 +194,7 @@ action to apply when at a given perceptual point.
 C-Node
 ++++++++++
 
-Python script to implement the C-Node cognitive node, which represens a context. It links a P-Node (initial state), the World Model and a Goal (desired state), 
+Python module that implements the C-Node cognitive node, which represens a context. It links a P-Node (initial state), the World Model and a Goal (desired state), 
 with the Policy needed to move from the initial to the desired state.
 
 .. automodule:: cognitive_nodes.cnode

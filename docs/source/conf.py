@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath("../../cognitive_nodes"))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "e-MDB Cognitive Nodes implemented by the GII"
-copyright = "2024, GII"
+copyright = "2025, GII"
 author = "GII"
 release = "Apache-2.0"
 
@@ -40,7 +40,15 @@ autodoc_mock_imports = [
     "cognitive_processes_interfaces",
     "cognitive_node_interfaces",
     "simulators",
-    "simulators_interfaces"
+    "simulators_interfaces",
+    "sklearn",       
+    "numpy",
+    "pandas",           
+    "scipy",           
+    "geometry_msgs",  
+    "sensor_msgs",    
+    "nav_msgs",      
+    "builtin_interfaces"
 ]
 
 # -- Options for HTML output -------------------------------------------------
