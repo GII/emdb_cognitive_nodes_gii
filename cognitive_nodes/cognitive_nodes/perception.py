@@ -365,6 +365,100 @@ class FruitShopPerception(Perception):
         self.publish_msg.timestamp=self.get_clock().now().to_msg()
         self.perception_publisher.publish(self.publish_msg)
 
+
+
+class OscarLLMPerception(Perception):
+    """Oscar LLM Perception class"""
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
+        """
+        Constructor for the Perception class.
+        Initializes a Perception instance with the given name and registers it in the LTM.
+        
+        :param name: The name of the Perception instance.
+        :type name: str
+        :param class_name: The name of the Perception class.
+        :type class_name: str
+        :param default_msg: The msg of the default subscription.
+        :type default_msg: str
+        :param default_topic: The topic of the default subscription.
+        :type default_topic: str
+        :param normalize_data: Values in order to normalize values.
+        :type normalize_data: dict
+        """
+        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+
+    def process_and_send_reading(self):
+        """
+        Method that processes the sensor values received.
+        """
+        sensor = {}
+        value = []
+        if isinstance(self.reading.data, list):
+            if "object" in self.name:
+                for perception in self.reading.data:
+                    label = perception.label
+                    x_position = (perception.x_position
+                                  - self.normalize_values["x_min"]
+                                  ) / (
+                        self.normalize_values["x_max"]
+                        - self.normalize_values["x_min"]
+                    )
+                    y_position = (perception.y_position 
+                                  - self.normalize_values["y_min"]) / (
+                        self.normalize_values["y_max"]
+                        - self.normalize_values["y_min"]
+                    )
+                    diameter = (perception.diameter - self.normalize_values["diameter_min"]) / (
+                        self.normalize_values["diameter_max"]
+                        - self.normalize_values["diameter_min"]
+                    )
+                    color = (perception.color
+                    )
+                    state = perception.state
+                    value.append(
+                        dict(
+                            label=label,
+                            x_position=x_position,
+                            y_position=y_position,
+                            diameter= diameter,
+                            color=color,
+                            state=state
+                            )
+                            )
+            
+            elif "robot_hand" in self.name:
+                for perception in self.reading.data:
+                    state = perception.state
+                    x = (perception.x_position 
+                         - self.normalize_values["x_min"]                     
+                    ) / (
+                        self.normalize_values["x_max"] 
+                        - self.normalize_values["x_min"]
+                    )
+                    y = (perception.y_position
+                         - self.normalize_values["y_min"]                   
+                    ) / (
+                        self.normalize_values["y_max"]
+                        - self.normalize_values["y_min"]
+                        )
+                    value.append(
+                        dict(
+                            x_position=x,
+                            y_position=y,
+                            state = state
+                            )
+                            )
+        else:
+            value.append(dict(data=self.reading.data))
+        
+        sensor[self.name] = value
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
+        sensor_msg = perception_dict_to_msg(sensor)
+        self.publish_msg.perception=sensor_msg
+        self.publish_msg.timestamp=self.get_clock().now().to_msg()
+        self.perception_publisher.publish(self.publish_msg)
+
+
         
 
 

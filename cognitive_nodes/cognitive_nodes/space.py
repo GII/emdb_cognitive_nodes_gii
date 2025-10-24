@@ -737,7 +737,7 @@ class ANNSpace(PointBasedSpace):
         # Define the Neural Network's model
         self.model = tf.keras.Sequential(
             [
-                tf.keras.layers.Dense(128, activation="relu", input_shape=(8,)), #TODO Adapt to state space dimensions
+                tf.keras.layers.Dense(128, activation="relu", input_shape=(15,)), #TODO Adapt to state space dimensions
                 tf.keras.layers.Dense(64, activation="relu"),
                 tf.keras.layers.Dense(32, activation="relu"),
                 tf.keras.layers.Dense(1, activation=output_activation),

@@ -138,6 +138,21 @@ class Need(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
+class NeedAlignment(Need):
+    """"
+    Need Class for Alignment purposes.
+    """
+    def calculate_satisfaction(self):
+        """
+        Calculate whether the need is satisfied.
+
+        :return: True if the need is satisfied, False otherwise.
+        :rtype: bool
+        """
+        satisfied = self.drive_evaluation.evaluation<0.01 # the need is satisfied when the drive evaluation is less than 0.1
+
+        return satisfied
+    
 
 def main(args=None):
     rclpy.init(args=args)
