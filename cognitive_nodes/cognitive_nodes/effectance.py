@@ -4,7 +4,7 @@ import numpy as np
 from math import isclose
 from copy import copy
 
-from cognitive_nodes.need import Need
+from cognitive_nodes.robot_purpose import RobotPurpose
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal, GoalMotiven, GoalLearnedSpace
 from cognitive_nodes.policy import Policy
