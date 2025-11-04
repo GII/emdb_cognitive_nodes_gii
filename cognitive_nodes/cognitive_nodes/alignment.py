@@ -137,7 +137,7 @@ class PolicyAlignment(Policy):
         response.policy = self.name
         if self.policy_executed:
             self.get_logger().info('Policy executed successfully.')
-            client = ServiceClientAsync(self, SetActivation, '/need/alignment_need/set_activation', self.cbgroup_client)
+            client = ServiceClientAsync(self, SetActivation, '/robot_purpose/alignment_need/set_activation', self.cbgroup_client)
             await client.send_request_async(activation=0.0)
         return response
     
@@ -147,32 +147,34 @@ class PolicyAlignment(Policy):
         """
         self.get_logger().info('Creating missions and drives...')
         for index, (tag, weight) in enumerate(missions):
-            need_name = f"{tag}_need"
+            mission_name = f"{tag}_mission"
             drive_id = f"{tag}_drive"
+            purpose_type = 'Mission'
             if index == len(missions) - 1:
-                need_type = 'Operational'
+                terminal = True
             else:
-                need_type = 'Other'
+                terminal = False
             
-            need_parameters = {
+            mission_parameters = {
                 "weight": weight,
                 "drive_id": drive_id,
-                "need_type": need_type
+                "purpose_type": purpose_type,
+                "terminal": terminal
             }
             
             drive_parameters = {
                 "drive_function": drives[index],
-                "neighbors": [{"name": need_name, "node_type": "Need"}]
+                "neighbors": [{"name": mission_name, "node_type": "RobotPurpose"}]
             }
 
-            need = await self.create_node_client(name=need_name, class_name="cognitive_nodes.need.NeedAlignment", parameters=need_parameters)
+            mission = await self.create_node_client(name=mission_name, class_name="cognitive_nodes.robot_purpose.AlignmentMission", parameters=mission_parameters)
             drive = await self.create_node_client(name=drive_id, class_name="cognitive_nodes.drive.DriveLLM", parameters=drive_parameters)
 
-            if need and drive:
+            if mission and drive:
                 self.get_logger().info(f"Created need and drive: {tag}")
-                self.get_logger().info(f"Need: {need_name}, Drive: {drive_id}")
+                self.get_logger().info(f"Mission: {mission_name}, Drive: {drive_id}")
                 self.policy_executed = True
-            if not (need and drive):
+            if not (mission and drive):
                 self.get_logger().fatal(f"Failed creation of the operational need and drive: {tag}")
                 self.policy_executed = False
         return 

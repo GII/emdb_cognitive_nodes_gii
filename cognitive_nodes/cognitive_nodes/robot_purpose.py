@@ -139,7 +139,7 @@ class RobotPurpose(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
-class NeedAlignment(Need):
+class AlignmentMission(RobotPurpose):
     """"
     Need Class for Alignment purposes.
     """
