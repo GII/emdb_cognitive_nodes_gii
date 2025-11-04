@@ -4,6 +4,7 @@ from rclpy.impl.rcutils_logger import RcutilsLogger
 import tensorflow as tf
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.losses import Loss
+from keras._tf_keras.keras.callbacks import TensorBoard
 from keras import layers, metrics, losses, Sequential
 
 from core.cognitive_node import CognitiveNode
@@ -209,7 +210,7 @@ class Learner:
     
 
 class ANNLearner(Learner):
-    def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, model_file=None, **params):
+    def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, model_file=None, tensorboard=False, tensorboard_log_dir=None, **params):
         super().__init__(node, buffer, **params)
         tf.config.set_visible_devices([], 'GPU') # TODO: Handle GPU usage properly
         self.batch_size = batch_size
@@ -221,6 +222,9 @@ class ANNLearner(Learner):
         self.optimizer = Adam(learning_rate=self.learning_rate)
         self.configured = False
         self.model_file = model_file
+        self.tensorboard = tensorboard
+        self.tensorboard_log_dir = tensorboard_log_dir
+        self._run_counter = 0
         if self.model_file is not None:
             self.configure_model(0,0) # Load model from file
 
@@ -265,12 +269,24 @@ class ANNLearner(Learner):
             self.model = tf.keras.models.load_model(self.model_file, custom_objects={"AsymmetricMSE": AsymmetricMSE})
             self.configured = True               
     
-    def train(self, x_train, y_train, epochs=None, batch_size=None, verbose=1):
+    def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, x_val=None, y_val=None, verbose=1):
         # Ensure x_train and y_train are at least 2D
         if len(x_train.shape) == 1:
             x_train = x_train.reshape(-1, 1)
         if len(y_train.shape) == 1:
             y_train = y_train.reshape(-1, 1)
+
+        # Handle validation data if provided
+        validation_data = None
+        if x_val is not None and y_val is not None:
+            # Ensure x_val and y_val are at least 2D
+            if len(x_val.shape) == 1:
+                x_val = x_val.reshape(-1, 1)
+            if len(y_val.shape) == 1:
+                y_val = y_val.reshape(-1, 1)
+            validation_data = (x_val, y_val)
+            # If validation_data is provided, set validation_split to 0.0
+            validation_split = 0.0
 
         input_size = x_train.shape[1]
         output_size = y_train.shape[1]
@@ -281,13 +297,45 @@ class ANNLearner(Learner):
             batch_size = self.batch_size
         if not self.configured:
             self.configure_model(x_train.shape[1], y_train.shape[1])
+        callbacks = []
+
+
+        # Learning rate scheduling
+        lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=epochs // 10,
+            min_lr=1e-7,
+            verbose=1
+        )
+        callbacks.append(lr_scheduler)
+        
+        # Early stopping
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=epochs // 5,
+            restore_best_weights=True,
+            verbose=1
+        )
+        callbacks.append(early_stopping)
+
+        if self.tensorboard:
+            if self.tensorboard_log_dir is None:
+                self.tensorboard_log_dir = f'logs/fit/{self.node.name}'
+            run_dict = self.tensorboard_log_dir + f'/run_{self._run_counter}'
+            self._run_counter += 1
+            tensorboard_callback = TensorBoard(log_dir=run_dict, histogram_freq=1)
+            callbacks.append(tensorboard_callback)
         self.model.fit(
             x_train,
             y_train,
             epochs=epochs,
             batch_size=batch_size,
-            verbose=verbose
-            )
+            verbose=verbose,
+            validation_split=validation_split,
+            validation_data=validation_data,
+            callbacks=callbacks
+        )
 
     def call(self, x):
         if not self.configured:

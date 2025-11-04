@@ -242,12 +242,12 @@ class EpisodicBuffer:
     @property
     def main_max_size(self):
         """Returns the max size of the main buffer."""
-        return self.main_buffer.maxlen
+        return self.main_buffer.maxlen if self.main_buffer.maxlen is not None else float('inf')
 
     @property
-    def secondary_size(self):
+    def secondary_max_size(self):
         """Returns the max size of the secondary buffer."""
-        return self.secondary_buffer.maxlen
+        return self.secondary_buffer.maxlen if self.secondary_buffer.maxlen is not None else float('inf')
     
     @property
     def main_size(self):
@@ -433,13 +433,14 @@ class TraceBuffer(EpisodicBuffer):
     """
     Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
     """
-    def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_traces=1, max_antitraces=5, train_split=1.0, inputs=[], outputs=[], random_seed=0, **params):
+    def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_traces=1, max_antitraces=5, train_split=1.0, inputs=[], outputs=[], evaluation_method='linear', random_seed=0, **params):
         super().__init__(node, main_size, secondary_size, train_split, inputs, outputs, random_seed, **params)
         self.traces_buffer = deque(maxlen=max_traces)
         self.antitraces_buffer = deque(maxlen=max_antitraces)
         self.new_traces = 0
         self.min_utility_fraction = 0.01
         self.min_traces = float(min_traces)
+        self.evaluation_method = evaluation_method
 
     def add_episode(self, episode, reward):
         if type(episode) is not Episode:
@@ -467,16 +468,9 @@ class TraceBuffer(EpisodicBuffer):
         if n == 0:
             return []
         min_val = reward * self.min_utility_fraction
-        full_length = self.main_max_size
-        if full_length == 1 or n == 1:
-            return [reward]
-        # Compute the value at the position of the last element in a full-length trace
-        start_val = min_val + (reward - min_val) * (full_length - n) / (full_length - 1)
-        # Interpolate from start_val to reward over n steps
-        values = [start_val + (reward - start_val) * i / (n - 1) for i in range(n-1)]
-        values.append(reward)
+        values = getattr(self, f"eval_{self.evaluation_method}", self.eval_default)(reward, min_val, n, self.main_max_size)
         return values
-    
+      
     def get_dataset(self, shuffle=True):
         flattened_traces = [item for trace in self.traces_buffer for item in trace]
         buffer, utilities = zip(*flattened_traces) if flattened_traces else ([], [])
@@ -495,6 +489,58 @@ class TraceBuffer(EpisodicBuffer):
             :type secondary: bool
             """
             self.new_traces = 0
+
+    def eval_default(self, reward, min_val, n, full_length):
+        raise NotImplementedError(f"Evaluation method '{self.evaluation_method}' is not implemented.")
+
+    @staticmethod
+    def eval_linear(reward, min_val, n, full_length):
+        """
+        Linear evaluation function: f(x) = start_val + (reward - start_val) * x / (n - 1)
+        where x ranges from 0 to (n-1)
+        """
+        if n == 1:
+            return [reward]
+        
+        # Compute the start value at the equivalent position in a full-length trace
+        start_val = min_val + (reward - min_val) * (full_length - n) / (full_length - 1)
+        
+        # Linear interpolation from start_val to reward over n steps
+        values = []
+        for i in range(n-1):
+            value = start_val + (reward - start_val) * i / (n - 1)
+            values.append(value)
+        values.append(reward)
+        return values
+
+    @staticmethod
+    def eval_exponential(reward, min_val, n, full_length):
+        """
+        Exponential evaluation function: f(x) = min_val * exp(k * x)
+        where k = ln(reward/min_val) / (full_length-1) and x ranges from (full_length-n) to (full_length-1)
+        This ensures consistency - shorter sequences are slices of the full sequence.
+        """
+        if n == 1:
+            return [reward]
+        
+        # Ensure min_val is positive for logarithm calculation
+        if min_val <= 0:
+            min_val = 0.001
+        
+        # Calculate the exponential growth rate based on full sequence
+        k = np.log(reward / min_val) / (full_length - 1)
+        
+        # Generate exponential values for the last n positions of the full sequence
+        values = []
+        start_position = full_length - n
+        for i in range(n-1):
+            position = start_position + i
+            value = min_val * np.exp(k * position)
+            values.append(value)
+        values.append(reward)
+        
+        return values
+    
 
     @property
     def max_traces(self):

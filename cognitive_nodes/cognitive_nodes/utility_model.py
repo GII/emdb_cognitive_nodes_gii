@@ -19,7 +19,7 @@ class UtilityModel(DeliberativeModel):
     """
     Utility Model class
     """
-    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions = 5, ltm_id="", **params):
+    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions = 5, ltm_id="", **params):
         """
         Constructor of the Utility Model class.
 
@@ -30,9 +30,9 @@ class UtilityModel(DeliberativeModel):
         :param class_name: The name of the Utility Model class.
         :type class_name: str
         """
-        super().__init__(name, class_name, prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", **params)
+        super().__init__(name, class_name, prediction_srv_type=prediction_srv_type, **params)
         self.configure_activation_inputs(self.neighbors)
-        self.setup_model(max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
+        self.setup_model(trace_length=trace_length, max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
         self.execute_service = self.create_service(
             Execute,
             'utility_model/' + str(name) + '/execute',
@@ -40,11 +40,11 @@ class UtilityModel(DeliberativeModel):
             callback_group=self.cbgroup_server
         )
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, **params):
+    def setup_model(self, trace_length, max_iterations, candidate_actions, ltm_id, **params):
         """
         Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
         """
-        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=50, inputs=['perception'], outputs=[])
+        self.episodic_buffer = TraceBuffer(self, main_size=trace_length, inputs=['perception'], outputs=[], **params)
         self.learner = DefaultUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
@@ -104,12 +104,11 @@ class NoveltyUtilityModel(UtilityModel):
     This model is used to compute the novelty of the episodes.
     It inherits from the UtilityModel class.
     """
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
-        
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(name=name, class_name=class_name, prediction_srv_type=prediction_srv_type, trace_length=trace_length, max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50, **params):
-        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
+    def setup_model(self, trace_length, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50, **params):
+        self.episodic_buffer = TraceBuffer(self, main_size=trace_length, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[], **params)
         self.learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, exploration_process=True, **params)
@@ -121,17 +120,29 @@ class HardCodedUtilityModel(UtilityModel):
     This model is used to compute the utility of the episodes based on hard coded values.
     It inherits from the UtilityModel class.
     """
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(
+            name=name,
+            class_name=class_name,
+            prediction_srv_type=prediction_srv_type,
+            trace_length=trace_length,
+            max_iterations=max_iterations,
+            candidate_actions=candidate_actions,
+            ltm_id=ltm_id,
+            min_traces=min_traces,
+            max_traces=max_traces,
+            max_antitraces=max_antitraces,
+            **params,
+        )
         self.get_logger().info("HardCodedUtilityModel initialized")
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50,**params):
-        self.episodic_buffer =  TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[])
+    def setup_model(self, trace_length, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50, **params):
+        self.episodic_buffer =  TraceBuffer(self, main_size=trace_length, max_traces=max_traces, min_p_traces=train_traces, inputs=['perception'], outputs=[], **params)
         self.learner = DefaultUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = None
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
         self.spin_deliberation()
-    
+
     def predict(self, input_episodes: list[Episode]) -> list[float]:
         "Work in progress"
         distances = []
@@ -139,8 +150,8 @@ class HardCodedUtilityModel(UtilityModel):
             perception = episode.perception
             ball_position = np.array([perception['ball'][0]['x'], perception['ball'][0]['y']])
             box_position = np.array([perception['box'][0]['x'], perception['box'][0]['y']])
-            left_arm_position = np.array([perception['left_arm'][0]['x'], perception['left_arm'][0]['y']])
-            right_arm_position = np.array([perception['right_arm'][0]['x'], perception['right_arm'][0]['y']])
+            left_arm_position = np.array([perception['left_arm'][0]['x']/2, perception['left_arm'][0]['y']])
+            right_arm_position = np.array([perception['right_arm'][0]['x']/2+0.5, perception['right_arm'][0]['y']])
             left_gripper = bool(perception['ball_in_left_hand'][0]['data'])
             right_gripper = bool(perception['ball_in_right_hand'][0]['data'])
             if left_gripper or right_gripper:
@@ -149,7 +160,7 @@ class HardCodedUtilityModel(UtilityModel):
                 elif right_gripper and box_position[0] > 0.5:
                     distances.append(np.linalg.norm(box_position - right_arm_position))
                 else:
-                    distances.append(np.linalg.norm(left_arm_position - right_arm_position) + 1)
+                    distances.append(np.linalg.norm(left_arm_position - right_arm_position))
             elif isclose(np.linalg.norm(ball_position - left_arm_position), 0) or isclose(np.linalg.norm(ball_position - right_arm_position), 0):
                 distances.append(0.0) # In this condition, the ball should be inside of the box
             else:
@@ -169,14 +180,26 @@ class HardCodedUtilityModel(UtilityModel):
         utilities = 1 - normalized_distances
         self.get_logger().info(f"Prediction made: {utilities}")
         return utilities
-    
+
     def execute_callback(self, request, response):
         response = super().execute_callback(request, response)
         return response
-    
+
 class LearnedUtilityModel(UtilityModel):
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
-        super().__init__(name, class_name, max_iterations, candidate_actions, ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+        super().__init__(
+            name=name,
+            class_name=class_name,
+            prediction_srv_type=prediction_srv_type,
+            trace_length=trace_length,
+            max_iterations=max_iterations,
+            candidate_actions=candidate_actions,
+            ltm_id=ltm_id,
+            min_traces=min_traces,
+            max_traces=max_traces,
+            max_antitraces=max_antitraces,
+            **params,
+        )
         self.min_traces = float(min_traces)
         self.max_traces = max_traces
         self.trace_service = self.create_service(
@@ -197,27 +220,27 @@ class LearnedUtilityModel(UtilityModel):
 
         self.get_logger().info(f"Utility Model created: {self.name}")
 
-    def setup_model(self, max_iterations, candidate_actions, ltm_id, min_traces=1, max_traces=50, max_antitraces=10, **params):
+    def setup_model(self, trace_length, max_iterations, candidate_actions, ltm_id, min_traces=1, max_traces=50, max_antitraces=10, **params):
         """
         Sets up the Utility Model by initializing the episodic buffer, learner, and confidence evaluator.
         """
-        self.episodic_buffer = TraceBuffer(self, main_size=max_iterations, max_traces=max_traces, min_traces=min_traces, max_antitraces=max_antitraces, inputs=['perception'], outputs=[])
+        self.episodic_buffer = TraceBuffer(self, main_size=trace_length, max_traces=max_traces, min_traces=min_traces, max_antitraces=max_antitraces, inputs=['perception'], outputs=[], **params)
         self.learner = ANNLearner(self, self.episodic_buffer, **params)
         self.alternative_learner = NoveltyUtilityModelLearner(self, self.episodic_buffer, **params)
         self.confidence_evaluator = DefaultUtilityEvaluator(self, self.learner, self.episodic_buffer, **params)
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
         self.spin_deliberation()
-    
+
     def predict(self, input_episodes: list[Episode]) -> list[float]:
-            input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
-            predictions = self.learner.call(input_data)
-            if predictions is None:
-                self.get_logger().warn("Learner not configured, using alternative learner for predictions")
-                predictions = self.alternative_learner.call(input_data)
-            self.get_logger().info(f"Prediction made: {len(predictions)} episodes")
-            self.get_logger().info(f"Predictions: {predictions}")
-            return predictions
-    
+        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        predictions = self.learner.call(input_data)
+        if predictions is None:
+            self.get_logger().warn("Learner not configured, using alternative learner for predictions")
+            predictions = self.alternative_learner.call(input_data)
+        self.get_logger().info(f"Prediction made: {len(predictions)} episodes")
+        self.get_logger().info(f"Predictions: {predictions}")
+        return predictions
+
     def execute_callback(self, request, response):
         response = super().execute_callback(request, response)
         self.get_logger().info(f"Total traces: {self.episodic_buffer.n_traces}, Total antitraces: {self.episodic_buffer.n_antitraces} New traces: {self.episodic_buffer.new_traces}, Min traces: {self.min_traces} {self.episodic_buffer.min_traces}")
@@ -226,7 +249,7 @@ class LearnedUtilityModel(UtilityModel):
             self.learner.train(x_train, y_train)
             self.episodic_buffer.reset_new_sample_count()
         return response
-    
+
     def episode_callback(self, msg):
         if not msg.parent_policy: # Parent policy is empty if no specific Utility Model/Policy is being executed
             episode = episode_msg_to_obj(msg)
@@ -272,7 +295,7 @@ class DefaultUtilityModelLearner(Learner):
         output_len = x.shape[0]
         y = np.ones((output_len))
         return y
-    
+
 class NoveltyUtilityModelLearner(Learner):
     """ Default Utility Model class, used when no specific utility model is defined.
     This model provides higher utility to states not visited previously.
@@ -327,8 +350,6 @@ class DefaultUtilityEvaluator(Evaluator):
         :rtype: list
         """
         return self.model_confidence
-
-
 
 
 def main(args=None):

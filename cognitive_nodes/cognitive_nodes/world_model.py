@@ -1,4 +1,5 @@
 import rclpy
+import numpy as np
 from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
@@ -81,12 +82,17 @@ class WorldModelLearned(WorldModel):
             outputs = ["perception"],
         )
 
-        self.learner = ANNLearner(self, self.episodic_buffer)
+        self.learner = ANNLearner(self, self.episodic_buffer, **params)
 
         self.confidence_evaluator = EvaluatorWorldModel(self, self.learner, self.episodic_buffer)
 
     def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+        if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
+            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the input episodes.")
+            output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
+            return output_episodes
         input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        self.get_logger().info(f"Data for prediction: {input_data.shape} samples. Ex: {input_data[:2]}")
         predictions = self.learner.call(input_data)
         if predictions is None:
             for episode in input_episodes:
@@ -113,14 +119,14 @@ class WorldModelLearned(WorldModel):
 
             # TODO: Allow to train the learner in different moments, not only when the main buffer is full
             # If the main buffer is full, train the learner
-            if self.episodic_buffer.new_sample_count_main >= self.episodic_buffer.main_size:
+            if self.episodic_buffer.new_sample_count_main >= self.episodic_buffer.main_max_size:
                 self.get_logger().info("Training the learner with the new episodes")
                 x_train, y_train = self.episodic_buffer.get_train_samples(shuffle=True)
                 self.learner.train(x_train, y_train)
                 self.episodic_buffer.reset_new_sample_count(main=True, secondary=False)
                 self.get_logger().info("Learner trained with new episodes")
 
-            if self.episodic_buffer.new_sample_count_secondary >= self.episodic_buffer.secondary_size and self.learner.configured:
+            if self.episodic_buffer.new_sample_count_secondary >= self.episodic_buffer.secondary_max_size and self.learner.configured:
                 self.get_logger().info("Evaluating the learner with the new episodes")
                 self.confidence_evaluator.evaluate()
                 self.confidence_evaluator.publish_prediction_error()
@@ -345,12 +351,26 @@ class Sim2D(Learner):
         :rtype: dict
         """        
         out=deepcopy(input_dict)
-        for dim in out:
-            for param in out[dim][0]:
-                if config[dim][param]["type"]=="float":
+        for dim in input_dict:
+            for param in input_dict[dim][0]:
+                config_item = config[dim].get(param, {"type": None})
+                if config_item["type"]=="float":
                     bounds=config[dim][param]["bounds"]
                     value=out[dim][0][param]
                     out[dim][0][param]=bounds[0]+(value*(bounds[1]-bounds[0]))
+                if config_item["type"] is None:
+                    if param == "angle_cos":
+                        continue
+                    if param == "angle_sin":
+                        bounds=config[dim]["angle"]["bounds"]
+                        angle_sin = out[dim][0]["angle_sin"]*2 - 1.0  # Denormalize from [0, 1] to [-1, 1]
+                        angle_cos = out[dim][0]["angle_cos"]*2 - 1.0  # Denormalize from [0, 1] to [-1, 1]
+                        angle_rad = np.arctan2(angle_sin, angle_cos)
+                        if bounds == [-180, 180]:
+                            angle_deg = angle_rad * (180.0 / np.pi)
+                            out[dim][0]["angle"] = angle_deg
+                        else:
+                            out[dim][0]["angle"] = angle_rad
         return out
 
     def normalize(self, input_dict, config):
@@ -365,12 +385,29 @@ class Sim2D(Learner):
         :rtype: dict
         """        
         out=deepcopy(input_dict)
-        for dim in out:
-            for param in out[dim][0]:
-                if config[dim][param]["type"]=="float":
-                    bounds=config[dim][param]["bounds"]
+        for dim in input_dict:
+            for param in input_dict[dim][0]:
+                config_item = config[dim].get(param, {"type": None})
+                if config_item["type"]=="float":
+                    bounds=config_item["bounds"]
                     value=out[dim][0][param]
                     out[dim][0][param] = (value - bounds[0]) / (bounds[1] - bounds[0])
+                if config_item["type"] == "angle":
+                    # Check if angle is in degrees (common ranges: 0-360, -180 to 180)
+                    angle_range = config[dim]["angle"]["bounds"][1] - config[dim]["angle"]["bounds"][0]
+                    if angle_range > 2 * np.pi:  # Likely in degrees
+                        angle_rad = out[dim][0]["angle"] * np.pi / 180.0
+                    else:  # Already in radians
+                        angle_rad = out[dim][0]["angle"]
+
+                    angle_cos_raw = np.cos(angle_rad)
+                    angle_sin_raw = np.sin(angle_rad)
+                    # normalize from [-1, 1] to [0, 1] and clip to avoid tiny numerical drift
+                    angle_cos = min(max((angle_cos_raw + 1.0) / 2.0, 0.0), 1.0)
+                    angle_sin = min(max((angle_sin_raw + 1.0) / 2.0, 0.0), 1.0)
+                    out[dim][0].pop("angle")  # Remove the original angle
+                    out[dim][0]["angle_cos"] = angle_cos
+                    out[dim][0]["angle_sin"] = angle_sin
         return out
     
 

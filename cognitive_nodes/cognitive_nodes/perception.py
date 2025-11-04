@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from math import isclose
+from math import isclose, cos, sin, pi
 
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
@@ -247,18 +247,26 @@ class Sim2DPerception(Perception):
                     - self.normalize_values["y_min"]
                 )
                 if self.normalize_values.get("angle_max") and self.normalize_values.get("angle_min"):
-                    angle=(
-                    perception.angle - self.normalize_values["angle_min"]
-                    ) / (
-                        self.normalize_values["angle_max"]
-                        - self.normalize_values["angle_min"]
-                    )
+                    # Check if angle is in degrees (common ranges: 0-360, -180 to 180)
+                    angle_range = self.normalize_values["angle_max"] - self.normalize_values["angle_min"]
+                    if angle_range > 2 * pi:  # Likely in degrees
+                        angle_rad = perception.angle * pi / 180.0
+                    else:  # Already in radians
+                        angle_rad = perception.angle
+                    
+                    angle_cos_raw = cos(angle_rad)
+                    angle_sin_raw = sin(angle_rad)
+                    # normalize from [-1, 1] to [0, 1] and clip to avoid tiny numerical drift
+                    angle_cos = min(max((angle_cos_raw + 1.0) / 2.0, 0.0), 1.0)
+                    angle_sin = min(max((angle_sin_raw + 1.0) / 2.0, 0.0), 1.0)
+                    
                     value.append(
-                    dict(
-                        x=x,
-                        y=y,
-                        angle=angle
-                    )
+                        dict(
+                            x=x,
+                            y=y,
+                            angle_cos=angle_cos,
+                            angle_sin=angle_sin
+                        )
                     )
                 else:
                     value.append(
