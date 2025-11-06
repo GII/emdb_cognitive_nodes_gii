@@ -1,6 +1,7 @@
 import rclpy
 import threading
 import numpy as np
+from copy import deepcopy
 from rclpy.node import Node
 from math import isclose
 from rclpy.executors import SingleThreadedExecutor
@@ -120,7 +121,7 @@ class HardCodedUtilityModel(UtilityModel):
     This model is used to compute the utility of the episodes based on hard coded values.
     It inherits from the UtilityModel class.
     """
-    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
+    def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", perception_config=None, **params):
         super().__init__(
             name=name,
             class_name=class_name,
@@ -134,6 +135,7 @@ class HardCodedUtilityModel(UtilityModel):
             max_antitraces=max_antitraces,
             **params,
         )
+        self.perception_config = perception_config
         self.get_logger().info("HardCodedUtilityModel initialized")
 
     def setup_model(self, trace_length, max_iterations, candidate_actions, ltm_id, train_traces=1, max_traces=50, **params):
@@ -147,24 +149,29 @@ class HardCodedUtilityModel(UtilityModel):
         "Work in progress"
         distances = []
         for episode in input_episodes:
-            perception = episode.perception
+            perception = self.denormalize(episode.perception, self.perception_config)
+            x_lower_bound = self.perception_config['left_arm']['x']['bounds'][0]
+            x_upper_bound = self.perception_config['right_arm']['x']['bounds'][1]
+            half_x_range = (x_upper_bound - x_lower_bound) / 2.0 + x_lower_bound
             ball_position = np.array([perception['ball'][0]['x'], perception['ball'][0]['y']])
             box_position = np.array([perception['box'][0]['x'], perception['box'][0]['y']])
-            left_arm_position = np.array([perception['left_arm'][0]['x']/2, perception['left_arm'][0]['y']])
-            right_arm_position = np.array([perception['right_arm'][0]['x']/2+0.5, perception['right_arm'][0]['y']])
+            left_arm_position = np.array([perception['left_arm'][0]['x'], perception['left_arm'][0]['y']])
+            right_arm_position = np.array([perception['right_arm'][0]['x'], perception['right_arm'][0]['y']])
             left_gripper = bool(perception['ball_in_left_hand'][0]['data'])
             right_gripper = bool(perception['ball_in_right_hand'][0]['data'])
             if left_gripper or right_gripper:
-                if left_gripper and box_position[0] < 0.5:
+                if left_gripper and box_position[0] < half_x_range:
                     distances.append(np.linalg.norm(box_position - left_arm_position))
-                elif right_gripper and box_position[0] > 0.5:
+                elif right_gripper and box_position[0] > half_x_range:
                     distances.append(np.linalg.norm(box_position - right_arm_position))
                 else:
-                    distances.append(np.linalg.norm(left_arm_position - right_arm_position))
+                    distances.append(np.linalg.norm(left_arm_position - right_arm_position)+x_upper_bound/2)
             elif isclose(np.linalg.norm(ball_position - left_arm_position), 0) or isclose(np.linalg.norm(ball_position - right_arm_position), 0):
                 distances.append(0.0) # In this condition, the ball should be inside of the box
-            else:
-                distances.append(np.linalg.norm(ball_position - left_arm_position) + np.linalg.norm(ball_position - right_arm_position) + 1)
+            elif ball_position[0] < half_x_range:
+                distances.append(np.linalg.norm(ball_position - left_arm_position)+x_upper_bound)
+            elif ball_position[0] > half_x_range:
+                distances.append(np.linalg.norm(ball_position - right_arm_position)+x_upper_bound) 
             self.get_logger().debug(f"Ball position: {ball_position}, Box position: {box_position}, Left arm position: {left_arm_position}, Right arm position: {right_arm_position}, Left gripper: {left_gripper}, Right gripper: {right_gripper}")
             self.get_logger().debug(f"Distance calculated: {distances[-1]}")
 
@@ -184,6 +191,40 @@ class HardCodedUtilityModel(UtilityModel):
     def execute_callback(self, request, response):
         response = super().execute_callback(request, response)
         return response
+    
+    def denormalize(self, input_dict, config):
+        """
+        Denormalize the input dictionary according to the configuration
+
+        :param input_dict: Perception or actuation dictionary.
+        :type input_dict: dict
+        :param config: Configuration of the perception or actuation bounds.
+        :type config: dict
+        :return: Denormalized dictionary.
+        :rtype: dict
+        """        
+        out=deepcopy(input_dict)
+        for dim in input_dict:
+            for param in input_dict[dim][0]:
+                config_item = config[dim].get(param, {"type": None})
+                if config_item["type"]=="float":
+                    bounds=config[dim][param]["bounds"]
+                    value=out[dim][0][param]
+                    out[dim][0][param]=bounds[0]+(value*(bounds[1]-bounds[0]))
+                if config_item["type"] is None:
+                    if param == "angle_cos":
+                        continue
+                    if param == "angle_sin":
+                        bounds=config[dim]["angle"]["bounds"]
+                        angle_sin = out[dim][0]["angle_sin"]*2 - 1.0  # Denormalize from [0, 1] to [-1, 1]
+                        angle_cos = out[dim][0]["angle_cos"]*2 - 1.0  # Denormalize from [0, 1] to [-1, 1]
+                        angle_rad = np.arctan2(angle_sin, angle_cos)
+                        if bounds == [-180, 180]:
+                            angle_deg = angle_rad * (180.0 / np.pi)
+                            out[dim][0]["angle"] = angle_deg
+                        else:
+                            out[dim][0]["angle"] = angle_rad
+        return out
 
 class LearnedUtilityModel(UtilityModel):
     def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
