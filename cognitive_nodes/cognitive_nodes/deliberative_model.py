@@ -269,7 +269,15 @@ class ANNLearner(Learner):
             self.model = tf.keras.models.load_model(self.model_file, custom_objects={"AsymmetricMSE": AsymmetricMSE})
             self.configured = True               
     
-    def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, x_val=None, y_val=None, verbose=1):
+    def reset_optimizer_state(self):
+        """Reset only the optimizer state, keeping model weights unchanged."""
+        if self.configured:
+            # Create a fresh optimizer instance
+            fresh_optimizer = Adam(learning_rate=self.learning_rate)
+            # Recompile with fresh optimizer (weights unchanged)
+            self.model.compile(optimizer=fresh_optimizer, loss="mse", metrics=['mae'])
+
+    def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, x_val=None, y_val=None, verbose=1, reset_optimizer=True):
         # Ensure x_train and y_train are at least 2D
         if len(x_train.shape) == 1:
             x_train = x_train.reshape(-1, 1)
@@ -288,8 +296,6 @@ class ANNLearner(Learner):
             # If validation_data is provided, set validation_split to 0.0
             validation_split = 0.0
 
-        input_size = x_train.shape[1]
-        output_size = y_train.shape[1]
         
         if not epochs:
             epochs = self.epochs
@@ -299,6 +305,8 @@ class ANNLearner(Learner):
             self.configure_model(x_train.shape[1], y_train.shape[1])
         callbacks = []
 
+        if reset_optimizer:
+            self.reset_optimizer_state()
 
         # Learning rate scheduling
         lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(

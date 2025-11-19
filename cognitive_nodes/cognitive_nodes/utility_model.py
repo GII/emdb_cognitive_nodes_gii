@@ -144,36 +144,61 @@ class HardCodedUtilityModel(UtilityModel):
         self.confidence_evaluator = None
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
         self.spin_deliberation()
-
+    
     def predict(self, input_episodes: list[Episode]) -> list[float]:
         "Work in progress"
         distances = []
+        i = 0
         for episode in input_episodes:
-            perception = self.denormalize(episode.perception, self.perception_config)
-            x_lower_bound = self.perception_config['left_arm']['x']['bounds'][0]
-            x_upper_bound = self.perception_config['right_arm']['x']['bounds'][1]
-            half_x_range = (x_upper_bound - x_lower_bound) / 2.0 + x_lower_bound
-            ball_position = np.array([perception['ball'][0]['x'], perception['ball'][0]['y']])
-            box_position = np.array([perception['box'][0]['x'], perception['box'][0]['y']])
-            left_arm_position = np.array([perception['left_arm'][0]['x'], perception['left_arm'][0]['y']])
-            right_arm_position = np.array([perception['right_arm'][0]['x'], perception['right_arm'][0]['y']])
-            left_gripper = bool(perception['ball_in_left_hand'][0]['data'])
-            right_gripper = bool(perception['ball_in_right_hand'][0]['data'])
-            if left_gripper or right_gripper:
-                if left_gripper and box_position[0] < half_x_range:
-                    distances.append(np.linalg.norm(box_position - left_arm_position))
-                elif right_gripper and box_position[0] > half_x_range:
-                    distances.append(np.linalg.norm(box_position - right_arm_position))
+            # Obtain distances between arms, ball, and box
+            left_arm_to_ball = episode.perception["dist_left_arm_ball"][0]["distance"]
+            right_arm_to_ball = episode.perception["dist_right_arm_ball"][0]["distance"]
+            ball_to_box = episode.perception["dist_ball_box"][0]["distance"]
+            ball_in_left_hand = isclose(left_arm_to_ball, 0.0, abs_tol=0.005)
+            ball_in_right_hand = isclose(right_arm_to_ball, 0.0, abs_tol=0.005)
+
+            # Calculate angles (denormalize from [0, 1] to [-1, 1] and then to radians)
+            left_arm_to_ball_angle_sin = episode.perception["dist_left_arm_ball"][0]["angle_sin"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]  
+            left_arm_to_ball_angle_cos = episode.perception["dist_left_arm_ball"][0]["angle_cos"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]
+            left_arm_to_ball_angle_rad = np.arctan2(left_arm_to_ball_angle_sin, left_arm_to_ball_angle_cos)/np.pi # Normalize to [-1, 1] (dividing by pi)
+            right_arm_to_ball_angle_sin = episode.perception["dist_right_arm_ball"][0]["angle_sin"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]  
+            right_arm_to_ball_angle_cos = episode.perception["dist_right_arm_ball"][0]["angle_cos"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]
+            right_arm_to_ball_angle_rad = np.arctan2(right_arm_to_ball_angle_sin, right_arm_to_ball_angle_cos)/np.pi # Normalize to [-1, 1] (dividing by pi)
+            ball_to_box_angle_sin = episode.perception["dist_ball_box"][0]["angle_sin"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]
+            ball_to_box_angle_cos = episode.perception["dist_ball_box"][0]["angle_cos"]*2 - 1.0 # Denormalize from [0, 1] to [-1, 1]
+            ball_to_box_angle_rad = np.arctan2(ball_to_box_angle_sin, ball_to_box_angle_cos)/np.pi # Normalize to [-1, 1] (dividing by pi)
+            
+            # Position angles
+            box_angle = episode.perception["box_angle"][0]["data"]
+            ball_angle = episode.perception["ball_angle"][0]["data"]
+            
+            self.get_logger().debug(f"Episode candidate {i}: \n Left arm to ball distance: {left_arm_to_ball} \n Right arm to ball distance: {right_arm_to_ball} \n Ball to box distance: {ball_to_box} \n Ball in left hand: {ball_in_left_hand} \n Ball in right hand: {ball_in_right_hand} \n Left arm to ball angle (rad): {left_arm_to_ball_angle_rad} \n Right arm to ball angle (rad): {right_arm_to_ball_angle_rad} \n Ball to box angle (rad): {ball_to_box_angle_rad} \n Box angle: {box_angle} \n Ball angle: {ball_angle}")
+            i += 1
+
+            # Ball in hand and same side
+            if ball_in_left_hand and box_angle < 0.5:
+                distances.append(ball_to_box + np.abs(left_arm_to_ball_angle_cos-ball_to_box_angle_cos) + np.abs(left_arm_to_ball_angle_sin-ball_to_box_angle_sin))
+                self.get_logger().debug(f"Ball grasped left, same side, distance: {distances[-1]}")
+            elif ball_in_right_hand and box_angle > 0.5:
+                distances.append(ball_to_box + np.abs(right_arm_to_ball_angle_cos-ball_to_box_angle_cos) + np.abs(right_arm_to_ball_angle_sin-ball_to_box_angle_sin))
+                self.get_logger().debug(f"Ball grasped right, same side, distance: {distances[-1]}")
+            # Ball in hand but wrong side
+            elif ball_in_left_hand:
+                distances.append(right_arm_to_ball + np.abs(left_arm_to_ball_angle_rad) + np.abs(right_arm_to_ball_angle_rad) + 5.0) # Penalty for wrong side
+                self.get_logger().debug(f"Ball grasped left, wrong side, distance: {distances[-1]}")
+            elif ball_in_right_hand:
+                distances.append(left_arm_to_ball - np.abs(right_arm_to_ball_angle_rad) + np.abs(left_arm_to_ball_angle_rad) + 5.0) # Penalty for wrong side
+                self.get_logger().debug(f"Ball grasped right, wrong side, distance: {distances[-1]}")
+            # Ball not in hand
+            else:
+                if ball_angle < 0.5:
+                    distances.append(left_arm_to_ball + np.abs(left_arm_to_ball_angle_rad) + 10.0)
+                    self.get_logger().debug(f"Ball not grasped, ball left, distance: {distances[-1]}")
                 else:
-                    distances.append(np.linalg.norm(left_arm_position - right_arm_position)+x_upper_bound/2)
-            elif isclose(np.linalg.norm(ball_position - left_arm_position), 0) or isclose(np.linalg.norm(ball_position - right_arm_position), 0):
-                distances.append(0.0) # In this condition, the ball should be inside of the box
-            elif ball_position[0] < half_x_range:
-                distances.append(np.linalg.norm(ball_position - left_arm_position)+x_upper_bound)
-            elif ball_position[0] > half_x_range:
-                distances.append(np.linalg.norm(ball_position - right_arm_position)+x_upper_bound) 
-            self.get_logger().debug(f"Ball position: {ball_position}, Box position: {box_position}, Left arm position: {left_arm_position}, Right arm position: {right_arm_position}, Left gripper: {left_gripper}, Right gripper: {right_gripper}")
-            self.get_logger().debug(f"Distance calculated: {distances[-1]}")
+                    distances.append(right_arm_to_ball + np.abs(right_arm_to_ball_angle_rad) + 10.0)
+                    self.get_logger().debug(f"Ball not grasped, ball right, distance: {distances[-1]}")
+
+
 
         # Normalize distances to a range of 0 to 1
         distances = np.array(distances)

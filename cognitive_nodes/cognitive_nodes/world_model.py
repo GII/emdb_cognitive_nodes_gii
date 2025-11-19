@@ -47,7 +47,7 @@ class WorldModelLearned(WorldModel):
     """
     WorldModelLearned class: A world model that uses episodes to learn the dynamics of the world.
     """
-    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_topic=None, **params):
+    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_topic=None, retrain=True, **params):
         """
         Constructor of the WorldModelLearned class.
 
@@ -86,6 +86,8 @@ class WorldModelLearned(WorldModel):
 
         self.confidence_evaluator = EvaluatorWorldModel(self, self.learner, self.episodic_buffer)
 
+        self.retrain = retrain
+
     def predict(self, input_episodes: list[Episode]) -> list[Episode]:
         if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
             self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the input episodes.")
@@ -120,11 +122,12 @@ class WorldModelLearned(WorldModel):
             # TODO: Allow to train the learner in different moments, not only when the main buffer is full
             # If the main buffer is full, train the learner
             if self.episodic_buffer.new_sample_count_main >= self.episodic_buffer.main_max_size:
-                self.get_logger().info("Training the learner with the new episodes")
-                x_train, y_train = self.episodic_buffer.get_train_samples(shuffle=True)
-                self.learner.train(x_train, y_train)
-                self.episodic_buffer.reset_new_sample_count(main=True, secondary=False)
-                self.get_logger().info("Learner trained with new episodes")
+                if not self.learner.configured or self.retrain:   
+                    self.get_logger().info("Training the learner with the new episodes")
+                    x_train, y_train = self.episodic_buffer.get_train_samples(shuffle=True)
+                    self.learner.train(x_train, y_train)
+                    self.episodic_buffer.reset_new_sample_count(main=True, secondary=False)
+                    self.get_logger().info("Learner trained with new episodes")
 
             if self.episodic_buffer.new_sample_count_secondary >= self.episodic_buffer.secondary_max_size and self.learner.configured:
                 self.get_logger().info("Evaluating the learner with the new episodes")
