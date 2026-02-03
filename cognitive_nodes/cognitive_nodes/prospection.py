@@ -376,7 +376,7 @@ class PolicyProspection(Policy):
         for ds_goal, us_goal in zip(knowledge_msg.downstream_goals, knowledge_msg.upstream_goals):
             if not self.found_knowledge.get(ds_goal, None):
                 self.found_knowledge[ds_goal]=[]
-            if us_goal not in self.found_knowledge[ds_goal]:
+            if us_goal not in self.found_knowledge[ds_goal] and not (us_goal == ds_goal): # TODO:Hack to avoid self-links, Should be fixed properly.
                 #If knowledge not found previously, update neighbor and save relationship
                 self.found_knowledge[ds_goal].append(us_goal)
                 self.get_logger().info(f"Linking {us_goal} to {ds_goal}")

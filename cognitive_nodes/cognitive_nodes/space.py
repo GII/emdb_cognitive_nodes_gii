@@ -819,8 +819,9 @@ class ANNSpace(PointBasedSpace):
             if self.size >= self.max_data:
                 self.first_data = self.size - self.max_data
 
-            if abs(confidence - prediction)>0.4: #HACK: Select a proper training threshold
+            if True: #HACK: Select a proper training threshold
                 # Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
+                self.logger.info(f"[TRAINING] {self.ident}: point added with confidence {confidence}, prediction {prediction}")
                 X = members[self.first_data : self.size]
                 Y = memberships[self.first_data : self.size]
                 n_0 = int(len(Y[Y == 0.0]))
@@ -868,3 +869,634 @@ class ANNSpace(PointBasedSpace):
         else:
             act = 0.0
         return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act
+
+
+class ANNSpace_m(PointBasedSpace):
+    """
+    Use and train a Neural Network to calculate the activations.
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Init attributes when a new object is created.
+        """
+        #GPU USAGE TEST
+        tf.config.set_visible_devices([], 'GPU') #Temporary disable of GPU
+        '''
+        #tf.debugging.set_log_device_placement(True) #Detailed log in every TF operation
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Set memory growth to avoid allocating all GPU memory
+                for gpu in gpus:
+                    tf.config.experimental.set_virtual_device_configuration(
+                    gpus[0],
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
+                )
+            except RuntimeError as e:
+                print(e)
+        '''
+
+        # self.n_splits = 5
+        self.batch_size = 50
+        self.epochs = 50
+        self.max_data = 400
+        self.first_data = 0
+        # Define the Neural Network's model
+        self.model = None
+
+        # Initialize variables
+        self.there_are_points = False
+        self.there_are_antipoints = False
+        super().__init__(**kwargs)
+
+    def build_model(self, input_shape):
+        """
+        Build the model with the given input shape.
+
+        :param input_shape: The shape of the input data.
+        :type input_shape: tuple
+        """
+        # Define train values
+        output_activation = "sigmoid"
+        optimizer = tf.optimizers.Adam()
+        loss = tf.losses.BinaryCrossentropy()
+        metrics = ["accuracy"]
+
+        # Build the model
+        model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(input_shape,)),
+        tf.keras.layers.Dense(16, activation="relu"),
+        tf.keras.layers.Dense(1, activation=output_activation),
+        ])
+
+        # Compile the model
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+        # Log the model summary for debugging purposes
+        self.logger.debug(f"Model summary for {self.ident}:")
+        model.summary(print_fn=self.logger.debug)
+
+        # Return the compiled model  
+        return model
+
+    def add_point(self, perception, confidence):
+        """
+        Add a new point to the P-Node.
+
+        :param perception: A given perception to add.
+        :type perception: dict
+        :param confidence: The confidence of the added point that specifies if it is a point or an
+            antipoint.
+        :type confidence: float
+        :return: The position of the added point.
+        :rtype: int
+        """
+        pos = None
+
+        if confidence > 0.0:
+            self.there_are_points = True
+        else:
+            self.there_are_antipoints = True
+
+        if self.there_are_points and self.there_are_antipoints:
+            candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
+            self.copy_perception(candidate_point, 0, perception)
+            point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
+            
+            # If the model is not built yet, build it
+            if self.model is None:
+                input_shape = point.shape[1]  # Get the number of features from the point
+                self.model = self.build_model(input_shape)
+
+            # Catch diff between point and model input shape
+            if point.shape[1] != self.model.input_shape[1]:
+                self.logger.error(
+                    f"Point shape {point.shape} does not match model input shape {self.model.input_shape}"
+                )
+                raise RuntimeError("LTM operation cannot continue :-(")    
+
+            prediction = (self.model.call(point)[0][0]*2)-1 #Pass from [0,1] to [-1, 1]
+            pos = super().add_point(perception, confidence)
+
+            members = structured_to_unstructured(
+                self.members[0 : self.size][list(self.members.dtype.names)]
+            )
+            memberships = self.memberships[0 : self.size].copy()
+            memberships[memberships > 0] = 1.0
+            memberships[memberships <= 0] = 0.0
+
+
+            if self.size >= self.max_data:
+                self.first_data = self.size - self.max_data
+
+            if abs(confidence - prediction)>0.2: #HACK: Select a proper training threshold
+                # Node.get_logger().logdebug(f"Training... {self.ident}") #TODO: Pass pnode logger to space
+                self.logger.info(f"[TRAINING] {self.ident}: point added with confidence {confidence}, prediction {prediction}")
+                X = members[self.first_data : self.size]
+                Y = memberships[self.first_data : self.size]
+                n_0 = int(len(Y[Y == 0.0]))
+                n_1 = int(len(Y[Y == 1.0]))
+                weight_for_0 = (
+                    (1 / n_0) * ((self.size - self.first_data) / 2.0) if n_0 != 0 else 1.0
+                )
+                weight_for_1 = (
+                    (1 / n_1) * ((self.size - self.first_data) / 2.0) if n_1 != 0 else 1.0
+                )
+                class_weight = {0: weight_for_0, 1: weight_for_1}
+                self.model.fit(
+                    x=X,
+                    y=Y,
+                    batch_size=self.batch_size,
+                    epochs=self.epochs,
+                    verbose=0,
+                    class_weight=class_weight,
+                )
+
+        else:
+            pos = super().add_point(perception, confidence)
+
+        return pos
+
+    def get_probability(self, perception):
+        """
+        Calculate the new activation value.
+
+        :param perception: The given perception to calculate the activation.
+        :type perception: dict
+        :return: The activation value.
+        :rtype: float
+        """
+        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
+        self.copy_perception(candidate_point, 0, perception)
+        point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
+        if self.there_are_points:
+            if self.there_are_antipoints:
+                act = float(self.model.call(point)[0][0])
+                if act < 0.01:
+                    act=0.0
+            else:
+                act = 1.0
+        else:
+            act = 0.0
+        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act
+
+
+class PyTorchANNSpace(PointBasedSpace):
+    """
+    Espacio basado en puntos que usa exclusivamente una red neuronal PyTorch
+    para obtener la probabilidad de pertenencia (punto positivo vs antipunto).
+    """
+
+    def __init__(self, batch_size=50, epochs=30, max_data=400, use_gpu=True, model_path=None, **kwargs):
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+
+        self.torch = torch
+        self.nn = nn
+        self.optim = optim
+
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.max_data = max_data
+        self.first_data = 0
+        # Define la red neuronal
+        self.model = None
+
+        # Variables de control
+        self.there_are_points = False
+        self.there_are_antipoints = False
+        super().__init__(**kwargs)
+        self.logger.info(f"PyTorchANNSpace initialized on device: {self.device}")
+
+    def build_model(self, input_shape):
+        """
+        Construye el modelo con la forma de entrada dada.
+
+        :param input_shape: La forma de los datos de entrada.
+        :type input_shape: tuple
+        """
+        # Valores de entrenamiento
+        output_activation = "sigmoid"
+        optimizer = tf.optimizers.Adam()
+        loss = tf.losses.BinaryCrossentropy()
+        metrics = ["accuracy"]
+
+        # Construye el modelo
+        model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(input_shape,)),
+        tf.keras.layers.Dense(128, activation="relu"),
+        tf.keras.layers.Dense(64, activation="relu"),
+        tf.keras.layers.Dense(32, activation="relu"),
+        tf.keras.layers.Dense(1, activation=output_activation),
+        ])
+
+        # Compila el modelo
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+        # Registra el resumen del modelo para fines de depuración
+        self.logger.debug(f"Model summary for {self.ident}:")
+        model.summary(print_fn=self.logger.debug)
+
+        # Retorna el modelo compilado  
+        return model
+
+    def add_point(self, perception, confidence):
+        """
+        Agrega un nuevo punto al P-Node.
+
+        :param perception: Una percepción dada para agregar.
+        :type perception: dict
+        :param confidence: La confianza del punto agregado que especifica si es un punto o un
+            antipunto.
+        :type confidence: float
+        :return: La posición del punto agregado.
+        :rtype: int
+        """
+        pos = None
+
+        if confidence > 0.0:
+            self.there_are_points = True
+        else:
+            self.there_are_antipoints = True
+
+        if self.there_are_points and self.there_are_antipoints:
+            candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
+            self.copy_perception(candidate_point, 0, perception)
+            point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
+            
+            # Si el modelo no está construido aún, constrúyelo
+            if self.model is None:
+                input_shape = point.shape[1]  # Obtiene el número de características de la punto
+                self.model = self.build_model(input_shape)
+
+            # Verifica la diferencia entre la forma de la punto y la forma de entrada del modelo
+            if point.shape[1] != self.model.input_shape[1]:
+                self.logger.error(
+                    f"Point shape {point.shape} does not match model input shape {self.model.input_shape}"
+                )
+                raise RuntimeError("LTM operation cannot continue :-(")    
+
+            # Convierte la salida de la red neuronal de [0, 1] a [-1, 1]
+            prediction = (self.model.call(point)[0][0]*2)-1 
+            pos = super().add_point(perception, confidence)
+
+            members = structured_to_unstructured(
+                self.members[0 : self.size][list(self.members.dtype.names)]
+            )
+            memberships = self.memberships[0 : self.size].copy()
+            memberships[memberships > 0] = 1.0
+            memberships[memberships <= 0] = 0.0
+
+
+            if self.size >= self.max_data:
+                self.first_data = self.size - self.max_data
+
+            # HACK: Selecciona un umbral de entrenamiento adecuado
+            if True: 
+                self.logger.info(f"[TRAINING] {self.ident}: point added with confidence {confidence}, prediction {prediction}")
+                X = members[self.first_data : self.size]
+                Y = memberships[self.first_data : self.size]
+                n_0 = int(len(Y[Y == 0.0]))
+                n_1 = int(len(Y[Y == 1.0]))
+                weight_for_0 = (
+                    (1 / n_0) * ((self.size - self.first_data) / 2.0) if n_0 != 0 else 1.0
+                )
+                weight_for_1 = (
+                    (1 / n_1) * ((self.size - self.first_data) / 2.0) if n_1 != 0 else 1.0
+                )
+                class_weight = {0: weight_for_0, 1: weight_for_1}
+                self.model.fit(
+                    x=X,
+                    y=Y,
+                    batch_size=self.batch_size,
+                    epochs=self.epochs,
+                    verbose=0,
+                    class_weight=class_weight,
+                )
+
+        else:
+            pos = super().add_point(perception, confidence)
+
+        return pos
+
+    def get_probability(self, perception):
+        """
+        Calcula el nuevo valor de activación.
+
+        :param perception: La percepción dada para calcular la activación.
+        :type perception: dict
+        :return: El valor de activación.
+        :rtype: float
+        """
+        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
+        self.copy_perception(candidate_point, 0, perception)
+        point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
+        if self.there_are_points:
+            if self.there_are_antipoints:
+                act = float(self.model.call(point)[0][0])
+                if act < 0.01:
+                    act=0.0
+            else:
+                act = 1.0
+        else:
+            act = 0.0
+        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act
+
+
+class PyTorchANNSpaceGates(PyTorchANNSpace):
+    """
+    PyTorchANNSpace + FullyAutomaticSystem integrado (80%+ accuracy automática)
+    - Entrena NN principal + hypothesis/gates en add_point()
+    - Usa tus 8 sensores directamente
+    """
+    def __init__(self, n_sensors=8, batch_size=50, epochs=30, max_data=400, use_gpu=True, model_path=None, **kwargs):
+        super().__init__(batch_size, epochs, max_data, use_gpu, model_path, **kwargs)
+        self.n_sensors = n_sensors
+        self.hypothesis_module = None  # Se crea en build_hypothesis_model()
+
+    def build_hypothesis_model(self):
+        """Crea el FullyAutomaticSystem como nn.Module integrado."""
+        class HypothesisGates(self.nn.Module):
+            def __init__(self_inner, n_sensors, nn_ref, torch_ref):
+                super().__init__()
+                self_inner.n_sensors = n_sensors
+                self_inner.sensor_weights = nn_ref.Parameter(torch_ref.randn(n_sensors) * 0.8)
+                self_inner.gate_weights = nn_ref.Parameter(torch_ref.randn(n_sensors) * 0.4)
+                self_inner.h_bias = nn_ref.Parameter(torch_ref.randn(1))
+                self_inner.clf_weight = nn_ref.Parameter(torch_ref.randn(1) * 3.0)
+                self_inner.clf_bias = nn_ref.Parameter(torch_ref.randn(1))
+
+            def forward(self_inner, x_raw):
+                gates = (x_raw > 0.01).float()
+                contrib_sensors = self.torch.sum(x_raw * self_inner.sensor_weights * gates, dim=-1)
+                contrib_gates = self.torch.sum(gates * self_inner.gate_weights, dim=-1)
+                h_raw = contrib_sensors + contrib_gates + self_inner.h_bias
+                h = self.torch.sigmoid(h_raw)
+                logit = h * self_inner.clf_weight + self_inner.clf_bias
+                return self.torch.sigmoid(logit)
+
+        self.hypothesis_module = HypothesisGates(self.n_sensors, self.nn, self.torch).to(self.device)
+        self.logger.info(f"PyTorchANNSpaceGates: Hypothesis module created on {self.device}")
+
+    def build_model(self, input_shape):
+        """Extiende modelo principal + hypothesis layer concatenado."""
+        # Llama al build original
+        base_model = super().build_model(input_shape)
+        
+        # Si no existe hypothesis, crea
+        if self.hypothesis_module is None:
+            self.build_hypothesis_model()
+        
+        # Nuevo modelo: concatena [base_features, hypothesis_prob]
+        class ExtendedModel(self.nn.Module):
+            def __init__(self_inner, base_model, hyp_module, nn_ref, torch_ref):
+                super().__init__()
+                self_inner.base_model = base_model
+                self_inner.hyp_module = hyp_module
+                self_inner.final_layer = nn_ref.Linear(2, 1)  # 2 features -> 1 output
+                self_inner.torch_ref = torch_ref
+
+            def forward(self_inner, x):
+                base_logit = self_inner.base_model(x)  # (batch, 1)
+                hyp_prob = self_inner.hyp_module(x)     # (batch,) o (batch, 1)
+                
+                # Asegurar que ambos sean (batch, 1) - reshape explícito
+                batch_size = x.size(0)
+                base_logit = base_logit.view(batch_size, 1)
+                hyp_prob = hyp_prob.view(batch_size, 1)
+                    
+                combined = self_inner.torch_ref.cat([base_logit, hyp_prob], dim=1)  # (batch, 2)
+                return self_inner.final_layer(combined)  # (batch, 1)
+
+        return ExtendedModel(base_model, self.hypothesis_module, self.nn, self.torch).to(self.device)
+
+    def _train_model(self, X, Y):
+        """Entrena modelo extendido (base NN + hypothesis)."""
+        if self.hypothesis_module is None:
+            self.build_hypothesis_model()
+        
+        super()._train_model(X, Y)  # Entrena todo (incluye parameters de hypothesis)
+        
+        # Extra: step individual para hypothesis (opcional, para fine-tuning rápido)
+        X_tensor = self.torch.from_numpy(X).float().to(self.device)
+        for i in range(len(X)):
+            x_raw = X_tensor[i:i+1]
+            y_sign = 1 if Y[i] > 0 else 0
+            result = self.hypothesis_step(x_raw, y_sign)
+            self.logger.debug(f"Gates step {i}: p={result['prediction']:.3f}")
+
+    def hypothesis_step(self, x_raw, y_sign):
+        """Paso rápido para hypothesis (como en tu script)."""
+        y_target = self.torch.tensor([1.0 if y_sign > 0 else 0.0], device=self.device)
+        self.hypothesis_module.train()
+        
+        optimizer_h = self.optim.Adam(self.hypothesis_module.parameters(), lr=0.04)
+        p = self.hypothesis_module(x_raw)
+        loss = self.nn.BCELoss()(p.unsqueeze(0), y_target.unsqueeze(0))
+        
+        optimizer_h.zero_grad()
+        loss.backward()
+        optimizer_h.step()
+        
+        pred = 1 if float(p.detach()) > 0.5 else 0
+        correct = (pred == (1 if y_sign > 0 else 0))
+        return {'prediction': float(p.detach()), 'correct': correct, 'loss': float(loss.detach())}
+
+    def _save_model(self):
+        """Guarda modelo extendido completo."""
+        super()._save_model()  # Guarda state_dict principal (incluye hypothesis)
+        # Opcional: checkpoint completo
+        if self.model_path:
+            checkpoint = {
+                'extended_model': self.model.state_dict(),
+                'hypothesis': self.hypothesis_module.state_dict() if self.hypothesis_module else None,
+                'stats': self.stats if hasattr(self, 'stats') else None
+            }
+            gates_path = self.model_path.replace('.pth', '_gates.pth')
+            self.torch.save(checkpoint, gates_path)
+            self.logger.info(f"Saved extended gates model to {gates_path}")
+
+    def get_probability(self, perception):
+        """Probabilidad con gates integrada."""
+        prob = super().get_probability(perception)  # Usa modelo extendido
+        if self.hypothesis_module:
+            candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
+            self.copy_perception(candidate_point, 0, perception)
+            x_unstruct = structured_to_unstructured(candidate_point)
+            x_tensor = self.torch.from_numpy(x_unstruct).float().to(self.device).unsqueeze(0)
+            with self.torch.no_grad():
+                hyp_prob = float(self.hypothesis_module(x_tensor).detach())
+            prob = min(prob, hyp_prob)  # Intersección como en original
+        return prob
+
+class PyTorchOnlineSGDSpace(PointBasedSpace):
+    """
+    SGD Online: P(confidence=1 | percepción) vs confidence=-1.
+    Entrena con cada nuevo punto/antipunto en streaming.
+    """
+    
+    def __init__(self, lr=0.05, momentum=0.9, window_size=200, **kwargs):
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        
+        self.torch = torch
+        self.nn = nn
+        self.optim = optim
+        
+        self.lr = lr
+        self.momentum = momentum
+        self.window_size = window_size
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        self.model = None
+        self.optimizer = None
+        self.feature_keys = None
+        
+        # NUEVO: Guarda percepciones originales + features + labels
+        self.perception_history = []  # [(perception_dict, features, label), ...]
+        
+        super().__init__(**kwargs)
+        self.logger.info(f"SGD Online (1=punto, -1=antipunto) lr={lr} on {self.device}")
+    
+    def _flatten_perception(self, perception):
+        """Dict anidado → vector features ordenado."""
+        import numpy as np
+        self.logger.debug(f"[SGD] flatten start type={type(perception)}")
+        if isinstance(perception, np.void):
+            perception = {name: perception[name] for name in perception.dtype.names}
+        
+        features = []
+        keys = []
+        
+        for sensor_name in sorted(perception.keys()):
+            sensor_data = perception[sensor_name]
+            if isinstance(sensor_data, dict):
+                for field in sorted(sensor_data.keys()):
+                    val = sensor_data[field]
+                    features.append(float(val) if val is not None else 0.0)
+                    keys.append(f"{sensor_name}.{field}")
+            elif isinstance(sensor_data, list) and len(sensor_data) > 0 and isinstance(sensor_data[0], dict):
+                # Maneja listas de dicts como {'data': value}
+                for field in sorted(sensor_data[0].keys()):
+                    val = sensor_data[0][field]
+                    features.append(float(val) if val is not None else 0.0)
+                    keys.append(f"{sensor_name}.{field}")
+            else:
+                features.append(float(sensor_data))
+                keys.append(sensor_name)
+        
+        if self.feature_keys is None:
+            self.feature_keys = keys
+            self.logger.info(f"[SGD] Features init ({len(keys)}): {keys[:8]}...")
+        self.logger.debug(f"[SGD] flatten done feats={len(features)}")
+        return np.array(features, dtype=np.float32)
+    
+    def build_model(self, input_dim):
+        self.logger.info(f"[SGD] build_model input_dim={input_dim}")
+        nn_ref = self.nn
+        torch_ref = self.torch
+        
+        class ConfidenceNet(nn_ref.Module):
+            def __init__(self, input_size):
+                super().__init__()
+                self.ln = nn_ref.LayerNorm(input_size)
+                self.fc1 = nn_ref.Linear(input_size, 64)
+                self.fc2 = nn_ref.Linear(64, 32)
+                self.out = nn_ref.Linear(32, 1)
+            
+            def forward(self, x):
+                x = self.ln(x)
+                x = torch_ref.relu(self.fc1(x))
+                x = torch_ref.relu(self.fc2(x))
+                return self.out(x)
+        
+        return ConfidenceNet(input_dim).to(self.device)
+    
+    def add_point(self, perception, confidence):
+        """Añade punto + guarda en histórico."""
+        import numpy as np
+        self.logger.debug(f"[SGD] add_point conf={confidence}")
+        pos = super().add_point(perception, confidence)
+        if pos < 0:
+            self.logger.debug("[SGD] super.add_point rejected")
+            return pos
+        
+        # NUEVO: Extrae features y guarda en histórico
+        try:
+            feats = self._flatten_perception(perception)
+            label = 1.0 if confidence > 0 else 0.0
+            self.perception_history.append((perception, feats, label))
+            self.logger.debug(f"[SGD] hist size={len(self.perception_history)} feats_len={len(feats)}")
+        except Exception as e:
+            self.logger.warning(f"[SGD] Error flattening perception: {e}")
+            return pos
+
+        if self.model is None and len(self.perception_history) > 2:
+            self.model = self.build_model(feats.shape[0])
+            self.optimizer = self.optim.SGD(self.model.parameters(), lr=self.lr, momentum=self.momentum)
+            self.logger.info("[SGD] model created")
+
+        if self.model is not None and len(self.perception_history) > 10:
+            X, Y = self._get_training_data()
+            pos_count = np.sum(Y == 1.0)
+            neg_count = np.sum(Y == 0.0)
+            self.logger.debug(f"[SGD] training window X={X.shape} pos={pos_count} neg={neg_count}")
+            if pos_count > 0 and neg_count > 0:
+                self._sgd_online_update(X, Y)
+                self.logger.info(f"[SGD] SGD done pos={pos_count} neg={neg_count}")
+        return pos
+
+    def _get_training_data(self):
+        import numpy as np
+        start = max(0, len(self.perception_history) - self.window_size)
+        window = self.perception_history[start:]
+        X = np.array([feats for _, feats, _ in window])
+        Y = np.array([label for _, _, label in window])
+        self.logger.debug(f"[SGD] get_training_data X={X.shape} Y={Y.shape}")
+        return X, Y
+
+    def _sgd_online_update(self, X, Y):
+        self.logger.debug(f"[SGD] _sgd_online_update start batches={max(1, len(X)//8)}")
+        X_t = self.torch.tensor(X, dtype=self.torch.float32).to(self.device)
+        Y_t = self.torch.tensor(Y, dtype=self.torch.float32).unsqueeze(1).to(self.device)
+        criterion = self.nn.BCEWithLogitsLoss()
+        self.model.train()
+        indices = self.torch.randperm(len(X_t))
+        total_loss = 0
+        num_batches = 0
+        for i in range(0, len(X_t), 8):
+            batch_idx = indices[i:min(i+8, len(X_t))]
+            batch_X, batch_Y = X_t[batch_idx], Y_t[batch_idx]
+            logits = self.model(batch_X)
+            loss = criterion(logits, batch_Y)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.optimizer.step()
+            total_loss += loss.item()
+            num_batches += 1
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        self.logger.debug(f"[SGD] _sgd_online_update done avg_loss={avg_loss:.4f}")
+
+    def get_probability(self, perception):
+        """P(confidence=1) para nueva percepción."""
+        if self.model is None:
+            self.logger.debug("[SGD] get_prob model=None =>0.5")
+            return 0.5
+        try:
+            feats = self._flatten_perception(perception)
+        except Exception as e:
+            self.logger.error(f"[SGD] Error in get_probability: {e}")
+            return 0.5
+        
+        self.model.eval()
+        with self.torch.no_grad():
+            x = self.torch.tensor(feats, dtype=self.torch.float32).unsqueeze(0).to(self.device)
+            logit = self.model(x)
+            prob_success = self.torch.sigmoid(logit).item()
+        
+        self.logger.debug(f"[SGD] get_prob={prob_success:.4f}")
+        return prob_success
