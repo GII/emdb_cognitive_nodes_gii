@@ -334,6 +334,7 @@ class LearnedUtilityModel(UtilityModel):
         max_traces=50,
         max_antitraces=10,
         train_traces=5,
+        train_every=1,
         validation_split=0.1,
         reward_factor=1.0,
         ltm_id="",
@@ -361,6 +362,8 @@ class LearnedUtilityModel(UtilityModel):
         :type max_antitraces: int, optional
         :param train_traces: Number of new traces required to trigger a training step, defaults to 5
         :type train_traces: int, optional
+        :param train_every: Frequency of training updates (number of new traces before training), defaults to 1
+        :type train_every: int, optional
         :param validation_split: Fraction of data to use for validation during training, defaults to 0.1
         :type validation_split: float, optional
         :param reward_factor: Scaling factor applied to rewards, defaults to 1.0
@@ -401,7 +404,7 @@ class LearnedUtilityModel(UtilityModel):
             0,
             callback_group=self.cbgroup_server
         )
-
+        self.train_every = train_every
         self.train_traces = train_traces
         self.validation_split = validation_split
         self.update_semaphore = threading.Semaphore()
@@ -473,7 +476,7 @@ class LearnedUtilityModel(UtilityModel):
     def train_step(self):
         """Perform a training step for the utility model if sufficient new traces are available.
         """        
-        if self.episodic_buffer.n_traces >= self.min_traces and self.episodic_buffer.new_traces >= self.train_traces:
+        if self.episodic_buffer.n_traces >= self.min_traces and self.episodic_buffer.new_traces >= self.train_every:
             sample_size = max(self.train_traces, self.episodic_buffer.new_traces)
             self.get_logger().info(f"Training Utility Model with {sample_size} new traces")
             x_train, y_train = self.episodic_buffer.get_dataset(shuffle=True, n_samples=sample_size)
@@ -656,6 +659,7 @@ class QUtilityModel(LearnedUtilityModel):
             max_traces=max_traces, 
             max_antitraces=max_antitraces, 
             train_traces=train_traces, 
+            train_every=train_every,
             validation_split=validation_split, 
             reward_factor=reward_factor,
             ltm_id=ltm_id, 
@@ -663,7 +667,6 @@ class QUtilityModel(LearnedUtilityModel):
             )
         
         self.candidate_actions = candidate_actions
-        self.train_every = train_every
         self.replace_every = replace_every
         self.discount_factor = discount_factor
         self.train_step_count = 0
