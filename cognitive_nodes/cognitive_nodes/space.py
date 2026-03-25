@@ -1040,3 +1040,33 @@ class PyTorchOnlineSGDSpace(PointBasedSpace):
         
         self.logger.debug(f"[SGD] get_prob={prob_success:.4f}")
         return prob_success
+
+
+class randomSpace(PointBasedSpace):
+    """
+    A dummy space that returns a random activation value for any perception.
+    """
+    def add_point(self, perception, confidence):
+        """
+        Dummy method to add a point to the space.
+        This method does not actually add any points.
+
+        :param perception: A given perception to add. It is not used.
+        :type perception: dict
+        :param confidence: The confidence of the added point. Irrelevant in this case.
+        :type confidence: float
+        :return: -1
+        :rtype: int
+        """
+        return -1
+
+    def get_probability(self, perception):
+        """
+        Activation value is a random number between 0 and 1.
+
+        :param perception: A given perception to add. It is not used.
+        :type perception: dict
+        :return: The activation value, which is a random number between 0 and 1.
+        :rtype: float
+        """
+        return numpy.random.uniform()
