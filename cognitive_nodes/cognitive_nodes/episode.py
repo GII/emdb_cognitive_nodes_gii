@@ -11,8 +11,6 @@ from core.utils import perception_dict_to_msg, perception_msg_to_dict, actuation
 
 
 class Container:
-    data: xr.DataArray
-
     @property
     def name(self) -> str | None:
         return self.data.name
@@ -23,7 +21,7 @@ class Container:
 
     @property
     def size(self) -> int:
-        valid = self.data.coords["valid"].values
+        valid = self._valid_cache
         return int(np.count_nonzero(valid))
     
     @property
@@ -39,7 +37,7 @@ class Container:
     
     @property
     def feature_labels(self) -> list[str]:
-        return list(self.data.coords[self.feature_dim].values)
+        return self._feature_labels_cache.tolist()
 
     def __init__(self, name, max_size: int, container_type: str, data_type=np.float64, labels: list = None) -> Container:
         feature_dim = f"{name}_feature"
@@ -63,9 +61,72 @@ class Container:
             name=name,
         )
 
+        self._feature_index_cache: dict[tuple[tuple[str, ...], tuple[str, ...]], np.ndarray] = {}
+
+        # Ring metadata for O(1) slot resolution.
+        self._write_cursor = 0
+        self._n_valid = 0
+
+        self._refresh_cached_indices()
+
+    def __len__(self):
+        return self.size
+
+    def _refresh_cached_indices(self) -> None:
+        self._valid_cache = self.data.coords["valid"].values
+        self._buffer_index_cache = self.data.coords["buffer_index"].values
+        self._timestamp_cache = self.data.coords["timestamp"].values
+        self._feature_cache = self.data.values
+        self._feature_labels_cache = self.data.coords[self.feature_dim].values
+
+    def _get_feature_take_indices(
+        self,
+        src_labels: tuple[str, ...],
+        dst_labels: tuple[str, ...],
+    ) -> np.ndarray:
+        cache_key = (src_labels, dst_labels)
+        cached = self._feature_index_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        src_pos = {label: i for i, label in enumerate(src_labels)}
+        try:
+            take_idx = np.fromiter(
+                (src_pos[label] for label in dst_labels),
+                dtype=np.int64,
+                count=len(dst_labels),
+            )
+        except KeyError as exc:
+            missing = str(exc.args[0])
+            raise ValueError(f"Missing destination feature in source container: {missing}") from exc
+
+        self._feature_index_cache[cache_key] = take_idx
+        return take_idx
+    
+    def _is_ring_step_sequence(self, slots: np.ndarray) -> bool:
+        if slots.size <= 1:
+            return True
+        diffs = (slots[1:] - slots[:-1]) % self.max_size
+        return bool(np.all(diffs == 1))
+    
+    def _ordered_all_valid_slots(self) -> np.ndarray:
+        n = int(self._n_valid)
+        if n == 0:
+            return np.empty(0, dtype=np.int64)
+
+        start = (self._write_cursor - n) % self.max_size
+        end = start + n
+
+        if end <= self.max_size:
+            return np.arange(start, end, dtype=np.int64)
+
+        first = np.arange(start, self.max_size, dtype=np.int64)
+        second = np.arange(0, end % self.max_size, dtype=np.int64)
+        return np.concatenate((first, second))
+
     def _resolve_slot(self, index: int, by_buffer_index: bool = False, require_valid: bool = True) -> int:
         if by_buffer_index:
-            matches = np.where(self.data.coords["buffer_index"].values == index)[0]
+            matches = np.where(self._buffer_index_cache == index)[0]
             if matches.size == 0:
                 raise IndexError(f"buffer_index {index} not found")
             slot = int(matches[0])
@@ -75,51 +136,74 @@ class Container:
         if slot < 0 or slot >= self.max_size:
             raise IndexError(f"slot {slot} out of range [0, {self.max_size - 1}]")
 
-        if require_valid and not bool(self.data.coords["valid"].values[slot]):
+        if require_valid and not bool(self._valid_cache[slot]):
             raise IndexError(f"slot {slot} has no valid data")
 
         return slot
     
-    def _update_buffer_index(self, slots: int | np.ndarray | list[int]) -> np.ndarray:
-        """
-        Vectorized buffer_index update for one or many written slots.
+    def _update_buffer_index_fallback(self, slots: np.ndarray) -> np.ndarray:
+        # Original robust behavior for non-ring-ordered writes.
+        buffer_indexes = self._buffer_index_cache
+        valid = self._valid_cache
 
-        The slots passed here are treated as the newest writes, in the given order.
-        """
-        slots = np.asarray(slots, dtype=np.int64).reshape(-1)
-        if slots.size == 0:
-            return np.empty(0, dtype=np.int64)
-
-        if np.any((slots < 0) | (slots >= self.max_size)):
-            raise IndexError(f"slot out of range [0, {self.max_size - 1}]")
-
-        # Avoid ambiguous ordering if a slot appears more than once in one call.
-        if np.unique(slots).size != slots.size:
-            raise ValueError("slots must be unique within one _update_buffer_index call")
-
-        buffer_indexes = self.data.coords["buffer_index"].values
-        valid = self.data.coords["valid"].values
-
-        # Current valid slots ordered oldest -> newest by existing buffer_index.
         old_valid_slots = np.flatnonzero(valid)
         if old_valid_slots.size > 0:
-            old_order = np.argsort(buffer_indexes[old_valid_slots])
+            old_order = np.argsort(buffer_indexes[old_valid_slots], kind="stable")
             old_valid_slots = old_valid_slots[old_order]
 
-        # Keep old valid slots except those being rewritten now.
         keep_old = old_valid_slots[~np.isin(old_valid_slots, slots)]
 
-        # New global order: old kept first, then new writes as newest.
         new_order = np.concatenate([keep_old, slots])
         n_valid = new_order.size
 
-        # Reset and assign compact indices.
         buffer_indexes[:] = -1
         valid[:] = False
         valid[new_order] = True
         buffer_indexes[new_order] = np.arange(n_valid, dtype=np.int64)
 
-        # Return assigned indices for the written slots.
+        # Reconstruct ring metadata from compact ordering.
+        self._n_valid = int(n_valid)
+        if self._n_valid == 0:
+            self._write_cursor = 0
+        else:
+            newest_bi = int(self._n_valid - 1)
+            newest_slot = int(np.where((valid) & (buffer_indexes == newest_bi))[0][0])
+            self._write_cursor = (newest_slot + 1) % self.max_size
+
+        return buffer_indexes[slots]
+    
+    def _update_buffer_index(self, slots: int | np.ndarray | list[int]) -> np.ndarray:
+        """
+        Incremental buffer_index update for ring-ordered writes.
+        Falls back to robust full rebuild if slots are not ring-contiguous.
+        """
+        slots = np.asarray(slots, dtype=np.int64).reshape(-1)
+        if slots.size == 0:
+            return np.empty(0, dtype=np.int64)
+
+        if not self._is_ring_step_sequence(slots):
+            return self._update_buffer_index_fallback(slots)
+
+        buffer_indexes = self._buffer_index_cache
+        valid = self._valid_cache
+
+        n_new = int(slots.size)
+        prev_n = int(self._n_valid)
+        cap = self.max_size
+
+        if n_new + prev_n > cap:
+            # Wraping case: new slots will overwrite some of the oldest valid slots.
+            buffer_indexes = np.remainder(buffer_indexes - n_new, cap)
+
+        else:
+            # Non-wrapping case: just mark new slots as valid with correct buffer_index.
+            buffer_indexes[slots] = np.arange(prev_n, prev_n + n_new, dtype=np.int64)
+        
+        valid[slots] = True
+
+        self._n_valid = min(cap, prev_n + n_new)
+        self._write_cursor = (self._write_cursor + n_new) % cap
+
         return buffer_indexes[slots]
 
 
@@ -130,30 +214,13 @@ class Container:
         if n_samples > self.max_size:
             raise ValueError(f"n_samples {n_samples} exceeds container size {self.max_size}")
 
-        # Get current valid slots ordered oldest -> newest by existing buffer_index.
-        valid = self.data.coords["valid"].values
-        buffer_indexes = self.data.coords["buffer_index"].values
-        valid_slots = np.flatnonzero(valid)
-        if valid_slots.size > 0:
-            order = np.argsort(buffer_indexes[valid_slots])
-            valid_slots = valid_slots[order]
-
-        # New writes will occupy the next n_samples slots after the current newest.
-        if valid_slots.size == 0:
-            return np.arange(n_samples, dtype=np.int64)
-
-        last_slot = valid_slots[-1]
-        candidate_slots = (last_slot + 1 + np.arange(n_samples, dtype=np.int64)) % self.max_size
-
-        return candidate_slots
+        return (self._write_cursor + np.arange(n_samples, dtype=np.int64)) % self.max_size
 
     def _write_slot(self, slots: np.ndarray, values: np.ndarray, timestamps: np.ndarray) -> np.ndarray:
-        # Write payload. Any extra source metadata fields are ignored by design.
-        self.data.values[slots] = values
-        self.data.coords["timestamp"].values[slots] = timestamps
-        self.data.coords["valid"].values[slots] = True
+        self._feature_cache[slots] = values
+        self._timestamp_cache[slots] = timestamps
+        self._valid_cache[slots] = True
 
-        # Rebuild compact order, with these slots as newest.
         self._update_buffer_index(slots)
         return slots
 
@@ -162,23 +229,30 @@ class Container:
         sample: Container | np.ndarray,
         timestamps: np.ndarray | None = None,
     ) -> int | np.ndarray:
-        dst_feature_dim = self.feature_dim
-        dst_features = self.feature_labels
-        n_features = self.data.sizes[dst_feature_dim]
-
         if isinstance(sample, Container):
-            batch = sample.read(ordered=True)
-            if sample.size == 0:
+            dst_labels = tuple(str(x) for x in self.feature_labels)
+            src_data = sample.data
+            src_valid = sample._valid_cache
+            if not np.any(src_valid):
                 return np.empty(0, dtype=np.int64)
 
-            src_feature_dim = sample.feature_dim
+            src_slots = np.flatnonzero(src_valid)
+            if src_slots.size > 1:
+                src_bi = sample._buffer_index_cache
+                src_slots = src_slots[np.argsort(src_bi[src_slots], kind="stable")]
 
-            # Keep only destination feature set and order.
-            batch = batch.sel({src_feature_dim: dst_features})
-            values = batch.values
-            ts = batch.coords["timestamp"].values
+            values = src_data.values[src_slots]
+            ts = sample._timestamp_cache[src_slots]
+            src_labels = tuple(str(x) for x in sample.feature_labels)
+
+            if src_labels != dst_labels:
+                take_idx = self._get_feature_take_indices(src_labels, dst_labels)
+                values = np.take(values, take_idx, axis=1)
+
+            values = np.asarray(values, dtype=self.data.dtype)
 
         else:
+            n_features = len(self.feature_labels)
             values = np.asarray(sample, dtype=self.data.dtype)
             if values.ndim == 1:
                 values = values.reshape(1, -1)
@@ -210,34 +284,45 @@ class Container:
         return int(written_slots[0]) if written_slots.size == 1 else written_slots
 
     def clear(self) -> None:
-        self.data.coords["valid"].values[:] = False
-        self.data.coords["buffer_index"].values[:] = -1
-        self.data.coords["timestamp"].values[:] = 0.0
+        self._valid_cache[:] = False
+        self._buffer_index_cache[:] = -1
+        self._timestamp_cache[:] = 0.0
 
-    def read(self, ordered: bool = False, index: int | slice | list[int] | np.ndarray | None = None) -> xr.DataArray:
+        self._write_cursor = 0
+        self._n_valid = 0
+
+    def read(self, index: int | slice | list[int] | np.ndarray | None = None, ordered: bool = True) -> xr.DataArray:
         if index is None:
-            candidate_slots = np.arange(self.max_size)
-        elif isinstance(index, int):
-            candidate_slots = np.array([self._resolve_slot(index, require_valid=True)], dtype=int)
+            if ordered:
+                slots = self._ordered_all_valid_slots()
+            else:
+                slots = np.flatnonzero(self._valid_cache)
+            return self.data.isel(sample=slots)
+
+        ordered_slots = self._ordered_all_valid_slots()
+
+        if isinstance(index, int):
+            if index < 0 or index >= ordered_slots.size:
+                raise IndexError(f"buffer_index {index} out of range [0, {ordered_slots.size - 1}]")
+            slots = np.array([ordered_slots[index]], dtype=np.int64)
         elif isinstance(index, slice):
-            candidate_slots = np.arange(self.max_size)[index]
+            slots = ordered_slots[index]
         else:
-            candidate_slots = np.asarray(index, dtype=int)
-            if candidate_slots.ndim != 1:
+            buffer_indexes = np.asarray(index, dtype=np.int64)
+            if buffer_indexes.ndim != 1:
                 raise ValueError("index array must be 1-dimensional")
-            if np.any((candidate_slots < 0) | (candidate_slots >= self.max_size)):
-                raise IndexError(f"index out of range [0, {self.max_size - 1}]")
+            if np.any((buffer_indexes < 0) | (buffer_indexes >= ordered_slots.size)):
+                raise IndexError(f"buffer_index out of range [0, {ordered_slots.size - 1}]")
+            slots = ordered_slots[buffer_indexes]
 
-        valid_mask = self.data.coords["valid"].values[candidate_slots]
-        valid_slots = candidate_slots[valid_mask]
-        out = self.data.isel(sample=valid_slots)
-
-        if not ordered:
+        out = self.data.isel(sample=slots)
+        if not ordered or out.sizes.get("sample", 0) <= 1:
             return out
 
-        b = out.coords["buffer_index"].values
-        order = np.argsort(b)  # oldest -> newest
-        return out.isel(sample=order)
+        return out.isel(sample=np.argsort(out.coords["buffer_index"].values, kind="stable"))
+
+    def read_slots(self, slots: int | slice | list[int] | np.ndarray) -> xr.DataArray:
+        return self.data.isel(sample=slots)
 
 
 class Episode:
