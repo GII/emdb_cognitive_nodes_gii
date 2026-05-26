@@ -139,7 +139,15 @@ class Goal(CognitiveNode):
         response.confidences = []
 
         return response
-    
+
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """
+        TODO: this is a dummy method, WIP,
+        This method can be extended to include other factors, such as the distance to the points in the space,
+        the number of points in the space, etc.
+        """
+        return self.activation.metacognitive_params.confidence
+
     async def is_reached_callback(self, request, response):
         """
         Check if the goal has been reached.

@@ -26,6 +26,13 @@ class CNode(CognitiveNode):
         super().__init__(name, class_name, **params)
         self.configure_activation_inputs(self.neighbors)
 
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """TODO: this is a dummy method, WIP, 
+        This method can be extended to include other factors, such as the distance to the points in the space,
+        the number of points in the space, etc.
+        """
+        return 1.0
+
     async def calculate_activation(self, perception=None, activation_list=None):
         """
         Calculate the new activation value by multiplying the activation values of its neighbors.

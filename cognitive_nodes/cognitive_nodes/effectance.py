@@ -628,6 +628,10 @@ class GoalRecreateEffect(GoalLearnedSpace):
         #Provides activation if not learned depending on confidence
         if not self.learned_space:
             self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
-        
 
-
+    def calculate_confidence(self, perception, activation_list):
+        """
+        TODO: this is a dummy method, WIP,
+        This method extends the default calculate confidence method for goals and provides confidence based on the goal's activation.
+        """      
+        return 1.0

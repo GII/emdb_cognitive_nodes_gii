@@ -90,6 +90,13 @@ class Policy(CognitiveNode):
                 self.activation.timestamp=self.get_clock().now().to_msg()
         return self.activation
     
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """TODO: this is a dummy method, WIP,
+        This method can be extended to include other factors, such as the distance to the points in the space,
+        the number of points in the space, etc.
+        """
+        return 1.0
+    
     def execute_callback(self, request, response):
         """
         Placeholder for the execution of the policy.

@@ -216,6 +216,13 @@ class PNode(CognitiveNode):
             self.activation.activation = activations[0] if len(activations) == 1 else float(max(activations)) #Fix this else case for multiple perceptions
             self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
+    
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """
+        This method use the already calculated success rate as confidence value, 
+        stored in 
+        """
+        return self.success_rate
 
     def get_space(self, perception):
         """

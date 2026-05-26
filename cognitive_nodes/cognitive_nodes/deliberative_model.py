@@ -200,6 +200,14 @@ class DeliberativeModel(CognitiveNode):
         """
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
+    
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """
+        TODO: this is a dummy method, WIP,
+        This method can be extended to include other factors, such as the distance to the points in the space,
+        the number of points in the space, etc.
+        """
+        return self.activation.metacognitive_params.confidence
 
     def predict(self, input_episodes: list[Episode]) -> list:
         input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
