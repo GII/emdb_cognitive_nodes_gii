@@ -1,15 +1,24 @@
+from __future__ import annotations
+
 from math import isclose
-import numpy
+import os
+import numpy as np
 import threading
 from numpy.lib.recfunctions import structured_to_unstructured, require_fields
 import pandas as pd
 from sklearn import svm
-import tensorflow as tf
 from rclpy.node import Node
 from rclpy.logging import get_logger
 
-from core.utils import separate_perceptions
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 
+from core.utils import separate_perceptions
+from core.container import Container
+
+from core_interfaces.msg import Container as ContainerMsg
 
 class Space(object):
     """A n-dimensional state space."""
@@ -24,7 +33,7 @@ class Space(object):
         self.parent_space = None
         self.logger = get_logger("space_" + str(ident))
         self.logger.info(f"CREATING SPACE: {ident}")
-        self.rng = numpy.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(random_seed)
 
 
 class PointBasedSpace(Space):
@@ -37,16 +46,52 @@ class PointBasedSpace(Space):
         :param size: Maximum number of points that the space can contain, defaults to 5000.
         :type size: int
         """
+        self._data = None
         self.real_size = size
-        self.size = 0
-        # These lists must be empty, not None, in order loops correctly operate with empty spaces.
-        self.members = []
-        self.memberships = []
         super().__init__(**kwargs)
 
-    def populate_space(self, labels, members, memberships):
+    @property
+    def size(self):
         """
-        Populate the structured array and memberships list based on the given parameters.
+        Get the size of the space.
+
+        :return: The size of the space.
+        :rtype: int
+        """
+        return self._data.size if self._data is not None else 0
+
+    @property
+    def members(self):
+        """
+        Get the members of the space.
+
+        :return: The members of the space.
+        :rtype: list
+        """
+        if self._data is not None:        
+            return self._data.read(ordered=True).drop(columns=["confidence"]).values
+        else:
+            return np.array([])
+    
+    @property
+    def memberships(self):
+        """
+        Get the memberships of the space.
+
+        :return: The memberships of the space.
+        :rtype: list
+        """
+        if self._data is not None:
+            return self._data.read(ordered=True)["confidence"].values
+        else:
+            return np.array([])
+
+    @classmethod
+    def populate_space(cls, data_container: Container):
+        """
+        Populates the space from the data container. 
+
+        NOTE: This method is intended to be used when loading a space from a saved state, where the data container already contains the necessary information to populate the space. (e.g. it has the confidences stored as a column, so we don't need to pass them separately as in add_point)
 
         :param point: A perception dictionary describing the structure of the space.
         :type point: dict
@@ -56,110 +101,22 @@ class PointBasedSpace(Space):
         :type memberships: list
         :raises ValueError: If the size of memberships does not match the calculated size of the space.
         """
-        if self.size != 0:
-            raise RuntimeError("Only an empty space can be populated.")
+        size = len(data_container)
+        space = cls(size=size)
+        space._data = data_container
+        return space
 
-        # Ensure the size matches the expected dimensions
-        if len(memberships) != self.real_size:
-            raise ValueError("Size of memberships does not match the space's real size.")
-
-        # Create a structured array using the provided point structure
-        point=self.create_point_from_labels(labels)
-        self.members = self.create_structured_array(point, None, len(memberships))
-        
-        # Populate the structured array with the members' data
-        n_dims = len(self.members.dtype.names)
-        n_data = len(members) // n_dims
-
-        if n_data != len(memberships):
-            raise ValueError("Mismatch between members and memberships size.")
-
-        for i in range(n_data):
-            member_data = members[i * n_dims:(i + 1) * n_dims]
-            self.members[i] = tuple(member_data)
-
-        # Assign memberships
-        self.memberships = numpy.array(memberships)
-        self.size = len(memberships)
-    
-    #TODO This method assumes that there is only one element per sensor. See configure_labels in goal.py
-    @staticmethod
-    def create_point_from_labels(labels):
+    def initialize_data_structure(self, point: Container, size): 
         """
-        Generates a point from a list of labels.
-
-        :param labels: List of labels of the space.
-        :type labels: list
-        :return: Space point.
-        :rtype: dict
-        """        
-        point={}
-        for label in labels:
-            elements=label.split("-")
-            sensor=elements[1]
-            attribute=elements[2]
-            if not point.get(sensor):
-                point[sensor]=[{attribute: 0.0}]
-            else:
-                point[sensor][0][attribute]=0.0
-        point = separate_perceptions(point)[0]
-        print(f"Point: {point}")
-        return point
-
-    def create_structured_array(self, perception, base_dtype, size):
-        """
-        Create a structured array to store points.
-
-        The key is what fields to use. There are three cases:
-        - If base_dtype is specified, use the fields in perception that are also in base_dtype.
-        - Otherwise, if this space is a specialization, use the fields in perception that are NOT in parent_space.
-        - Otherwise, use every field in perception.
-
-        :param perception: The perception that sizes the structured array.
-        :type perception: dict
-        :param base_dtype: The dtype of the structured array.
-        :type base_dtype: numpy.dtype
+        Initialize the structured array based on the given point and size.
+        :param point: A perception that will provide the structure for the space.
+        :type point: Container
         :param size: The size of the structured array.
         :type size: int
-        :return: The structured array, filled with zeros.
-        :rtype: numpy.ndarray
         """
-        if getattr(perception, "dtype", None):
-            if base_dtype:
-                types = [
-                    (name, float) for name in perception.dtype.names if name in base_dtype.names
-                ]
-            elif self.parent_space:
-                types = [
-                    (name, float)
-                    for name in perception.dtype.names
-                    if name not in self.parent_space.members.dtype.names
-                ]
-            else:
-                types = perception.dtype
-        else:
-            if base_dtype:
-                types = [
-                    (sensor + "_" + attribute, float)
-                    for sensor, attributes in perception.items()
-                    for attribute in attributes
-                    if sensor + "_" + attribute in base_dtype.names
-                ]
-            elif self.parent_space:
-                types = [
-                    (sensor + "_" + attribute, float)
-                    for sensor, attributes in perception.items()
-                    for attribute in attributes
-                    if sensor + "_" + attribute not in self.parent_space.members.dtype.names
-                ]
-            else:
-                types = [
-                    (sensor + "_" + attribute, float)
-                    for sensor, attributes in perception.items()
-                    for attribute in attributes
-                ]
-        return numpy.zeros(size, dtype=types)
-    
+        labels = point.feature_labels + ["confidence"]
+        self._data = Container(name=self.ident + "_data", max_size=size, container_type="space", labels=labels)
+
     def learnable(self):
         """
         Only antipoints are considered learnables.
@@ -168,32 +125,42 @@ class PointBasedSpace(Space):
         :rtype: bool
         """
         for i in self.memberships[0 : self.size]:
-            if numpy.isclose(i, -1.0):
+            if np.isclose(i, -1.0):
                 return True
         return False
+    
+    def reload_members(self, members, memberships, timestamps):
+        """ Reload the members and memberships of the space with new values."""
+        self._data.clear()
+        data = np.concatenate([members, memberships.reshape(-1, 1)], axis=1)
+        labels = self._data.feature_labels
+        self._data.push(data, labels, timestamps=timestamps)
 
-    @staticmethod
-    def copy_perception(space, position, perception):
+    def data_from_perception(self, perception: Container):
         """
-        Copy a perception to a structured array.
+        Create a structured array for the given perception.
 
-        :param space: An structured array, filled with zeros.
-        :type space: numpy.ndarray
-        :param position: Position of the array in which the perception is added.
-        :type position: int
-        :param perception: The perception that is copied in the structured array.
-        :type perception: dict
+        :param perception: The given perception to create the structured array.
+        :type perception: Container
+        :return: The structured array created from the given perception.
+        :rtype: numpy.ndarray
         """
-        if getattr(perception, "dtype", None):
-            for name in perception.dtype.names:
-                if name in space.dtype.names:
-                    space[position][name] = perception[name]
-        else:
-            for sensor, attributes in perception.items():
-                for attribute, value in attributes.items():
-                    name = sensor + "_" + attribute
-                    if name in space.dtype.names:
-                        space[position][name] = value
+        data = perception.read(ordered=True)
+        filtered_features = data.sel(features=self._data.feature_labels[:-1])
+        return filtered_features.values
+
+    def to_msg(self):
+        """
+        Convert the space to a message format.
+        
+        :return: The message format of the space.
+        :rtype: ContainerMsg
+        """
+        if self._data is not None:
+            return self._data.to_msg()
+
+        
+
 
     @staticmethod
     def get_closest_point_and_antipoint_info(members, memberships, foreigner):
@@ -201,7 +168,7 @@ class PointBasedSpace(Space):
         Obtain info about the closest point and antipoint for a given foreigner.
 
         :param members: Set of the points and antipoints.
-        :type members: numpy.ndarray
+        :type members: np.ndarray
         :param memberships: The confidence of the points contained in members.
         :type memberships: numpy.ndarray
         :param foreigner: The given foreigner point in order to obtain the info.
@@ -210,11 +177,11 @@ class PointBasedSpace(Space):
             their distance with the foreigner point.
         :rtype: int (position), float (distance)
         """
-        distances = numpy.linalg.norm(members - foreigner, axis=1)
+        distances = np.linalg.norm(members - foreigner, axis=1)
         closest_point_pos = None
-        closest_point_dist = numpy.finfo(float).max
+        closest_point_dist = np.finfo(float).max
         closest_antipoint_pos = None
-        closest_antipoint_dist = numpy.finfo(float).max
+        closest_antipoint_dist = np.finfo(float).max
         for pos, _ in enumerate(members):
             if memberships[pos] > 0.0:
                 if distances[pos] < closest_point_dist:
@@ -241,66 +208,51 @@ class PointBasedSpace(Space):
             new_space.add_point(space, 1.0)
         return new_space
 
-    def add_point(self, perception, confidence):
+    def add_point(self, perceptions: Container, confidences: np.ndarray):
         """
         Add a new point to the P-Node.
 
         :param perception: A given perception to add.
-        :type perception: dict
+        :type perception: Container
         :param confidence: The confidence of the added point that specifies if it is a point or an
             antipoint.
         :type confidence: float
         :raises RuntimeError: If LTM operation cannot continue.
         :return: The position of the added point.
-        :rtype: int
+        :rtype: int | numpy.ndarray
         """
         added_point_pos = -1
         # Currently, we don't add the point if it is an anti-point and the space does not activate for it.
-        if (confidence > 0.0) or (self.get_probability(perception) > 0.0):
+        probabilities = self.get_probability(perceptions)
+        ## Create an index list for the points that either have a confidence greater than 0.0 or a probability greater than 0.0
+        indexes = (confidences > 0.0) | (probabilities > 0.0)
+        data = perceptions.read(ordered=True).values[indexes]
+        timestamps = perceptions.coords["timestamps"].values[indexes]
+        # Add the confidence as a new column to the data array, so it can be stored in the structured array of the space
+        points = np.concatenate([data, confidences[indexes].reshape(-1, 1)], axis=1)
+        labels = perceptions.feature_labels + ["confidence"]
+
+        if points.shape[0] > 0:
             if self.parent_space:
-                self.parent_space.add_point(perception, confidence)
-            # Check if we need to initialize the structured numpy array for storing points
+                self.parent_space.add_point(perceptions, confidences)
+            # Check if we need to initialize the container for storing points
             if self.size == 0:
-                # This first point's dtype sets the space's dtype
-                # In order to relax this restriction, we will probably replace structured arrays with xarrays
-                self.members = self.create_structured_array(perception, None, self.real_size)
-                self.memberships = numpy.zeros(self.real_size)
-            # Create a new structured array for the new perception
-            candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-            # Check if the perception is compatible with this space
-            if self.members.dtype != candidate_point.dtype:
-                # Node.get_logger().error(
-                #     "Trying to add a perception to a NOT compatible space!!!"
-                #     "Please, take into account that, at the present time, sensor order in perception matters!!!"
-                #     ) #TODO: Pass pnode logger to space
-                raise RuntimeError("LTM operation cannot continue :-(")
-            else:
-                # Copy the new perception on the structured array
-                self.copy_perception(candidate_point, 0, perception)
-                # Store the new perception if there is a place for it
-                if self.size < self.real_size:
-                    self.members[self.size] = candidate_point
-                    self.memberships[self.size] = confidence
-                    added_point_pos = self.size
-                    self.size += 1
-                else:
-                    # Points should be replaced when the P-node is full (may be some metric based on number of times
-                    # involved in get_probability)
-                    # Node().get_logger().debug(self.ident + " full!")
-                    raise RuntimeError("LTM operation cannot continue :-(")
+                self.initialize_data_structure(perceptions, None, self.real_size)
+            # Add the new points to the container
+            added_point_pos = self._data.push(points, labels, timestamps=timestamps)
         return added_point_pos
 
-    def get_probability(self, perception):
+    def get_probability(self, perceptions):
         """
         Calculate the new activation value.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
         :raises NotImplementedError: The method has to be implemented in a child class.
         """
         raise NotImplementedError
 
-    def contains(self, space, threshold=0.9):
+    def contains(self, space: PointBasedSpace, threshold=0.9):
         """
         Check if other space is contained inside this one.
         That happens if this space has a given value of probability for every point belonging to the other space.
@@ -315,7 +267,7 @@ class PointBasedSpace(Space):
         contained = False
         if space.size:
             contained = True
-            for point, confidence in zip(space.members[0 : space.size],space.memberships[0 : space.size]) : #Cuando se excluyen los antipuntos????
+            for point, confidence in zip(space.members, space.memberships) :
                 self.logger.debug(f"Evaluating point {point} [{confidence}]")
                 probability = self.get_probability(point)
                 if probability < threshold and confidence>0:
@@ -335,8 +287,9 @@ class PointBasedSpace(Space):
         """
         answer = False
         if self.size and space.size:
-            types = [name for name in space.members.dtype.names if name in self.members.dtype.names]
-            if len(types) == len(self.members.dtype.names) == len(space.members.dtype.names):
+            self_labels = set(self._data.feature_labels)
+            compared_labels = set(space._data.feature_labels)
+            if self_labels == compared_labels:
                 answer = True
         return answer
 
@@ -348,24 +301,13 @@ class PointBasedSpace(Space):
         :type space: cognitive_nodes.Space
         """
         common_sensors = [
-            (name, float) for name in self.members.dtype.names if name in space.members.dtype.names
+            name for name in self._data.feature_labels if name in space._data.feature_labels
         ]
-        self.members = require_fields(self.members, common_sensors)
-
-    def aging(self):
-        """
-        Move towards zero the activation for every point or anti-point.
-        """
-        for i in range(self.size):
-            if self.memberships[i] > 0.0:
-                self.memberships[i] -= 0.001
-            elif self.memberships[i] < 0.0:
-                self.memberships[i] += 0.001
-            # This is ugly as it can lead to holes (points that are not really points or antipoints any longer)
-            # If this works well, an index structure to reuse these holes should be implemented.
-            if numpy.isclose(self.memberships[i], 0.0):
-                self.memberships[i] = 0.0
-
+        data_array = self._data.read(ordered=True)
+        data = data_array.sel(features=common_sensors).values
+        timestamps = data_array.coords["timestamps"].values
+        self._data = Container(name=self.ident + "_data", max_size=self.real_size, container_type="space", labels=common_sensors)
+        self._data.push(data, common_sensors, timestamps=timestamps)
 
 class ClosestPointBasedSpace(PointBasedSpace):
     """
@@ -377,37 +319,47 @@ class ClosestPointBasedSpace(PointBasedSpace):
     between them. Otherwise, the activation is -1.
     """
 
-    def get_probability(self, perception):
-        """
-        Calculate the new activation value.
+    # NOTE: This method has been migrated to vectorial form, so multiple points can be evaluated at the same time.
+    # TESTING IS NEEDED TO ENSURE IT WORKS PROPERLY AND IT IS MORE EFFICIENT. OTHERWISE, REVERT TO THE ORIGINAL AND IMPLEMENT FOR LOOP OVER THE POINTS IN THE PERCEPTION.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
-        :return: The activation value.
-        :rtype: float
+    def get_probability(self, perceptions):
         """
-        # Create a new structured array for the new perception
-        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-        # Copy the new perception on the structured array
-        self.copy_perception(candidate_point, 0, perception)
-        # Create views on the structured arrays so they can be used in calculations
-        members = structured_to_unstructured(
-            self.members[0 : self.size][list(candidate_point.dtype.names)]
-        )
-        point = structured_to_unstructured(candidate_point)
-        memberships = self.memberships[0 : self.size]
+        Calculate the new activation value for multiple perception rows.
+
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
+        """
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
+        # Obtain the members and memberships of the space
+        members = self.members
+        memberships = self.memberships
         # Calculate the activation value
-        distances = numpy.linalg.norm(members - point, axis=1)
-        pos_closest = numpy.argmin(distances)
-        if memberships[pos_closest] > 0.0:
-            activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
+        n_rows = points.shape[0]
+        # No stored points yet -> no activation
+        if members.size == 0 or memberships.size == 0:
+            activation = np.zeros(n_rows, dtype=float)
         else:
-            activation = -1
-        return (
-            min(activation, self.parent_space.get_probability(perception))
-            if self.parent_space
-            else activation
-        )
+            # members: shape (None, n_members, n_features)
+            # points: shape (n_rows, None, n_features)
+            # distances: shape (n_rows, n_members)
+            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
+
+            pos_closest = np.argmin(distances, axis=1)  # one closest member per row
+            closest_dist = distances[np.arange(n_rows), pos_closest]
+            closest_membership = memberships[pos_closest]
+
+            activation = np.where(
+                closest_membership > 0.0,
+                closest_membership / (closest_dist + 1.0),
+                -1.0,
+            )
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation
 
 
 class CentroidPointBasedSpace(PointBasedSpace):
@@ -425,47 +377,73 @@ class CentroidPointBasedSpace(PointBasedSpace):
     membership. Otherwise the activation is -1.
     """
 
-    def get_probability(self, perception):
-        """
-        Calculate the new activation value.
+    # NOTE: This method has been migrated to vectorial form, so multiple points can be evaluated at the same time.
+    # TESTING IS NEEDED TO ENSURE IT WORKS PROPERLY AND IT IS MORE EFFICIENT. OTHERWISE, REVERT TO THE ORIGINAL AND IMPLEMENT FOR LOOP OVER THE POINTS IN THE PERCEPTION.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
-        :return: The activation value.
-        :rtype: float
+    def get_probability(self, perceptions):
         """
-        # Create a new structured array for the new perception
-        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-        # Copy the new perception on the structured array
-        self.copy_perception(candidate_point, 0, perception)
-        # Create views on the structured arrays so they can be used in calculations
-        # Be ware, if candidate_point.dtype is not equal to self.members.dtype, members is a new array!!!
-        members = structured_to_unstructured(
-            self.members[0 : self.size][list(candidate_point.dtype.names)]
-        )
-        point = structured_to_unstructured(candidate_point)
-        memberships = self.memberships[0 : self.size]
+        Calculate the new activation value for multiple perception rows.
+
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
+        """
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
+        # Obtain the members and memberships of the space
+        members = self.members
+        memberships = self.memberships
         # Calculate the activation value
-        distances = numpy.linalg.norm(members - point, axis=1)
-        pos_closest = numpy.argmin(distances)
-        if memberships[pos_closest] > 0.0:
-            activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
+        n_rows = points.shape[0]
+        # No stored points yet -> no activation
+        if members.size == 0 or memberships.size == 0:
+            activation = np.zeros(n_rows, dtype=float)
         else:
-            centroid = numpy.mean(members[memberships > 0.0], axis=0)
-            dist_antipoint_centroid = numpy.linalg.norm(members[pos_closest] - centroid)
-            dist_newpoint_centroid = numpy.linalg.norm(point - centroid)
-            if dist_newpoint_centroid + 0.000001 < dist_antipoint_centroid:
-                distances = distances[memberships > 0.0]
-                pos_closest = numpy.argmin(distances)
-                memberships = memberships[memberships > 0.0]
-                activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
-            else:
-                activation = -1
-        return (
-            min(activation, self.parent_space.get_probability(perception))
-            if self.parent_space
-            else activation
-        )
+            # Compute pairwise distances: shape (n_rows, n_members)
+            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
+            
+            pos_closest = np.argmin(distances, axis=1)
+            closest_dist = distances[np.arange(n_rows), pos_closest]
+            closest_membership = memberships[pos_closest]
+            
+            # Vectorized case 1: closest member is positive
+            activation = np.where(
+                closest_membership > 0.0,
+                closest_membership / (closest_dist + 1.0),
+                -1.0,
+            )
+            
+            # Handle case 2: closest member is negative (antipoint)
+            neg_mask = closest_membership <= 0.0
+            
+            if np.any(neg_mask) and np.any(memberships > 0.0):
+                centroid = np.mean(members[memberships > 0.0], axis=0)
+                
+                # Distance from each point to centroid
+                dist_points_centroid = np.linalg.norm(points - centroid[None, :], axis=1)
+                
+                # Distance from each closest antipoint to centroid
+                dist_antipoints_centroid = np.linalg.norm(members[pos_closest] - centroid[None, :], axis=1)
+                
+                # Points closer to centroid than antipoint
+                closer_mask = (dist_points_centroid + 0.000001) < dist_antipoints_centroid
+                update_mask = neg_mask & closer_mask
+                
+                if np.any(update_mask):
+                    pos_members = members[memberships > 0.0]
+                    pos_memberships = memberships[memberships > 0.0]
+                    
+                    for row_idx in np.where(update_mask)[0]:
+                        dists = np.linalg.norm(pos_members - points[row_idx], axis=1)
+                        closest_pos_idx = np.argmin(dists)
+                        activation[row_idx] = pos_memberships[closest_pos_idx] / (dists[closest_pos_idx] + 1.0)
+        
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        
+        return activation
 
 
 class NormalCentroidPointBasedSpace(PointBasedSpace):
@@ -484,67 +462,92 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
     membership, otherwise the activation is -1.
     """
 
-    def get_probability(self, perception):
+    def get_probability(self, perceptions):
         """
-        Calculate the new activation value.
+        Calculate the new activation value for multiple perception rows.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
-        :return: The activation value.
-        :rtype: float
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
         """
-        # Create a new structured array for the new perception
-        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-        # Copy the new perception on the structured array
-        self.copy_perception(candidate_point, 0, perception)
-        # Create views on the structured arrays so they can be used in calculations
-        # Be ware, if candidate_point.dtype is not equal to self.members.dtype, members is a new array!!!
-        members = structured_to_unstructured(
-            self.members[0 : self.size][list(candidate_point.dtype.names)]
-        )
-        point = structured_to_unstructured(candidate_point)
-        memberships = self.memberships[0 : self.size]
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
+        # Obtain the members and memberships of the space
+        members = self.members
+        memberships = self.memberships
         # Calculate the activation value
-        distances = numpy.linalg.norm(members - point, axis=1)
-        pos_closest = numpy.argmin(distances)
-        if memberships[pos_closest] > 0.0:
-            activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
+        n_rows = points.shape[0]
+        # No stored points yet -> no activation
+        if members.size == 0 or memberships.size == 0:
+            activation = np.zeros(n_rows, dtype=float)
         else:
-            centroid = numpy.mean(members[memberships > 0.0], axis=0)
-            v_antipoint_centroid = numpy.ravel(members[pos_closest] - centroid)
-            v_newpoint_centroid = numpy.ravel(point - centroid)
-            dist_antipoint_centroid = numpy.linalg.norm(v_antipoint_centroid)
-            dist_newpoint_centroid = numpy.linalg.norm(v_newpoint_centroid)
-            # https://en.wikipedia.org/wiki/Vector_projection
-            separation = numpy.linalg.norm(
-                v_antipoint_centroid
-                - numpy.inner(
-                    v_newpoint_centroid,
-                    numpy.inner(v_antipoint_centroid, v_newpoint_centroid)
-                    / numpy.inner(v_newpoint_centroid, v_newpoint_centroid),
-                )
+            # Compute pairwise distances: shape (n_rows, n_members)
+            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
+            
+            pos_closest = np.argmin(distances, axis=1)
+            closest_dist = distances[np.arange(n_rows), pos_closest]
+            closest_membership = memberships[pos_closest]
+            
+            # Vectorized case 1: closest member is positive
+            activation = np.where(
+                closest_membership > 0.0,
+                closest_membership / (closest_dist + 1.0),
+                -1.0,
             )
-            if (dist_newpoint_centroid < dist_antipoint_centroid) or (
-                numpy.random.uniform()
-                < dist_antipoint_centroid * separation / dist_newpoint_centroid
-            ):
-                distances = distances[memberships > 0.0]
-                pos_closest = numpy.argmin(distances)
-                memberships = memberships[memberships > 0.0]
-                activation = memberships[pos_closest] / (distances[pos_closest] + 1.0)
-            else:
-                activation = -1
-        return (
-            min(activation, self.parent_space.get_probability(perception))
-            if self.parent_space
-            else activation
-        )
+            
+            # Handle case 2: closest member is negative (antipoint)
+            neg_mask = closest_membership <= 0.0
+            if np.any(neg_mask) and np.any(memberships > 0.0):
+                # Centroid of points with positive membership
+                centroid = np.mean(members[memberships > 0.0], axis=0)
+
+                # Distance from each point to centroid
+                dist_newpoint_centroid = np.linalg.norm(points - centroid[None, :], axis=1)
+                # Distance from each closest antipoint to centroid
+                v_antipoint_centroid = members[pos_closest] - centroid[None, :]
+                dist_antipoint_centroid = np.linalg.norm(v_antipoint_centroid, axis=1)
+
+                # Vector from new points to centroid
+                v_newpoint_centroid = points - centroid[None, :]
+
+                # Check if new point is closer to centroid than antipoint, or if antipoint is far from the line between new point and centroid
+                # https://en.wikipedia.org/wiki/Vector_projection
+                dot_num = np.sum(v_antipoint_centroid * v_newpoint_centroid, axis=1)
+                dot_den = np.sum(v_newpoint_centroid * v_newpoint_centroid, axis=1)
+                projection = v_newpoint_centroid * (dot_num / dot_den)[:, None]
+                separation = np.linalg.norm(v_antipoint_centroid - projection, axis=1)
+
+                update_mask = neg_mask & (
+                    (dist_newpoint_centroid < dist_antipoint_centroid)
+                    | (
+                        np.random.uniform(size=n_rows)
+                        < (dist_antipoint_centroid * separation / dist_newpoint_centroid)
+                    )
+                )
+
+                if np.any(update_mask):
+                    positive_members = members[memberships > 0.0]
+                    positive_memberships = memberships[memberships > 0.0]
+
+                    for row_idx in np.where(update_mask)[0]:
+                        row_distances = np.linalg.norm(positive_members - points[row_idx], axis=1)
+                        pos_closest_positive = np.argmin(row_distances)
+                        activation[row_idx] = (
+                            positive_memberships[pos_closest_positive]
+                            / (row_distances[pos_closest_positive] + 1.0)
+                        )
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        
+        return activation
     
 class ActivatedDummySpace(PointBasedSpace):
     """
     A dummy space that always returns an activation of 1.0 for any perception.
     """
-    def add_point(self, perception, confidence):
+    def add_point(self, perceptions, confidences):
         """
         Dummy method to add a point to the space.
         This method does not actually add any points.
@@ -558,44 +561,28 @@ class ActivatedDummySpace(PointBasedSpace):
         """
         return -1
 
-    def get_probability(self, perception):
+    def get_probability(self, perceptions):
         """
-        Activation value is always 1.0.
+        Calculate the new activation value for multiple perception rows.
 
-        :param perception: A given perception to add. It is not used.
-        :type perception: dict
-        :return: The activation value, which is always 1.0.
-        :rtype: float
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
         """
-        return 1.0
+        return np.ones(perceptions.size, dtype=float)
 
 class SVMSpace(PointBasedSpace):
     """
     Use a SVM to calculate activations.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, kernel="poly", degree=32, max_iter=200000, **kwargs):
         """
         Init attributes when a new object is created.
         """
-        self.model = svm.SVC(kernel="poly", degree=32, max_iter=200000)
+        self.model = svm.SVC(kernel=kernel, degree=degree, max_iter=max_iter)
         super().__init__(**kwargs)
-
-
-    def prune_points(self, score, memberships):
-        """
-        Prune points depending on the model score obtained.
-
-        :param score: Score that determines the pruning.
-        :type score: float
-        :param memberships: The confidence of the points.
-        :type memberships: numpy.ndarray
-        """
-        if numpy.isclose(score, 1.0):
-            self.size = len(self.model.support_vectors_)
-            for i, vector in zip(self.model.support_, self.model.support_vectors_):
-                self.members[i] = tuple(vector)
-                self.memberships[i] = memberships[i]
 
     def fit_and_score(self):
         """
@@ -604,10 +591,8 @@ class SVMSpace(PointBasedSpace):
         :return: The score of the model.
         :rtype: float
         """
-        members = structured_to_unstructured(
-            self.members[0 : self.size][list(self.members.dtype.names)]
-        )
-        memberships = self.memberships[0 : self.size].copy()
+        members = self.members
+        memberships = self.memberships.copy()
         memberships[memberships > 0] = 1
         memberships[memberships <= 0] = 0
         self.model.fit(members, memberships)
@@ -621,7 +606,7 @@ class SVMSpace(PointBasedSpace):
             + str(score)
             + " points "
             + str(len(members))
-        ) #TODO: Pass pnode logger to space
+        )
         return score
 
     def remove_close_points(self):
@@ -630,30 +615,38 @@ class SVMSpace(PointBasedSpace):
         """
         threshold = 0
         previous_size = self.size
-        members = self.members[0 : self.size].copy()
-        umembers = structured_to_unstructured(members[list(self.members.dtype.names)])
-        memberships = self.memberships[0 : self.size].copy()
+        members = self.members.copy()
+        memberships = self.memberships.copy()
+        timestamps = self._data.read(ordered=True).coords["timestamps"].values.copy()
         score = 0.3
         while score < 1.0:
+            # Adjusted threshold to be more aggressive in removing close points in each iteration
             threshold += 0.1
-            distances = numpy.linalg.norm(umembers - umembers[previous_size - 1], axis=1)
+            # Calculate distances from the last member to all other members
+            distances = np.linalg.norm(members - members[-1], axis=1)
+            # Keep only those members that are farther than the threshold distance from the last member
             indexes = distances > threshold
             filtered_members = members[indexes]
             filtered_memberships = memberships[indexes]
-            self.size = len(filtered_members)
-            if self.size < previous_size - 1:
-                for i in range(self.size):
-                    self.members[i] = filtered_members[i]
-                    self.memberships[i] = filtered_memberships[i]
-                self.members[self.size] = members[previous_size - 1]
-                self.memberships[self.size] = memberships[previous_size - 1]
-                self.size += 1
-                score = self.fit_and_score()
-        # Node.get_logger.logdebug(
-        #     self.ident + ": throwing away " + str(previous_size - self.size) + " points."
-        # ) #TODO: Pass pnode logger to space
+            filtered_timestamps = timestamps[indexes]
+            # Update size of the space
+            size = len(filtered_members)
+            # If any points were removed, add the last member back to the space and fit the model again to check the score
+            if size < previous_size - 1:
+                # Add the last member back to the filtered members, memberships and timestamps arrays
+                filtered_members = np.concatenate([filtered_members, members[-1:]], axis=0)
+                filtered_memberships = np.concatenate([filtered_memberships, memberships[-1:]], axis=0)
+                filtered_timestamps = np.concatenate([filtered_timestamps, timestamps[-1:]], axis=0)
+                # Reload the data structure with the filtered members and memberships
+                self.reload_members(filtered_members, filtered_memberships, timestamps=filtered_timestamps)
+                # Fit the model and calculate the score with the filtered members
+                if self.learnable():
+                    score = self.fit_and_score()
+                else:
+                    score = 1.0 # Prevent training with insufficient data, which can lead to errors in the SVM.
 
-    def add_point(self, perception, confidence):
+
+    def add_point(self, perceptions, confidences):
         """
         Add a new point to the P-Node.
 
@@ -665,39 +658,38 @@ class SVMSpace(PointBasedSpace):
         :return: The position of the added point.
         :rtype: int
         """
-        pos = super().add_point(perception, confidence)
+        pos = super().add_point(perceptions, confidences)
         if self.learnable():
             self.fit_and_score()
-        prediction = self.get_probability(perception)
-        if ((confidence > 0.0) and (prediction <= 0.0)) or (
-            (confidence <= 0.0) and (prediction > 0.0)
+        prediction = self.get_probability(perceptions)
+        if ((confidences > 0.0) and (prediction <= 0.0)) or (
+            (confidences <= 0.0) and (prediction > 0.0)
         ):
             if self.fit_and_score() < 1.0:
                 self.remove_close_points()
         return pos
 
-    def get_probability(self, perception):
+    def get_probability(self, perceptions):
         """
-        Calculate the new activation value.
+        Calculate the new activation value for multiple perception rows.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
-        :return: The activation value.
-        :rtype: float
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
         """
-        # Create a new structured array for the new perception
-        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-        # Copy the new perception on the structured array
-        self.copy_perception(candidate_point, 0, perception)
-        # Create views on the structured arrays so they can be used in calculations
-        # Beware, if candidate_point.dtype is not equal to self.members.dtype, members is a new array!
-        point = structured_to_unstructured(candidate_point)
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
         # Calculate the activation value
         if self.learnable():
-            act = min(2.0, self.model.decision_function(point)[0]) / 2.0
+            output = self.model.decision_function(points)
+            activation = np.minimum(np.full_like(output, 2.0), output) / 2.0
         else:
-            act = 1.0
-        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act
+            activation = np.ones_like(points[:, 0])  # Default activation when not learnable (e.g., no points or only antipoints)
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation
 
 
 class ANNSpace(PointBasedSpace):
@@ -705,132 +697,368 @@ class ANNSpace(PointBasedSpace):
     Use and train a Neural Network to calculate the activations.
     """
 
-    def __init__(self, **kwargs):
-        """
-        Init attributes when a new object is created.
-        """
-        #GPU USAGE TEST
-        tf.config.set_visible_devices([], 'GPU') #TODO: Handle GPU usage properly
-        '''
-        #tf.debugging.set_log_device_placement(True) #Detailed log in every TF operation
-        gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            try:
-                # Set memory growth to avoid allocating all GPU memory
-                for gpu in gpus:
-                    tf.config.experimental.set_virtual_device_configuration(
-                    gpus[0],
-                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
-                )
-            except RuntimeError as e:
-                print(e)
-        '''
+    def __init__(self, max_data=2000, sampled_points=200, train_every=20, batch_size=50, epochs=50, output_activation="sigmoid", hidden_activation="relu", hidden_layers=[128, 64, 32], learning_rate=0.001, validation_split=0.2, loss_function=nn.BCEWithLogitsLoss, val_function=nn.BCEWithLogitsLoss, model_file=None, **kwargs):
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.output_activation = output_activation
+        self.hidden_activation = hidden_activation
+        self.hidden_layers = hidden_layers
+        self.learning_rate = learning_rate
+        self.validation_split = validation_split
 
-        # self.n_splits = 5
-        self.batch_size = 50
-        self.epochs = 50
-        self.max_data = 2000
-        self.sampled_points = 200
-        self.train_every = 20
+        self.max_data = max_data
+        self.sampled_points = sampled_points
+        self.train_every = train_every
         self.new_points = 0
-        # Define the Neural Network's model
+
+        # Model and optimizer will be initialized later
+        self.configured = False
+        self.model_file = model_file
         self.model = None
-        #self.semaphore = threading.Semaphore()
+        self.optimizer = None
+        self.criterion = loss_function(reduction="none")
+        self.val_criterion = val_function()
 
+        if self.model_file is not None:
+            self.load_model()
 
-        # Initialize variables
-        self.there_are_points = False
-        self.there_are_antipoints = False
         super().__init__(**kwargs)
 
-    def build_model(self, input_shape):
+    def configure_model(self, input_length):
+        """Configure the ANN model architecture and initialize the optimizer.
+
+        :param input_length: Number of input features for the neural network.
+        :type input_length: int
+        :param output_length: Number of output features/predictions from the neural network.
+        :type output_length: int
         """
-        Build the model with the given input shape.
+        self.model = ANNModel_classification(
+            input_size=input_length,
+            hidden_layers=self.hidden_layers,
+            hidden_activation=self.hidden_activation
+        ).to(self.device)
+        
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.input_length = input_length
+        self.configured = True
+        
+        self.logger.info(f"Model configured with input: {input_length}")
 
-        :param input_shape: The shape of the input data.
-        :type input_shape: tuple
+    def load_model(self):
+        """Loads model from file."""
+        if os.path.exists(self.model_file):
+            checkpoint = torch.load(self.model_file, map_location=self.device)
+            
+            # Extract model configuration from checkpoint
+            self.input_length = checkpoint['input_length']
+            self.hidden_layers = checkpoint['hidden_layers']
+            self.hidden_activation = checkpoint['hidden_activation']
+            self.learning_rate = checkpoint['learning_rate']
+            
+            # Configure model architecture
+            self.configure_model(self.input_length)
+            
+            # Load weights
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            
+            self.logger.info(f"Model loaded from {self.model_file}")
+        else:
+            self.logger.warning(f"Model file {self.model_file} not found")
+
+    def save_model(self, filepath):
+        """Save the trained model to a PyTorch checkpoint file.
+
+        :param filepath: Path where the model checkpoint will be saved. Automatically adds '.pth' extension if not present.
+        :type filepath: str
+        :return: Tuple containing success status and the path where the model was saved.
+        :rtype: tuple(bool, str)
+        """        
+        if not self.configured:
+            self.logger.warning("Model not configured. Cannot save.")
+            return False, ""
+            
+        filepath = filepath if filepath.endswith('.pth') else filepath + '.pth'
+        if filepath is None:
+            self.logger.warning("No save path provided")
+            return False, ""
+            
+        checkpoint = {
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'input_length': self.input_length,
+            'hidden_layers': self.hidden_layers,
+            'hidden_activation': self.hidden_activation,
+            'output_activation': self.output_activation,
+            'learning_rate': self.learning_rate
+        }
+        
+        torch.save(checkpoint, filepath)
+        self.logger.info(f"Model saved to {filepath}")
+        return True, filepath
+
+    def reset_model_state(self):
+        """Reset optimizer state while keeping model weights."""
+        if self.configured:
+            # Save current weights
+            weights = self.model.state_dict().copy()
+            
+            # Reinitialize optimizer
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+            
+            # Restore weights
+            self.model.load_state_dict(weights)
+
+    def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, 
+              x_val=None, y_val=None, sample_weights=None, verbose=1, reset_optimizer=True):
+        """Train the neural network model using PyTorch with optional validation and early stopping.
+
+        :param x_train: Training input data (features).
+        :type x_train: np.ndarray or torch.Tensor
+        :param y_train: Training target data (labels).
+        :type y_train: np.ndarray or torch.Tensor
+        :param epochs: Number of training epochs. If None, uses the learner's default epochs, defaults to None
+        :type epochs: int, optional
+        :param batch_size: Batch size for training. If None, uses the learner's default batch size, defaults to None
+        :type batch_size: int, optional
+        :param validation_split: Fraction of training data to use for validation (0.0 to 1.0), defaults to 0.0
+        :type validation_split: float, optional
+        :param x_val: Validation input data. If provided with y_val, overrides validation_split, defaults to None
+        :type x_val: np.ndarray or torch.Tensor, optional
+        :param y_val: Validation target data. If provided with x_val, overrides validation_split, defaults to None
+        :type y_val: np.ndarray or torch.Tensor, optional
+        :param sample_weights: Optional weights for the training samples, defaults to None
+        :type sample_weights: np.ndarray or torch.Tensor, optional
+        :param verbose: Verbosity level. 0 = silent, 1 = progress logs, defaults to 1
+        :type verbose: int, optional
+        :param reset_optimizer: Whether to reset the optimizer state before training, defaults to True
+        :type reset_optimizer: bool, optional
         """
-        # Define train values
-        output_activation = "sigmoid"
-        optimizer = tf.optimizers.Adam()
-        loss = tf.losses.BinaryCrossentropy()
-        metrics = ["accuracy"]
+        
+        # Convert numpy arrays to torch tensors
+        if isinstance(x_train, np.ndarray):
+            x_train = torch.FloatTensor(x_train)
+        if isinstance(y_train, np.ndarray):
+            y_train = torch.FloatTensor(y_train)
+            
+        # Ensure proper dimensions
+        if len(x_train.shape) == 1:
+            x_train = x_train.unsqueeze(1)
+        if len(y_train.shape) == 1:
+            y_train = y_train.unsqueeze(1)
+            
+        epochs = epochs or self.epochs
+        batch_size = batch_size or self.batch_size
+        
+        # Configure model if not done
+        if not self.configured:
+            self.configure_model(x_train.shape[1], y_train.shape[1])
+            
+        if reset_optimizer:
+            self.reset_model_state()
+            
+        # Prepare validation data
+        val_loader = None
+        if x_val is not None and y_val is not None:
+            if isinstance(x_val, np.ndarray):
+                x_val = torch.FloatTensor(x_val)
+            if isinstance(y_val, np.ndarray):
+                y_val = torch.FloatTensor(y_val)
+                
+            if len(x_val.shape) == 1:
+                x_val = x_val.unsqueeze(1)
+            if len(y_val.shape) == 1:
+                y_val = y_val.unsqueeze(1)
+                
+            val_dataset = TensorDataset(x_val, y_val)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        elif validation_split > 0:
+            # Split training data for validation
+            split_idx = int(len(x_train) * (1 - validation_split))
+            x_val = x_train[split_idx:]
+            y_val = y_train[split_idx:]
+            x_train = x_train[:split_idx]
+            y_train = y_train[:split_idx]
+            sample_weights = sample_weights[:split_idx] if sample_weights is not None else None
+            
+            val_dataset = TensorDataset(x_val, y_val)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            
+        # Create data loader for training
+        train_dataset = WeightedTensorDataset(x_train, y_train, weights=sample_weights)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        
+        # Learning rate scheduler
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.5, 
+            patience=epochs//10, min_lr=1e-7,
+        )
+        
+        # Early stopping variables
+        best_val_loss = float('inf')
+        patience_counter = 0
+        early_stopping_patience = epochs // 5
+        best_epoch = 0
+        
+        # Training loop
+        self.model.train()
+        for epoch in range(epochs):
+            train_loss = 0.0
+            num_batches = 0
+            
+            for batch_x, batch_y, batch_weights in train_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+                batch_weights = batch_weights.to(self.device).float()
+                
+                # Zero gradients
+                self.optimizer.zero_grad()
+                
+                # Forward pass
+                outputs = self.model(batch_x)
+                per_sample_loss = self.criterion(outputs, batch_y)
+                loss = (per_sample_loss * batch_weights.unsqueeze(-1)).mean()
+                
+                # Backward pass and optimization
+                loss.backward()
+                self.optimizer.step()
+                
+                train_loss += loss.item()
+                num_batches += 1
+                
+            avg_train_loss = train_loss / num_batches
+            
+            # Validation
+            val_loss = None
+            if val_loader is not None:
+                self.model.eval()
+                val_loss = 0.0
+                val_batches = 0
+                
+                with torch.no_grad():
+                    for batch_x, batch_y in val_loader:
+                        batch_x = batch_x.to(self.device)
+                        batch_y = batch_y.to(self.device)
+                        outputs = self.model(batch_x)
+                        loss = self.val_criterion(outputs, batch_y)
+                        val_loss += loss.item()
+                        val_batches += 1
+                        
+                val_loss = val_loss / val_batches
+                self.model.train()
+                
+                # Learning rate scheduling
+                scheduler.step(val_loss)
+                
+                # Early stopping
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    # Save best weights
+                    self.best_weights = self.model.state_dict().copy()
+                    best_epoch = epoch
+                else:
+                    patience_counter += 1
+                    
+                if patience_counter >= early_stopping_patience:
+                    if verbose > 0:
+                        self.logger().info(f"Early stopping at epoch {epoch+1}. Restoring weights from epoch {best_epoch+1} with val loss {best_val_loss:.4f}.")
+                    # Restore best weights
+                    self.model.load_state_dict(self.best_weights)
+                    break
+                    
+            if verbose > 0:
+                if val_loss is not None:
+                    self.logger().info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f} - Val Loss: {val_loss:.4f}")
+                else:
+                    self.logger().info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f}")
 
-        # Build the model
-        model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(input_shape,)),
-        tf.keras.layers.Dense(128, activation="relu"),
-        tf.keras.layers.Dense(64, activation="relu"),
-        tf.keras.layers.Dense(32, activation="relu"),
-        tf.keras.layers.Dense(1, activation=output_activation),
-        ])
+    def call(self, x):
+        """Make predictions with the trained model.
 
-        # Compile the model
-        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        :param x: Input data for prediction. Can be numpy array or torch tensor.
+        :type x: np.ndarray or torch.Tensor
+        :return: Model predictions as a numpy array, or None if model is not configured.
+        :rtype: np.ndarray or None
+        """        
+        if not self.configured:
+            return None
+            
+        # Convert to tensor if needed
+        if isinstance(x, np.ndarray):
+            x = torch.FloatTensor(x)
+            
+        if len(x.shape) == 1:
+            x = x.unsqueeze(1)
+            
+        x = x.to(self.device)
+        
+        self.model.eval()
+        with torch.no_grad():
+            predictions = torch.sigmoid(self.model(x)) # TODO: Make activation function configurable
+            
+        return predictions.cpu().numpy()
+    
+    def get_weights(self):
+        """Get the current model , uses the state dictionary."""
+        if not self.configured:
+            self.logger().warning("Model not configured. Cannot get weights.")
+            return None
+        return self.model.state_dict()
 
-        # Log the model summary for debugging purposes
-        self.logger.debug(f"Model summary for {self.ident}:")
-        model.summary(print_fn=self.logger.debug)
+    def set_weights(self, weights):
+        """Set the model weights from a state dictionary.
 
-        # Return the compiled model  
-        return model
-
-    def add_point(self, perception, confidence):
+        :param weights: PyTorch state dictionary containing model weights and biases.
+        :type weights: dict
+        :return: True if weights were successfully loaded, False otherwise.
+        :rtype: bool
+        """        
+        if not self.configured:
+            self.logger().warning("Model not configured. Cannot set weights.")
+            return False
+            
+        try:
+            self.model.load_state_dict(weights)
+            self.logger().info("Weights set successfully.")
+            return True
+        except Exception as e:
+            self.logger().error(f"Failed to set weights: {e}")
+            return False
+        
+    def add_point(self, perceptions, confidences):
         """
         Add a new point to the P-Node.
 
-        :param perception: A given perception to add.
-        :type perception: dict
-        :param confidence: The confidence of the added point that specifies if it is a point or an
-            antipoint.
-        :type confidence: float
+        :param perceptions: A given perception to add.
+        :type perceptions: dict
+        :param confidences: The confidences of the added points that specify if they are points or antipoints.
+        :type confidences: float
         :return: The position of the added point.
         :rtype: int
         """
         #self.semaphore.acquire()
-        pos = None
+        pos = super().add_point(perceptions, confidences)
+        self.new_points += len(pos) if isinstance(pos, list) else 1
 
-        if confidence > 0.0:
-            self.there_are_points = True
-        else:
-            self.there_are_antipoints = True
-
-        if self.there_are_points and self.there_are_antipoints:
-            candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-            self.copy_perception(candidate_point, 0, perception)
-            point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
-            
+        if self.learnable():
             # If the model is not built yet, build it
-            if self.model is None:
-                input_shape = point.shape[1]  # Get the number of features from the point
-                self.model = self.build_model(input_shape)
+            if self.configured == False:
+                input_shape = self.members.shape[1]  # Get the number of features from the point
+                self.model = self.configure_model(input_shape)
 
-            # Catch diff between point and model input shape
-            if point.shape[1] != self.model.input_shape[1]:
-                self.logger.error(
-                    f"Point shape {point.shape} does not match model input shape {self.model.input_shape}"
-                )
-                raise RuntimeError("LTM operation cannot continue :-(")    
 
-            #prediction = (self.model.call(point)[0][0]*2)-1 #Pass from [0,1] to [-1, 1]
-            pos = super().add_point(perception, confidence)
-            self.new_points += 1
-
-            if self.new_points>=self.train_every: #HACK: Train only every certain number of new points
-                self.logger.info(f"Training on {self.new_points}") #TODO: Pass pnode logger to space
+            if self.new_points>=self.train_every:
+                self.logger.info(f"Training on {self.new_points}")
                 if self.size > self.max_data:
-                    self.logger.info(f"Using last {self.max_data} points for training.") #TODO: Pass pnode logger to space
+                    self.logger.info(f"Using last {self.max_data} points for training.")
                     first_data = self.size - self.max_data
                 else:
                     first_data = 0
 
-                members = structured_to_unstructured(
-                    self.members[first_data : self.size][list(self.members.dtype.names)]
-                )
+                members = self.members[first_data : self.size]
                 memberships = self.memberships[first_data : self.size].copy()
-                memberships[memberships > 0] = 1.0
-                memberships[memberships <= 0] = 0.0
-
+                memberships[memberships <= 0] = 0.0 # Clamp negative memberships to 0
                 members_size = len(members)
                 n_samples = min(self.sampled_points, members_size)
                 idx = self.rng.choice(members_size, size=n_samples, replace=False)
@@ -845,60 +1073,121 @@ class ANNSpace(PointBasedSpace):
                 weight_for_1 = (
                     (1 / n_1) * (X.shape[0] / 2.0) if n_1 != 0 else 1.0
                 )
-                self.logger.info(f"Training data distribution: 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}")
-                class_weight = {0: weight_for_0, 1: weight_for_1}
-                self.model.fit(
-                    x=X,
-                    y=Y,
-                    batch_size=self.batch_size,
-                    epochs=self.epochs,
-                    verbose=0,
-                    class_weight=class_weight,
-                )
-                self.new_points = 0
+                # This supports the case of points that have lower confidence (between 0 and 1) which are weighted with 1. While points and antipoints are balanced.
+                weights = np.ones_like(Y)
+                weights[Y == 0.0] = weight_for_0
+                weights[Y == 1.0] = weight_for_1
 
-        else:
-            pos = super().add_point(perception, confidence)
-        #self.semaphore.release()
+                self.logger.info(f"Training data distribution: Total: {len(Y)}, 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}")
+                self.train(X, Y, validation_split=self.validation_split, sample_weights=weights)
+                self.new_points = 0
         return pos
 
-    def get_probability(self, perception):
+    def get_probability(self, perceptions):
         """
-        Calculate the new activation value.
+        Calculate the new activation value for multiple perception rows.
 
-        :param perception: The given perception to calculate the activation.
-        :type perception: dict
-        :return: The activation value.
-        :rtype: float
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
         """
-        #self.semaphore.acquire()
-        candidate_point = self.create_structured_array(perception, self.members.dtype, 1)
-        self.copy_perception(candidate_point, 0, perception)
-        point = tf.convert_to_tensor(structured_to_unstructured(candidate_point))
-        if self.there_are_points:
-            if self.there_are_antipoints:
-                act = float(self.model.call(point)[0][0])
-                if act < 0.01:
-                    act=0.0
-            else:
-                act = 1.0
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
+        # Calculate the activation value
+        if self.configured:
+            activation = self.call(points)
         else:
-            act = 0.0
-        #self.semaphore.release()
-        return min(act, self.parent_space.get_probability(perception)) if self.parent_space else act
+            activation = np.ones_like(points[:, 0], dtype=float)  # Default to 1.0 if model is not configured
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation
 
-    def save_model(self, path):
-        """
-        Save the trained model to the specified path.
+        
+    
+        
+class ANNModel_classification(nn.Module):
+    """PyTorch neural network model."""
+    
+    def __init__(self, input_size, hidden_layers=[128], 
+                 hidden_activation='relu'):
+        """Initialize the PyTorch neural network model with configurable architecture.
 
-        :param path: The file path where the model should be saved.
-        :type path: str
+        :param input_size: Number of input features to the network.
+        :type input_size: int
+        :param hidden_layers: List of integers specifying the size of each hidden layer, defaults to [128]
+        :type hidden_layers: list, optional
+        :param hidden_activation: Activation function for hidden layers ('relu', 'tanh', 'sigmoid'), defaults to 'relu'
+        :type hidden_activation: str, optional
+        """        
+        super(ANNModel_classification, self).__init__()
+        
+        self.layers = nn.ModuleList()
+        
+        # Input layer
+        prev_size = input_size
+        
+        # Hidden layers
+        for hidden_size in hidden_layers:
+            self.layers.append(nn.Linear(prev_size, hidden_size))
+            self.layers.append(nn.LayerNorm(hidden_size))
+            self.layers.append(self._get_activation(hidden_activation))
+            self.layers.append(nn.Dropout(0.1))
+            prev_size = hidden_size
+            
+        # Output layer
+        self.layers.append(nn.Linear(prev_size, 1))
+        
+    def _get_activation(self, activation_name):
+        """Get activation function by name.
+
+        :param activation_name: String name of the activation function.
+        :type activation_name: str
+        :return: Activation function module.
+        :rtype: nn.Module
         """
-        if self.model:
-            fullpath = path + ".keras"
-            self.model.save(fullpath)
-            self.logger.info(f"Model saved to {fullpath}")
-            return True, fullpath
+        if activation_name == 'relu':
+            return nn.ReLU()
+        elif activation_name == 'tanh':
+            return nn.Tanh()
+        elif activation_name == 'sigmoid':
+            return nn.Sigmoid()
         else:
-            self.logger.warning("No model to save.")
-            return False, ""
+            return nn.ReLU()  # Default
+            
+    def forward(self, x):
+        """Forward pass through the network.
+
+        :param x: Input tensor.
+        :type x: torch.Tensor
+        :return: Output tensor after passing through the network.
+        :rtype: torch.Tensor
+        """        """"""
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class WeightedTensorDataset(TensorDataset):
+    """TensorDataset that includes sample weights, defaults to ones if not provided."""
+    def __init__(self, x, y, weights=None):
+        super().__init__(x, y)
+        n = len(x)
+        if weights is None:
+            weights = torch.ones(n)
+        # convert and normalize shape to 1D
+        if not isinstance(weights, torch.Tensor):
+            weights = torch.FloatTensor(weights)
+        else:
+            weights = weights.float()
+        if weights.dim() == 2 and weights.shape[1] == 1:
+            weights = weights.squeeze(1)
+        if weights.shape[0] != n:
+            raise ValueError(f"weights length ({weights.shape[0]}) must match number of samples ({n})")
+        self.weights = weights
+        
+    def __getitem__(self, idx):
+        x, y = super().__getitem__(idx)
+        w = self.weights[idx]
+        return x, y, w

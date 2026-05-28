@@ -1,7 +1,10 @@
-from cognitive_node_interfaces.msg import Episode as EpisodeMsg
-from cognitive_processes_interfaces.msg import RewardList
-from cognitive_node_interfaces.msg import Action as ActionMsg
-from core.utils import perception_dict_to_msg, perception_msg_to_dict, actuation_dict_to_msg, actuation_msg_to_dict
+from __future__ import annotations
+import numpy as np
+from rclpy.time import Time
+
+from core.container import Container, consolidate_containers
+
+from core_interfaces.msg import Container as ContainerMsg
 
 
 
@@ -10,22 +13,26 @@ class Episode:
     """
     Episode class that represents a single episode in the cognitive architecture.
     """
-    def __init__(self, old_perception=None, parent_policy='', action=None, perception=None, reward_list=None) -> None:
+    def __init__(self, old_perception: Container = None, parent_policy='', action: Container = None, perception: Container = None, rewards: Container = None, old_ltm_state: dict = {}, ltm_state: dict = {}) -> None:
         """Initialize a new Episode.
 
         Captures the transition from a previous perceptual state to a new one,
         the selected action, the governing parent policy, and any observed rewards.
 
         :param old_perception: Perceptual state before the action/transition. If None, an empty dict is used.
-        :type old_perception: dict
+        :type old_perception: Container
         :param parent_policy: Identifier of the parent policy responsible for the decision. Defaults to ''.
         :type parent_policy: str
-        :param action: The chosen action. If None, a new Action() is created.
-        :type action: Action | None
+        :param action: The chosen action.
+        :type action: Container
         :param perception: Perceptual state after the action/transition. If None, an empty dict is used.
-        :type perception: dict
-        :param reward_list: Mapping of goal identifiers to reward values. If None, an empty dict is used.
-        :type reward_list: dict[str, float] | None
+        :type perception: Container
+        :param rewards: Mapping of goal identifiers to reward values. If None, an empty dict is used.
+        :type rewards: Container
+        :param old_ltm_state: Snapshot of long-term memory state before the transition. Defaults to an empty dict.
+        :type old_ltm_state: dict
+        :param ltm_state: Snapshot of long-term memory state after the transition. Defaults to an empty dict.
+        :type ltm_state: dict
 
         :return: None
         :rtype: None
@@ -34,64 +41,202 @@ class Episode:
         - old_ltm_state and ltm_state are initialized as empty dicts to store long-term memory snapshots.
         """        
 
+        self.container_size: int | None = None
+        self._old_perception: Container = None
+        self._action: Container = None
+        self._perception: Container = None
+        self._rewards: Container = None
 
-        self.old_perception=old_perception if old_perception is not None else {}
-        self.old_ltm_state={}
-        self.parent_policy=parent_policy
-        self.action=action if action is not None else Action()
-        self.perception=perception if perception is not None else {}
-        self.ltm_state={}
-        self.reward_list=reward_list if reward_list is not None else {}
+        self.old_ltm_state = {} if old_ltm_state is None else old_ltm_state
+        self.ltm_state = {} if ltm_state is None else ltm_state
+        self.parent_policy = parent_policy
 
-    def __repr__(self):
-        return f"Episode(old_perception={self.old_perception}, parent_policy={self.parent_policy}, action={self.action}, perception={self.perception}, reward_list={self.reward_list})"
+        if old_perception is not None:
+            self.old_perception = old_perception
+        if action is not None:
+            self.action = action
+        if perception is not None:
+            self.perception = perception
+        if rewards is not None:
+            self.rewards = rewards
 
-class Action:
-    """
-    Action class used to represent an action in the cognitive architecture.
-    """
-    def __init__(self, actuation={}, policy_id=None) -> None:
-        """Initialize an Action.
 
-        Represents the actuation payload to execute and the policy identifier
-        that produced it.
+    def _bind_container(self, field_name: str, container: Container) -> None:
+        if container is None:
+            raise ValueError(f"{field_name} cannot be None")
 
-        :param actuation: Mapping of actuator keys to command values. Defaults to {}.
-        :type actuation: dict
-        :param policy_id: Identifier of the parent policy. If None, it is set to 0.
-        :type policy_id: int | None
+        size = len(container)
+        if self.container_size is None:
+            self.container_size = size
+        elif size != self.container_size:
+            raise ValueError(
+                f"{field_name} size {size} does not match episode size {self.container_size}"
+            )
 
+        setattr(self, f"_{field_name}", container)
+
+    @property
+    def old_perception(self) -> Container | None:
+        return self._old_perception
+
+    @old_perception.setter
+    def old_perception(self, container: Container) -> None:
+        self._bind_container("old_perception", container)
+
+    @property
+    def action(self) -> Container | None:
+        return self._action
+
+    @action.setter
+    def action(self, container: Container) -> None:
+        self._bind_container("action", container)
+
+    @property
+    def perception(self) -> Container | None:
+        return self._perception
+
+    @perception.setter
+    def perception(self, container: Container) -> None:
+        self._bind_container("perception", container)
+
+    @property
+    def rewards(self) -> Container | None:
+        return self._rewards
+
+    @rewards.setter
+    def rewards(self, container: Container) -> None:
+        self._bind_container("rewards", container)
+
+    @property
+    def reward_list(self) -> dict|list[dict]|None:
+        if self.rewards is None:
+            return None
+        reward_dicts = []
+        data = self.rewards.read().values
+        for row in data:
+            reward_dict = {label.split(":")[1]: row[idx] for idx, label in enumerate(self.rewards.feature_labels)}
+            reward_dicts.append(reward_dict)
+        return reward_dicts if len(reward_dicts) > 1 else reward_dicts[0] if reward_dicts else None
+
+    def update_reward(self, reward_dict_list: dict | list[dict], timestamp: float|Time) -> None:
+        """Update the episode's rewards with new reward values.
+
+        :param reward_dict: A dictionary mapping goal identifiers to reward values.
+        :type reward_dict: dict
+        :param timestamp: A single timestamp for the rewards.
+        :type timestamp: float | Time
         :return: None
         :rtype: None
+        """
+        timestamp = timestamp.nanoseconds / 1e9 if isinstance(timestamp, Time) else timestamp
+        if isinstance(reward_dict_list, dict):
+            reward_dict_list = [reward_dict_list]
+        
+        rewards_container = self.rewards
+        for reward_dict in reward_dict_list:
+            goals = list(reward_dict.keys())
+            labels = [f"rewards:{goal}" for goal in goals]
+            if rewards_container is None:
+                # If rewards container doesn't exist, create it with the goals as labels
+                rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=labels)
+                rewards = np.fromiter((reward_dict[g] for g in goals), dtype=rewards_container.data_type)
+            else:
+                # If rewards container exists, update it with new goals and rewards, rewards not present in the reward_dict will be set to 0.0.
+                # If new goals are introduced, a new rewards container will be created with the updated set of goals as labels.
+                existing_goals = set([label.split(":")[1] for label in rewards_container.labels])
+                new_goals = set(goals)
+                all_goals = existing_goals.union(new_goals)
+                rewards = np.fromiter((reward_dict.get(goal, 0.0) for goal in all_goals), dtype=rewards_container.data_type)
+                if not new_goals.issubset(existing_goals):
+                    all_goals = list(existing_goals.union(new_goals))
+                    if self.container_size > 1:
+                        # TODO: Implement handling new goals in rewards update for container_size > 1
+                        # Requires reconstructing the rewards container with the new set of goals and properly aligning existing reward values with the new labels, filling in 0.0 for any missing rewards in existing entries. 
+                        raise NotImplementedError("Handling new goals in rewards update is only implemented for container_size=1")
+                    rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=all_goals)
+            rewards_container.push(rewards, labels=labels, timestamp=timestamp)
+        self.rewards = rewards_container
 
-        Notes:
-        - policy_id is normalized to int; None becomes 0.
-        """        
-        self.actuation = actuation
-        self.policy_id = policy_id if policy_id is not None else 0
+    def obtain_flattened_episode(self) -> Container:
+        parts = [
+            self.old_perception,
+            self.action,
+            self.perception,
+            self.rewards,
+        ]
+        populated_parts = [p for p in parts if p is not None]
+        if not populated_parts:
+            return None
+        consolidated = consolidate_containers(populated_parts, container_type="episode", attrs={"parent_policy": self.parent_policy})
+        return consolidated
 
     def __repr__(self):
-        return f"Action(actuation={self.actuation}, policy_id={self.policy_id})"
+        return f"Episode(old_perception={self.old_perception}, parent_policy={self.parent_policy}, action={self.action}, perception={self.perception}, rewards={self.rewards})"
 
 
-def episode_msg_to_obj(episode_msg: EpisodeMsg) -> Episode:
-    """
-    Convert a ROS2 Episode message to an Episode object.
+def container_msg_to_episode(msg: ContainerMsg) -> Episode:
+    """Convert a flattened ContainerMsg back into a structured Episode (split by 'prefix:feature')."""
+    cont = Container.from_msg(msg)
+    return container_to_episode_obj(cont)
 
-    :param episode_msg: The ROS2 Episode message.
-    :type episode_msg: cognitive_node_interfaces.msg.Episode
-    :return: An Episode object.
-    :rtype: Episode
-    """
-    episode = Episode()
-    episode.old_perception = perception_msg_to_dict(episode_msg.old_perception)
-    episode.parent_policy = episode_msg.parent_policy
-    episode.action = action_msg_to_obj(episode_msg.action)
-    episode.perception = perception_msg_to_dict(episode_msg.perception)
-    episode.reward_list = reward_msg_to_dict(episode_msg.reward_list)
-    return episode
 
-def episode_obj_to_msg(episode: Episode) -> EpisodeMsg:
+def container_to_episode_obj(container: Container) -> Episode:
+    """Convert a flattened Container back into a structured Episode (split by 'prefix:feature')."""
+    epi = Episode()
+    if container.size == 0:
+        return epi
+
+    epi.parent_policy = container.attrs.get("parent_policy", "")
+    data = container.read()
+    values = data.values
+    ts = data.coords["timestamp"].values
+    feature_labels = data.coords["feature"].values
+    dtype = data.dtype
+    attrs = data.attrs
+    n_rows = int(values.shape[0])
+
+    # set episode container size before assigning parts so setters validate consistently
+    epi.container_size = n_rows
+
+    # group columns by prefix (prefix is the part name before the first ':')
+    groups: dict[str, list[tuple[int, str]]] = {}
+    order: list[str] = []
+    for col_idx, full_label in enumerate(feature_labels):
+        if ":" in full_label:
+            prefix, lbl = full_label.split(":", 1)
+        else:
+            prefix, lbl = "unknown", full_label
+        if prefix not in groups:
+            groups[prefix] = []
+            order.append(prefix)
+        groups[prefix].append((col_idx, lbl))
+
+    # create a Container for each group and bind to episode
+    for prefix in order:
+        cols = groups[prefix]
+        col_indices = [c[0] for c in cols]
+        sub_labels = [c[1] for c in cols]
+        sub_values = values[:, col_indices] if n_rows > 0 else np.empty((0, len(sub_labels)), dtype=dtype)
+        sub_ts = ts if ts.size > 0 else np.empty(0, dtype=np.float64)
+
+        c = Container(name=prefix, max_size=n_rows, container_type=prefix, data_type=dtype, labels=sub_labels, attrs=attrs)
+        c.push(sub_values, src_labels=sub_labels, src_dtype=dtype, timestamps=sub_ts)
+        # assign to episode (will validate sizes)
+        if prefix == "old_perception":
+            epi.old_perception = c
+        elif prefix == "action":
+            epi.action = c
+        elif prefix == "perception":
+            epi.perception = c
+        elif prefix == "rewards":
+            epi.rewards = c
+        else:
+            # attach unknown prefixes as attributes for future use
+            setattr(epi, prefix, c)
+
+    return epi
+
+def episode_obj_to_msg(episode: Episode, name="episodes") -> ContainerMsg:
     """
     Convert an Episode object to a ROS2 Episode message.
 
@@ -100,110 +245,5 @@ def episode_obj_to_msg(episode: Episode) -> EpisodeMsg:
     :return: A ROS2 Episode message.
     :rtype: cognitive_node_interfaces.msg.Episode
     """
-    episode_msg = EpisodeMsg()
-    episode_msg.old_perception = perception_dict_to_msg(episode.old_perception)
-    episode_msg.parent_policy = episode.parent_policy
-    episode_msg.action.actuation = actuation_dict_to_msg(episode.action.actuation)
-    episode_msg.action.policy_id = int(episode.action.policy_id)
-    episode_msg.perception = perception_dict_to_msg(episode.perception)
-    episode_msg.reward_list = reward_dict_to_msg(episode.reward_list)
-    return episode_msg
-
-def episode_msg_list_to_obj_list(episode_msg_list: list[EpisodeMsg]) -> list[Episode]:
-    """
-    Convert a list of ROS2 Episode messages to a list of Episode objects.
-
-    :param episode_msg_list: List of ROS2 Episode messages.
-    :type episode_msg_list: list[cognitive_node_interfaces.msg.Episode]
-    :return: List of Episode objects.
-    :rtype: list[Episode]
-    """
-    return [episode_msg_to_obj(episode_msg) for episode_msg in episode_msg_list]
-
-def episode_obj_list_to_msg_list(episode_list: list[Episode]) -> list[EpisodeMsg]:
-    """
-    Convert a list of Episode objects to a list of ROS2 Episode messages.
-
-    :param episode_list: List of Episode objects.
-    :type episode_list: list[Episode]
-    :return: List of ROS2 Episode messages.
-    :rtype: list[cognitive_node_interfaces.msg.Episode]
-    """
-    return [episode_obj_to_msg(episode) for episode in episode_list]
-
-def action_msg_to_obj(action_msg) -> Action:
-    """
-    Convert a ROS2 action message to an Action object.
-
-    :param action_msg: The ROS2 action message.
-    :type action_msg: cognitive_node_interfaces.msg.Action
-    :return: An Action object.
-    :rtype: Action
-    """
-    action = Action()
-    action.actuation = actuation_msg_to_dict(action_msg.actuation)
-    action.policy_id = action_msg.policy_id
-    return action
-
-def action_obj_to_msg(action: Action):
-    """
-    Convert an Action object to a ROS2 action message.
-
-    :param action: The Action object.
-    :type action: Action
-    :return: A ROS2 action message.
-    :rtype: cognitive_node_interfaces.msg.Action
-    """
-    action_msg = ActionMsg()
-    action_msg.actuation = actuation_dict_to_msg(action.actuation)
-    action_msg.policy_id = action.policy_id
-    return action_msg
-
-def action_msg_list_to_obj_list(action_msg_list: list[ActionMsg]) -> list[Action]:
-    """
-    Convert a list of ROS2 action messages to a list of Action objects.
-
-    :param action_msg_list: List of ROS2 action messages.
-    :type action_msg_list: list[cognitive_node_interfaces.msg.Action]
-    :return: List of Action objects.
-    :rtype: list[Action]
-    """
-    return [action_msg_to_obj(action_msg) for action_msg in action_msg_list]
-
-def action_obj_list_to_msg_list(action_list: list[Action]) -> list[ActionMsg]:
-    """
-    Convert a list of Action objects to a list of ROS2 action messages.
-
-    :param action_list: List of Action objects.
-    :type action_list: list[Action]
-    :return: List of ROS2 action messages.
-    :rtype: list[cognitive_node_interfaces.msg.Action]
-    """
-    return [action_obj_to_msg(action) for action in action_list]
-
-def reward_dict_to_msg(reward_dict):
-    """
-    Convert a reward dictionary to a ROS2 message format.
-
-    :param reward_dict: The reward dictionary.
-    :type reward_dict: dict
-    :return: A ROS2 message representing the reward.
-    :rtype: cognitive_node_interfaces.msg.Reward
-    """
-    reward_msg = RewardList()
-    reward_msg.goals = list(reward_dict.keys())
-    reward_msg.goals = [str(goal) for goal in reward_msg.goals]
-    reward_msg.rewards = list(reward_dict.values())
-    reward_msg.rewards = [float(reward) for reward in reward_msg.rewards]
-    return reward_msg
-
-def reward_msg_to_dict(reward_msg: RewardList) -> dict:
-    """
-    Convert a ROS2 reward message to a dictionary.
-
-    :param reward_msg: The ROS2 reward message.
-    :type reward_msg: cognitive_node_interfaces.msg.RewardList
-    :return: A dictionary representing the rewards.
-    :rtype: dict
-    """
-    return {goal: reward for goal, reward in zip(reward_msg.goals, reward_msg.rewards)}
+    cont = episode.obtain_flattened_episode()
+    return cont.to_msg() if cont is not None else ContainerMsg()

@@ -1,6 +1,5 @@
-Perception old_perception
+core_interfaces/Container old_perception
 string parent_policy
-Action action
-Perception perception
-cognitive_processes_interfaces/RewardList reward_list
-builtin_interfaces/Time timestamp
+core_interfaces/Container action
+core_interfaces/Container perception
+core_interfaces/Container rewards

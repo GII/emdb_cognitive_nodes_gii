@@ -2,15 +2,13 @@ import rclpy
 import numpy as np
 from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from simulators.scenarios_2D import SimpleScenario, EntityType
-from cognitive_node_interfaces.msg import Perception, Actuation, SuccessRate
-from core.utils import actuation_dict_to_msg, actuation_msg_to_dict, perception_dict_to_msg, perception_msg_to_dict
-from rclpy.impl.rcutils_logger import RcutilsLogger
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list 
+from cognitive_node_interfaces.msg import SuccessRate, Perception
+from cognitive_nodes.episode import Episode, container_msg_to_episode
 
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 
@@ -36,16 +34,16 @@ class WorldModel(DeliberativeModel):
         self.confidence_evaluator=None
         self.activation.activation = 1.0
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+    def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
 
         :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
+        :type input_episodes: Episode
         :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        :rtype: Episode
         """        
         self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the input episodes.")
-        output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
+        output_episodes = input_episodes
         return output_episodes
 
 
@@ -131,7 +129,7 @@ class WorldModelLearned(WorldModel):
             :param msg: The episode message received.
             :type msg: cognitive_node_interfaces.msg.Episode
             """
-            episode = episode_msg_to_obj(msg)
+            episode = container_msg_to_episode(msg)
             if episode.parent_policy != "reset_world":
                 self.episodic_buffer.add_episode(episode)
                 self.get_logger().info(f"Episode added to buffer \n New train samples: {self.episodic_buffer.new_sample_count_main}, New test samples: {self.episodic_buffer.new_sample_count_secondary}")

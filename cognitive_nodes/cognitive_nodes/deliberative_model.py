@@ -9,10 +9,11 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 from core.cognitive_node import CognitiveNode
-from core.utils import class_from_classname, msg_to_dict
-from cognitive_node_interfaces.srv import SetActivation, Predict, GetSuccessRate, IsCompatible, SaveModel
+from core.container import Container
+from core.utils import class_from_classname
+from cognitive_node_interfaces.srv import SetActivation, GetSuccessRate, IsCompatible, SaveModel
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj
 
 class DeliberativeModel(CognitiveNode):
     """
@@ -83,9 +84,6 @@ class DeliberativeModel(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
-        #TODO: Set activation from main_loop
-        #self.activation.activation = 1.0
-
     def set_activation_callback(self, request, response):
         """
         Some processes can modify the activation of a Model.
@@ -117,9 +115,9 @@ class DeliberativeModel(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.Predict.Response
         """
         self.get_logger().info('Predicting ...') 
-        input_episodes = episode_msg_list_to_obj_list(request.input_episodes)
+        input_episodes = container_msg_to_episode(request.input_episodes)
         output_episodes = self.predict(input_episodes)
-        response.output_episodes = episode_obj_list_to_msg_list(output_episodes)
+        response.output_episodes = container_msg_to_episode(output_episodes)
         self.get_logger().info(f"Prediction made... ")
         return response
     
@@ -201,7 +199,7 @@ class DeliberativeModel(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    def predict(self, input_episodes: list[Episode]) -> list:
+    def predict(self, input_episodes: Container) -> Episode:
         input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
         predictions = self.learner.call(input_data)
         if predictions is None:
@@ -209,7 +207,8 @@ class DeliberativeModel(CognitiveNode):
         else:
             self.get_logger().info(f"Predictions: {predictions}")
             self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+            prediction_container = self.episodic_buffer.matrix_to_container(predictions, self.episodic_buffer.output_labels, name= "predicted_episodes")
+            predicted_episodes = container_to_episode_obj(prediction_container)
         self.get_logger().info(f"Prediction made: {predicted_episodes}")
         return predicted_episodes
     
@@ -727,7 +726,6 @@ class ANNModel(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
-
 
 class AsymmetricMSELoss(nn.Module):
     """Asymmetric Mean Squared Error Loss that penalizes underestimations and overestimations differently."""

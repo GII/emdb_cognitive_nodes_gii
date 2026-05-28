@@ -7,13 +7,12 @@ from math import isclose
 from rclpy.executors import SingleThreadedExecutor
 
 from core.utils import class_from_classname
-from cognitive_nodes.episode import Episode, episode_msg_to_obj, episode_obj_to_msg, episode_msg_list_to_obj_list
+from cognitive_nodes.episode import Episode, episode_obj_to_msg, container_msg_to_episode
 from cognitive_nodes.episodic_buffer import EpisodicBuffer, TraceBuffer
 from cognitive_processes.deliberation import Deliberation
 
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_node_interfaces.srv import Execute, AddTrace
-import pandas as pd
 
 
 class UtilityModel(DeliberativeModel):
@@ -94,7 +93,7 @@ class UtilityModel(DeliberativeModel):
             self.activation.activation=0.0
             self.activation.timestamp=self.get_clock().now().to_msg()
 
-    def predict(self, input_episodes: list[Episode]) -> list[float]:
+    def predict(self, input_episodes: list[Episode]) -> np.ndarray:
         """Predict the expected utilities for a list of input episodes using the learner model.
 
         :param input_episodes: List of Episode objects to predict utilities for.
@@ -127,6 +126,23 @@ class UtilityModel(DeliberativeModel):
         response.policy = self.name
         response.episode = episode_obj_to_msg(self.deliberation.summary_episode)
 
+        return response
+    
+    def predict_callback(self, request, response):
+        """
+        Get predicted utility values for the provided perceptions.
+
+        :param request: The request that contains the timestamp and the policy.
+        :type request: cognitive_node_interfaces.srv.PredictUtility.Request
+        :param response: The response that included the obtained perception.
+        :type response: cognitive_node_interfaces.srv.PredictUtility.Response
+        :return: The response that included the obtained perception.
+        :rtype: cognitive_node_interfaces.srv.PredictUtility.Response
+        """
+        self.get_logger().info('Predicting ...') 
+        input_episodes = container_msg_to_episode(request.input_episodes)
+        response.expected_utilities = self.predict(input_episodes).tolist()
+        self.get_logger().info(f"Prediction made... ")
         return response
 
 class NoveltyUtilityModel(UtilityModel):
@@ -518,18 +534,19 @@ class LearnedUtilityModel(UtilityModel):
             self.get_logger().info("World reset detected, clearing buffer")
             self.episodic_buffer.clear()
         elif msg.parent_policy!=self.name: # Filter self generated episodes as those are handled by the deliberation process
-            episode = episode_msg_to_obj(msg)
+            episode = container_msg_to_episode(msg)
             linked_goals = self.deliberation.get_linked_goals()
-            rewards = [episode.reward_list[goal] for goal in linked_goals if goal in episode.reward_list]
-            self.get_logger().info(f"New episode received with rewards: {episode.reward_list}, linked goals: {linked_goals}")
+            reward_list = episode.reward_list
+            rewards = [reward_list[goal] for goal in linked_goals if goal in reward_list]
+            self.get_logger().info(f"New episode received with rewards: {reward_list}, linked goals: {linked_goals}")
             self.episodic_buffer.add_episode(episode, max(rewards, default=0.0))
             if any(rewards):
                 self.get_logger().info(f"New trace added to episodic buffer. Total traces: {self.episodic_buffer.n_traces}, Min traces: {self.episodic_buffer.min_traces}")
-                ltm_update_thread = threading.Thread(target=self.update_ltm_and_train, args=(episode.old_perception, episode.perception, self.name, episode.reward_list, self.deliberation.LTM_cache))
+                ltm_update_thread = threading.Thread(target=self.update_ltm_and_train, args=(episode.reward_list, self.deliberation.LTM_cache))
                 ltm_update_thread.start()
                 
 
-    def update_ltm_and_train(self, old_perception, perception, policy, reward_list, ltm_cache):
+    def update_ltm_and_train(self, reward_list, ltm_cache):
         """Update the Long-Term Memory cache with new reward basis information.
         This method updates the Long-Term Memory (LTM) cache with new reward basis information
         based on the provided perceptions, policy, and reward list. It uses a semaphore to ensure
@@ -546,7 +563,7 @@ class LearnedUtilityModel(UtilityModel):
         :type ltm_cache: dict
         """
         self.update_semaphore.acquire()
-        self.deliberation.update_pnodes_reward_basis(old_perception, perception, policy, reward_list, ltm_cache)
+        self.deliberation.update_pnodes_reward_basis(reward_list, ltm_cache)
         self.train_step()
         self.update_semaphore.release()
         
@@ -560,10 +577,10 @@ class LearnedUtilityModel(UtilityModel):
         :return: The response object indicating whether the traces were successfully added.
         :rtype: cognitive_node_interfaces.srv.AddTrace.Response
         """
-        episodes = episode_msg_list_to_obj_list(request.episodes)
-        rewards = request.rewards
-        for episode, reward in zip(episodes, rewards):
-            self.episodic_buffer.add_episode(episode, reward)
+        episodes = container_msg_to_episode(request.episodes)
+        reward = request.reward
+        reward_trace = request.reward_trace if request.reward_trace else None
+        self.episodic_buffer.add_trace(episodes, reward=reward, reward_trace=reward_trace)
         response.added = True
         return response
 
