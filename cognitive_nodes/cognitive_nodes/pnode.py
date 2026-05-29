@@ -132,9 +132,11 @@ class PNode(CognitiveNode):
         self.point_msg = request.point
         confidence = request.confidence
         point = perception_msg_to_dict(self.point_msg)
-        self.add_point(point,confidence)
-        self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
-        response.added = True
+        response.added = self.add_point(point,confidence)
+        if response.added:
+            self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
+        else:
+            self.get_logger().warn(f'Ignored empty/invalid point for {self.name}: {point}')
 
         return response
     
@@ -151,11 +153,13 @@ class PNode(CognitiveNode):
         """
         if request.points:
             self.point_msg = request.points[0]
+            added_count = 0
             for point, confidence in zip(request.points, request.confidences):
                 point_dict = perception_msg_to_dict(point)
-                self.add_point(point_dict, confidence)
-            response.added = True
-            self.get_logger().info(f'Added: {len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
+                if self.add_point(point_dict, confidence):
+                    added_count += 1
+            response.added = added_count > 0
+            self.get_logger().info(f'Added: {added_count}/{len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
         else:
             response.added = False
         return response
@@ -170,16 +174,20 @@ class PNode(CognitiveNode):
         :type confidence: float
         """
         points = separate_perceptions(point)
+        if not points:
+            return False
+
         for point in points:
             self.space = self.spaces[0]
             if not self.space:
                 self.space = self.spaces[0].__class__()
                 self.spaces.append(self.space)
-            added_point_pos = self.space.add_point(point, confidence)
+            self.space.add_point(point, confidence)
         self.added_point = True
         self.update_history(confidence)
         self.publish_success_rate()
         self.get_logger().info(f"P-Node success rate: {self.success_rate}")
+        return True
             
     def calculate_activation(self, perception=None, activation_list=None):
         """
@@ -193,27 +201,40 @@ class PNode(CognitiveNode):
             It also returs the timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
+        confidences = None
         if activation_list!=None:
             perception={}
+            confidences = []
             for sensor in activation_list:
                 activation_list[sensor]['updated']=False
                 perception[sensor]=activation_list[sensor]['data']
+                # Use provided confidence if present, otherwise default to 1.0
+                confidences.append(float(activation_list[sensor].get('confidence', 1.0)))
 
         if perception:
             activations = []
             perceptions = separate_perceptions(perception)
-            for perception_line in perceptions:
+            if not perceptions:
+                self.activation.activation = 0.0
+                self.activation.timestamp = self.get_clock().now().to_msg()
+                return self.activation
+
+            for idx, perception_line in enumerate(perceptions):
                 space = self.spaces[0]
                 if space and self.added_point:
-                    activation_value = max(0.0, space.get_probability(perception_line))
+                    base_activation = max(0.0, space.get_probability(perception_line))
+                    # weight activation by confidence (if provided), default 1.0
+                    conf = confidences[idx] if confidences is not None and idx < len(confidences) else 1.0
+                    activation_value = float(base_activation) * float(conf)
                     if activation_list is None:
                         self.get_logger().info(f'PNODE DEBUG: Perception: {perception_line} Space provided activation: {activation_value}')
                 else:
                     activation_value = 0.0
 
-                activations.append(activation_value) 
-            
-            self.activation.activation = activations[0] if len(activations) == 1 else float(max(activations)) #Fix this else case for multiple perceptions
+                activations.append(activation_value)
+
+            # If multiple perceptions, take the max weighted activation
+            self.activation.activation = activations[0] if len(activations) == 1 else float(max(activations))
             self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
