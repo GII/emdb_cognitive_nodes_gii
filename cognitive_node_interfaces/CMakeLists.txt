@@ -20,7 +20,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Activation.msg"
   "msg/Actuation.msg"
   "msg/Evaluation.msg"
-  "msg/Episode.msg"
   "msg/ObjectLayout.msg"
   "msg/ObjectParameters.msg"
   "msg/Perception.msg"

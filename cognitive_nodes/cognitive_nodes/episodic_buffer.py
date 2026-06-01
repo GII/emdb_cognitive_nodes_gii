@@ -9,8 +9,6 @@ from core.cognitive_node import CognitiveNode
 from core.container import Container, MultiContainer
 from cognitive_nodes.episode import Episode, container_to_episode_obj
 
-from cognitive_node_interfaces.msg import Episode as EpisodeMsg
-
 
 
 

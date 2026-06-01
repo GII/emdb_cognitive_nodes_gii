@@ -4,13 +4,16 @@ from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.impl.rcutils_logger import RcutilsLogger
 
+from cognitive_nodes.episode import Episode, container_msg_to_episode
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from simulators.scenarios_2D import SimpleScenario, EntityType
-from cognitive_node_interfaces.msg import SuccessRate, Perception
-from cognitive_nodes.episode import Episode, container_msg_to_episode
+from core.utils import class_from_classname
 
-from cognitive_node_interfaces.msg import Episode as EpisodeMsg
+
+from cognitive_node_interfaces.msg import SuccessRate, Perception
+
+
 
 
 class WorldModel(DeliberativeModel):
@@ -51,7 +54,7 @@ class WorldModelLearned(WorldModel):
     """
     WorldModelLearned class: A world model that uses episodes to learn the dynamics of the world.
     """
-    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
+    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_msg=None, episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
         """
         Constructor of the WorldModelLearned class.
 
@@ -70,7 +73,7 @@ class WorldModelLearned(WorldModel):
             raise ValueError("episodes_topic must be provided for WorldModelLearned")
 
         self.episode_subscription = self.create_subscription(
-            EpisodeMsg,
+            class_from_classname(episodes_msg),
             self.episodes_topic,
             self.episode_callback,
             10,
@@ -122,12 +125,12 @@ class WorldModelLearned(WorldModel):
         return predicted_episodes
     
 
-    def episode_callback(self, msg: EpisodeMsg):
+    def episode_callback(self, msg):
             """
             Callback for the episode subscription. It receives an episode message and adds it to the episodic buffer.
 
             :param msg: The episode message received.
-            :type msg: cognitive_node_interfaces.msg.Episode
+            :type msg: core_interfaces.msg.Container
             """
             episode = container_msg_to_episode(msg)
             if episode.parent_policy != "reset_world":

@@ -15,7 +15,7 @@ from core.utils import class_from_classname, compare_perceptions
 from core.container import Container
 
 from core_interfaces.msg import Container as ContainerMsg
-from cognitive_node_interfaces.srv import AddPoint, SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
+from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
@@ -73,9 +73,9 @@ class Goal(CognitiveNode):
         )
 
         self.add_point_service = self.create_service(
-            AddPoint,
-            'goal/' + str(name) + '/add_point',
-            self.add_point_callback,
+            AddPoints,
+            'goal/' + str(name) + '/add_points',
+            self.add_points_callback,
             callback_group=self.cbgroup_server
         )
 
@@ -104,16 +104,16 @@ class Goal(CognitiveNode):
         response.set = True
         return response
     
-    def add_point_callback(self, request, response):
+    def add_points_callback(self, request, response):
         """
         Callback method for adding a point (or anti-point) to a specific Goal.
 
         :param request: The request that contains the point that is added and its confidence.
-        :type request: cognitive_node_interfaces.srv.AddPoint.Request
+        :type request: cognitive_node_interfaces.srv.AddPoints.Request
         :param response: The response indicating if the point was added to the Goal.
-        :type response: cognitive_node_interfaces.srv.AddPoint.Response
+        :type response: cognitive_node_interfaces.srv.AddPoints.Response
         :return: The response indicating if the point was added to the Goal.
-        :rtype: cognitive_node_interfaces.srv.AddPoint.Response
+        :rtype: cognitive_node_interfaces.srv.AddPoints.Response
         """
         if request.points:
             points = Container.from_msg(request.points) 
@@ -212,7 +212,7 @@ class Goal(CognitiveNode):
         """
         raise NotImplementedError
     
-    def add_point(self, point, confidence):
+    def add_points(self, point, confidence):
         """
         Placeholder method in base goals. To be implemented in derived classes.
         
@@ -923,7 +923,7 @@ class GoalLearnedSpace(GoalMotiven):
             response.contained=False
         return response
     
-    def add_point(self, point, confidence):
+    def add_points(self, point, confidences):
         """
         Add a new point (or anti-point) to the Goal.
         
@@ -932,11 +932,10 @@ class GoalLearnedSpace(GoalMotiven):
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
-        self.get_logger().info(f"DEBUG - Adding point: {point} ({confidence})")
         if not self.space:
             self.get_logger().error("No space defined for the P-Node. Cannot add points.")
             return
-        self.space.add_point(point, np.ndarray([confidence]))
+        self.space.add_point(point, confidences)
         self.added_point = True
 
    #CONTINUE HERE

@@ -168,6 +168,9 @@ class DiscreteEventSimulatorPerception(Perception):
         Method that processes the sensor values received.
         """
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             for perception in self.reading.data:
                 distance = (
                     perception.distance - self.normalize_values["distance_min"]
@@ -195,7 +198,7 @@ class DiscreteEventSimulatorPerception(Perception):
 
         if self.container is None:
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
-        self.container.push(data, labels, timestamp=self.get_clock().now().nanoseconds)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()
@@ -226,6 +229,9 @@ class FruitShopPerception(Perception):
         Method that processes the sensor values received.
         """
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             if "scales" in self.name:
                 for perception in self.reading.data:
                     distance = (
@@ -273,7 +279,7 @@ class FruitShopPerception(Perception):
         
         if self.container is None:
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
-        self.container.push(data, labels, timestamp=self.get_clock().now().nanoseconds)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()
@@ -306,6 +312,9 @@ class OscarLLMPerception(Perception):
         Method that processes the sensor values received.
         """
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             if "object" in self.name:
                 for perception in self.reading.data:
                     label = perception.label
@@ -355,7 +364,7 @@ class OscarLLMPerception(Perception):
         
         if self.container is None:
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
-        self.container.push(data, labels, timestamp=self.get_clock().now().nanoseconds)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
         self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()

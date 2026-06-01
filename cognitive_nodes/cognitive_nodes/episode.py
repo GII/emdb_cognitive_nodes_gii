@@ -139,14 +139,14 @@ class Episode:
             if rewards_container is None:
                 # If rewards container doesn't exist, create it with the goals as labels
                 rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=labels)
-                rewards = np.fromiter((reward_dict[g] for g in goals), dtype=rewards_container.data_type)
+                rewards = np.fromiter((reward_dict[g] for g in goals), dtype=rewards_container.data.dtype)
             else:
                 # If rewards container exists, update it with new goals and rewards, rewards not present in the reward_dict will be set to 0.0.
                 # If new goals are introduced, a new rewards container will be created with the updated set of goals as labels.
-                existing_goals = set([label.split(":")[1] for label in rewards_container.labels])
+                existing_goals = set([label.split(":")[1] for label in rewards_container.feature_labels])
                 new_goals = set(goals)
                 all_goals = existing_goals.union(new_goals)
-                rewards = np.fromiter((reward_dict.get(goal, 0.0) for goal in all_goals), dtype=rewards_container.data_type)
+                rewards = np.fromiter((reward_dict.get(goal, 0.0) for goal in all_goals), dtype=rewards_container.data.dtype)
                 if not new_goals.issubset(existing_goals):
                     all_goals = list(existing_goals.union(new_goals))
                     if self.container_size > 1:
@@ -154,7 +154,7 @@ class Episode:
                         # Requires reconstructing the rewards container with the new set of goals and properly aligning existing reward values with the new labels, filling in 0.0 for any missing rewards in existing entries. 
                         raise NotImplementedError("Handling new goals in rewards update is only implemented for container_size=1")
                     rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=all_goals)
-            rewards_container.push(rewards, labels=labels, timestamp=timestamp)
+            rewards_container.push(rewards, src_labels=labels, timestamps=timestamp)
         self.rewards = rewards_container
 
     def obtain_flattened_episode(self) -> Container:

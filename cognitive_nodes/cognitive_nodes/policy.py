@@ -7,9 +7,8 @@ import numpy
 from std_msgs.msg import Int64
 from core.service_client import ServiceClient, ServiceClientAsync
 from cognitive_node_interfaces.srv import GetActivation, SetActivation, Execute
-from cognitive_node_interfaces.msg import Episode
 
-from core.utils import perception_dict_to_msg, class_from_classname
+from core.utils import class_from_classname
 
 class Policy(CognitiveNode):
     """
@@ -49,7 +48,8 @@ class Policy(CognitiveNode):
         )
 
         episodes_topic = getattr(self, "Control", {}).get("episodes_topic", "")
-        self.episode_publisher = self.create_publisher(Episode, episodes_topic, 0)
+        episodes_msg = getattr(self, "Control", {}).get("episodes_msg", "")
+        self.episode_publisher = self.create_publisher(class_from_classname(episodes_msg), episodes_topic, 0)
         
         self.configure_activation_inputs(self.neighbors) 
 
@@ -59,7 +59,7 @@ class Policy(CognitiveNode):
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
 
         :param perception: Arbitrary perception.
-        :type perception: dict
+        :type perception: core_interfaces.msg.Container
         :param activation_list: List of activations of the neighbors.
         :type activation_list: list
         :return: The activation of the Policy and its timestamp.
@@ -70,7 +70,7 @@ class Policy(CognitiveNode):
             if cnodes:
                 cnode_activations = []
                 for cnode in cnodes:
-                    perception_msg = perception_dict_to_msg(perception)
+                    perception_msg = perception.to_msg()
                     service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
                     if not service_name in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
@@ -88,7 +88,7 @@ class Policy(CognitiveNode):
             else:
                 self.activation.activation=0.0
                 self.activation.timestamp=self.get_clock().now().to_msg()
-        return self.activation
+            return self.activation
     
     def execute_callback(self, request, response):
         """

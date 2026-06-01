@@ -1,6 +1,7 @@
 import rclpy
 import numpy as np
 from collections import deque
+from rclpy.time import Time
 
 from core.cognitive_node import CognitiveNode
 from cognitive_nodes.space import PointBasedSpace
@@ -155,7 +156,7 @@ class PNode(CognitiveNode):
                 consolidate_containers(data, write_container=self.perception)
             activation_value = np.min(self.space.get_probability(self.perception)) if self.space else 0.0
             self.activation.activation = activation_value
-            self.activation.timestamp = self.get_clock().now().to_msg()
+            self.activation.timestamp = self.perception.data.coords["timestamp"].values[-1] 
             return self.activation
         
         if perception:
@@ -187,9 +188,9 @@ class PNode(CognitiveNode):
         :param msg: PerceptionStamped message that contains the perception and its timestamp.
         :type msg: cognitive_node_interfaces.msg.PerceptionStamped
         """        
-        if len(msg.max_size)>1:
+        if msg.max_size>1:
             self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')
-        elif len(msg.max_size)==1:
+        elif msg.max_size==1:
             node_name=msg.name
             if node_name in self.activation_inputs:
                 if self.activation_inputs[node_name]['data'] is None:

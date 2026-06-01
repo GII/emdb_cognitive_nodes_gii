@@ -1,5 +1,0 @@
-core_interfaces/Container old_perception
-string parent_policy
-core_interfaces/Container action
-core_interfaces/Container perception
-core_interfaces/Container rewards
