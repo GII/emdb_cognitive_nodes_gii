@@ -1,1 +1,2 @@
 float32 confidence
+string hyperparameters
