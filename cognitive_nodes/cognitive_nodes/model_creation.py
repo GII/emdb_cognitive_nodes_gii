@@ -357,6 +357,24 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         if not trace_success.added:
             self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
 
+        # Create a specialised PolicyLearned for this goal/drive.
+        await self.create_policy(goal, drive, cnode_name)
+
+    async def create_policy(self, goal, drive, cnode_name):
+        policy_name = f"policy_{drive if drive else goal}"
+        policy_class = self.default_class.get("Policy", "cognitive_nodes.policy.PolicyLearned")
+        policy_parameters = self.default_params.get("Policy", {})
+        neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
+        params = {**policy_parameters, **neighbors, "target_reward": goal}
+        creation_response = await self.create_node_client(
+            name=policy_name, class_name=policy_class, parameters=params
+        )
+        if creation_response.created:
+            self.get_logger().info(f"{policy_class}: {policy_name} created successfully.")
+        else:
+            self.get_logger().error(f"Failed to create Policy: {policy_name}")
+        return policy_name
+
     def read_activation_callback(self, msg):
         super().read_activation_callback(msg)
         # Process world model activations
