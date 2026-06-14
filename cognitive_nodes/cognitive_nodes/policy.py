@@ -522,6 +522,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
             f'PolicyLearned {self.name} activation={base.activation:.3f} '
             f'(scale={scale:.2f}, own_outcomes={n})'
         )
+        self.activation.metacognitive_params.confidence = success_rate
         return base
 
     # ── Execution loop ────────────────────────────────────────────────────────
@@ -654,6 +655,10 @@ class PolicyLearned(Policy, EpisodeSubscription):
             self._recent_outcomes.clear()
             self._sac.logger.dump(step=self.episodic_buffer.n_traces)
             self.get_logger().info(f'PolicyLearned {self.name}: training done')
+
+    def calculate_confidence(self, perception=None, activation_list=None):
+        """TODO:Confidence is not used for PolicyLearned, so return a dummy value."""
+        return 1.0
 
 
 def main(args=None):
