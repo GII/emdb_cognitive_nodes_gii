@@ -4,6 +4,8 @@ import threading
 import traceback
 from copy import deepcopy
 
+from core.service_client import ServiceClient, ServiceClientAsync
+
 import rclpy
 import numpy as np
 import yaml
@@ -11,7 +13,6 @@ import yaml
 from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import String
 
-from core.service_client import ServiceClientAsync
 from core.utils import actuation_dict_to_msg
 from core_interfaces.srv import GetNodeFromLTM
 
@@ -20,7 +21,7 @@ from cognitive_node_interfaces.msg import SuccessRate
 from cognitive_node_interfaces.msg import Perception
 from cognitive_node_interfaces.msg import Action as ActionMsg
 from cognitive_node_interfaces.srv import Execute, Predict, PredictUtility
-from cognitive_node_interfaces.msg import ObjectLayout, Actuation
+from cognitive_node_interfaces.msg import ObjectLayout, Actuation, ObjectParameters
 
 from cognitive_processes_interfaces.msg import RewardList
 
@@ -651,17 +652,25 @@ class PolicyDreamingDummy(Policy):
         super().__init__(name, **params)
 
         self.declare_parameter("world_model_name", "WorldModel_0")
+        self.declare_parameter("perception_size", 11)
+        self.declare_parameter("action_size", 4)
+
         self.world_model_name = self.get_parameter(
             "world_model_name"
         ).get_parameter_value().string_value
 
+        self.perception_size = self.get_parameter(
+            "perception_size"
+        ).get_parameter_value().integer_value
+
+        self.action_size = self.get_parameter(
+            "action_size"
+        ).get_parameter_value().integer_value
+
         self.world_model_predict_service_name = self._build_world_model_predict_service_name(
             self.world_model_name
         )
-        self.world_model_predict_client = self.create_client(
-            Predict,
-            self.world_model_predict_service_name
-        )
+        self.world_model_predict_client = None
 
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
@@ -674,22 +683,35 @@ class PolicyDreamingDummy(Policy):
         self.get_logger().info(
             f"PolicyDreamingDummy initialized. "
             f"world model service={self.world_model_predict_service_name}, "
-            f"manual service=/{self.name}/manual_world_model_predict"
+            f"manual service=/{self.name}/manual_world_model_predict, "
+            f"perception_size={self.perception_size}, action_size={self.action_size}"
         )
 
     def _build_world_model_predict_service_name(self, world_model_name: str) -> str:
         return f"/world_model/{world_model_name}/predict"
 
+    def _ensure_world_model_predict_client(self):
+        if self.world_model_predict_client is not None:
+            return
+
+        tmp_client = self.create_client(Predict, self.world_model_predict_service_name)
+        if not tmp_client.wait_for_service(timeout_sec=2.0):
+            raise RuntimeError(
+                f"{self.world_model_predict_service_name} not available yet"
+            )
+
+        self.world_model_predict_client = ServiceClient(
+            Predict,
+            self.world_model_predict_service_name
+        )
+
     def _recreate_world_model_predict_client(self):
         self.world_model_predict_service_name = self._build_world_model_predict_service_name(
             self.world_model_name
         )
-        self.world_model_predict_client = self.create_client(
-            Predict,
-            self.world_model_predict_service_name
-        )
+        self.world_model_predict_client = None
         self.get_logger().info(
-            f"World model predict client updated to {self.world_model_predict_service_name}"
+            f"World model predict client reset to {self.world_model_predict_service_name}"
         )
 
     def _on_parameters_changed(self, params):
@@ -701,101 +723,191 @@ class PolicyDreamingDummy(Policy):
                     result.successful = False
                     result.reason = "world_model_name cannot be empty"
                     return result
-
                 self.world_model_name = str(param.value).strip()
                 self._recreate_world_model_predict_client()
 
+            elif param.name == "perception_size":
+                if int(param.value) <= 0:
+                    result.successful = False
+                    result.reason = "perception_size must be > 0"
+                    return result
+                self.perception_size = int(param.value)
+
+            elif param.name == "action_size":
+                if int(param.value) <= 0:
+                    result.successful = False
+                    result.reason = "action_size must be > 0"
+                    return result
+                self.action_size = int(param.value)
+
         return result
 
+    def _make_layout(self):
+        layout = ObjectLayout()
+        layout.dim = []
+        layout.data_offset = 0
+        return layout
+
+    def _make_perception(self, size: int, fill_value: float = 0.0) -> Perception:
+        p = Perception()
+        p.layout = self._make_layout()
+        p.data = [float(fill_value)] * size
+        p.is_valid = [True] * size
+        return p
+
+    def _make_action(self, size: int, fill_value: float = 0.0) -> ActionMsg:
+        act = ActionMsg()
+        act.actuation = Actuation()
+        act.actuation.layout = self._make_layout()
+        act.actuation.data = [float(fill_value)] * size
+        act.actuation.is_valid = [True] * size
+        act.policy_id = 0
+        return act
+
+    def _make_dummy_episode(self) -> EpisodeMsg:
+        ep = EpisodeMsg()
+        ep.old_perception = self._make_perception(self.perception_size, 0.0)
+        ep.parent_policy = self.name
+        ep.action = self._make_action(self.action_size, 0.0)
+
+        ep.perception = self._make_perception(self.perception_size, 0.0)
+
+        rl = RewardList()
+        rl.goals = []
+        rl.rewards = []
+        ep.reward_list = rl
+
+        ep.timestamp = self.get_clock().now().to_msg()
+        return ep
+
     def manual_world_model_predict_trigger_callback(self, request, response):
+        try:
+            self._ensure_world_model_predict_client()
+        except Exception as exc:
+            self.get_logger().error(f"[proxy] failed to create predict client: {exc}")
+            response.output_episodes = []
+            response.valid = False
+            return response
+
         self.get_logger().info(
             f"Manual world model predict trigger called. "
             f"Using world model service {self.world_model_predict_service_name}"
         )
 
-        if not self.world_model_predict_client.wait_for_service(timeout_sec=2.0):
-            self.get_logger().error(f"{self.world_model_predict_service_name} not available")
-            response.output_episodes = []
-            return response
-
         input_episode = EpisodeMsg()
 
-        # old perception: 11 valores de percepción
         old_p = Perception()
         old_p.layout = ObjectLayout()
-        old_p.layout.dim = []
+        old_p.layout.dim = [
+            ObjectParameters(object='ball_angle0', labels=['data'], size=8, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='box_angle0', labels=['data'], size=8, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_ball_box0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_left_arm_ball0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_right_arm_ball0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+        ]
         old_p.layout.data_offset = 0
         old_p.data = [
-            0.37802556,  # ball_angle.data
-            0.93472717,  # box_angle.data
-            0.55755073,  # dist_ball_box.distance
-            0.93267341,  # dist_ball_box.angle_cos
-            0.24941324,  # dist_ball_box.angle_sin
-            0.36543905,  # dist_left_arm_ball.distance
-            0.47981450,  # dist_left_arm_ball.angle_cos
-            0.99959238,  # dist_left_arm_ball.angle_sin
-            0.40766941,  # dist_right_arm_ball.distance
-            0.00313517,  # dist_right_arm_ball.angle_cos
-            0.55590473,  # dist_right_arm_ball.angle_sin
+            0.13624948354867789,
+            0.5608655958909254,
+            0.5014107877258939,
+            0.8669652112813435,
+            0.16038767144104005,
+            0.3145382182829519,
+            0.9983897815549261,
+            0.45990479278476004,
+            0.7099251685547043,
+            0.7390485081174856,
+            0.0608464838273472,
         ]
         old_p.is_valid = [True] * len(old_p.data)
         input_episode.old_perception = old_p
 
         input_episode.parent_policy = self.name
 
-        # action: 4 valores
         act = ActionMsg()
         act.actuation = Actuation()
         act.actuation.layout = ObjectLayout()
-        act.actuation.layout.dim = []
+        act.actuation.layout.dim = [
+            ObjectParameters(object='left_arm0', labels=['dist', 'angle'], size=16, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='right_arm0', labels=['dist', 'angle'], size=16, stride=8, size_stride_units='bytes'),
+        ]
         act.actuation.layout.data_offset = 0
         act.actuation.data = [
-            0.19146181,  # left_arm.dist
-            0.30140961,  # left_arm.angle
-            0.23758396,  # right_arm.dist
-            0.81005426,  # right_arm.angle
+            0.9605706244711711,
+            0.7268366284761449,
+            0.15277657411350176,
+            0.15874396914567307,
         ]
         act.actuation.is_valid = [True] * len(act.actuation.data)
         act.policy_id = 0
         input_episode.action = act
 
-        # new perception: puede ser igual o ligeramente distinta
         new_p = Perception()
         new_p.layout = ObjectLayout()
-        new_p.layout.dim = []
+        new_p.layout.dim = [
+            ObjectParameters(object='ball_angle0', labels=['data'], size=8, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='box_angle0', labels=['data'], size=8, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_ball_box0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_left_arm_ball0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+            ObjectParameters(object='dist_right_arm_ball0', labels=['distance', 'angle_cos', 'angle_sin'], size=24, stride=8, size_stride_units='bytes'),
+        ]
         new_p.layout.data_offset = 0
         new_p.data = [
-            0.37802556,
-            0.93472717,
-            0.55755073,
-            0.93267341,
-            0.24941324,
-            0.36543905,
-            0.47981450,
-            0.99959238,
-            0.40766941,
-            0.00313517,
-            0.55590473,
+            0.13624948354867789,
+            0.5608655958909254,
+            0.5014107877258939,
+            0.8669652112813435,
+            0.16038767144104005,
+            0.28593014958874147,
+            0.7707294754836551,
+            0.9203635939330914,
+            0.7160675264112012,
+            0.09700901980790094,
+            0.20402995103590088,
         ]
         new_p.is_valid = [True] * len(new_p.data)
         input_episode.perception = new_p
 
         rl = RewardList()
-        rl.goals = []
-        rl.rewards = []
+        rl.goals = ['novelty_goal', 'grasped_ball_drive', 'object_in_box_drive']
+        rl.rewards = [0.0, 0.0, 0.0]
         input_episode.reward_list = rl
 
         input_episode.timestamp = self.get_clock().now().to_msg()
 
-        req = Predict.Request()
-        req.input_episodes = [input_episode]
+        try:
+            self.get_logger().info(
+                "[proxy] calling world model predict with 1 episode..."
+            )
+            result = self.world_model_predict_client.send_request(
+                input_episodes=[input_episode]
+            )
+        except Exception as exc:
+            self.get_logger().error(
+                f"[proxy] world model predict failed: {exc}"
+            )
+            response.output_episodes = []
+            response.valid = False
+            return response
 
-        self._pending_world_model_future = self.world_model_predict_client.call_async(req)
-        self._pending_world_model_future.add_done_callback(self._on_world_model_predict_done)
+        self.get_logger().info(
+            f"[proxy] result.n_output_episodes={len(result.output_episodes)}"
+        )
 
-        response.output_episodes = []
+        response.output_episodes = list(getattr(result, "output_episodes", []))
+        response.valid = getattr(result, "valid", True)
+
+        self.get_logger().info(
+            f"[proxy] response: valid={response.valid}, "
+            f"n_output_episodes={len(response.output_episodes)}"
+        )
         return response
-    
+
+    async def execute_callback(self, request, response):
+        self.get_logger().info("Executing dummy policy (execute_callback)...")
+        response.policy = self.name
+        return response
+
     def _on_world_model_predict_done(self, future):
         try:
             result = future.result()
@@ -806,17 +918,11 @@ class PolicyDreamingDummy(Policy):
             if output_episodes:
                 pe = output_episodes[0]
                 self.get_logger().info(
-                    f"Predicted perception: {pe.perception}"
+                    f"Predicted perception length={len(pe.perception.data)} "
+                    f"values={list(pe.perception.data)}"
                 )
         except Exception as exc:
             self.get_logger().error(f"World model predict callback failed: {exc}")
-
-    async def execute_callback(self, request, response):
-            self.get_logger().info("Executing dummy policy (execute_callback)...")
-            response.policy = self.name
-            return response
-
-            
 
 
 class PolicyRandomAction(PolicyBlocking):
