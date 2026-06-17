@@ -69,7 +69,7 @@ class PointBasedSpace(Space):
         :rtype: list
         """
         if self._data is not None:        
-            return self._data.read(ordered=True).drop(columns=["confidence"]).values
+            return self._data.read(ordered=True).drop_sel(features=["confidence"]).values
         else:
             return np.array([])
     
@@ -82,12 +82,12 @@ class PointBasedSpace(Space):
         :rtype: list
         """
         if self._data is not None:
-            return self._data.read(ordered=True)["confidence"].values
+            return self._data.read(ordered=True).sel(features=["confidence"]).values
         else:
             return np.array([])
 
     @classmethod
-    def populate_space(cls, data_container: Container):
+    def populate_space(cls, data_container: Container, **kwargs) -> PointBasedSpace:
         """
         Populates the space from the data container. 
 
@@ -101,8 +101,14 @@ class PointBasedSpace(Space):
         :type memberships: list
         :raises ValueError: If the size of memberships does not match the calculated size of the space.
         """
+        data_name = data_container.name
+        if data_name.endswith("_data"):
+            ident = data_name[:-5]  # Remove the "_data" suffix to get the space identifier
+        else:
+            ident = data_name
+            data_container.name = ident + "_data"  # Ensure the container name follows the expected format
         size = len(data_container)
-        space = cls(size=size)
+        space = cls(ident=ident, size=size, **kwargs)
         space._data = data_container
         return space
 
@@ -158,9 +164,11 @@ class PointBasedSpace(Space):
         """
         if self._data is not None:
             return self._data.to_msg()
-
-        
-
+        else:
+            self.logger.warning(f"Trying to convert space {self.ident} to message, but it has no data.")
+            msg = ContainerMsg()
+            msg.name = self.ident + "_data" 
+            return msg
 
     @staticmethod
     def get_closest_point_and_antipoint_info(members, memberships, foreigner):
@@ -226,8 +234,9 @@ class PointBasedSpace(Space):
         probabilities = self.get_probability(perceptions)
         ## Create an index list for the points that either have a confidence greater than 0.0 or a probability greater than 0.0
         indexes = (confidences > 0.0) | (probabilities > 0.0)
-        data = perceptions.read(ordered=True).values[indexes]
-        timestamps = perceptions.coords["timestamps"].values[indexes]
+        data_array = perceptions.read(ordered=True)
+        data = data_array.values[indexes]
+        timestamps = data_array.coords["timestamp"].values[indexes]
         # Add the confidence as a new column to the data array, so it can be stored in the structured array of the space
         points = np.concatenate([data, confidences[indexes].reshape(-1, 1)], axis=1)
         labels = perceptions.feature_labels + ["confidence"]
@@ -237,7 +246,7 @@ class PointBasedSpace(Space):
                 self.parent_space.add_point(perceptions, confidences)
             # Check if we need to initialize the container for storing points
             if self.size == 0:
-                self.initialize_data_structure(perceptions, None, self.real_size)
+                self.initialize_data_structure(perceptions, self.real_size)
             # Add the new points to the container
             added_point_pos = self._data.push(points, labels, timestamps=timestamps)
         return added_point_pos
@@ -252,29 +261,48 @@ class PointBasedSpace(Space):
         """
         raise NotImplementedError
 
-    def contains(self, space: PointBasedSpace, threshold=0.9):
+    def contains(self, space_data: Container, threshold=0.9):
         """
         Check if other space is contained inside this one.
         That happens if this space has a given value of probability for every point belonging to the other space.
-
-        :param space: Space that is checked if it is included.
-        :type space: cognitive_nodes.Space
-        :param threshold: Minimum probability value.
-        :type threshold: float
-        :return: Indicates whether the space is contained or not.
-        :rtype: bool
         """
-        contained = False
-        if space.size:
-            contained = True
-            for point, confidence in zip(space.members, space.memberships) :
-                self.logger.debug(f"Evaluating point {point} [{confidence}]")
-                probability = self.get_probability(point)
-                if probability < threshold and confidence>0:
-                    self.logger.info(f"Point not contained: {point} ({probability})")
-                    contained = False
-                    break
-        return contained
+        data_name = space_data.name[:-5] if space_data.name.endswith("_data") else space_data.name
+        self.logger.info(f"Checking if space {space_data.name} is contained with threshold {threshold}")
+
+        if space_data.size <= 0:
+            self.logger.info(f"Space {data_name} is empty.")
+            return False
+
+        data_array = space_data.read(ordered=True)
+        point_confidences = data_array.sel(features=["confidence"]).values.reshape(-1)
+        positive_idx = np.flatnonzero(point_confidences > 0.0)
+
+        if positive_idx.size == 0:
+            self.logger.info(f"Space {data_name} contains only antipoints; skipping containment checks.")
+            return True
+
+        positive_data = Container.from_dataarray(
+            data_array.isel(sample=positive_idx),
+            container_type=space_data.container_type,
+            name=space_data.name,
+        )
+
+        probabilities = self.get_probability(positive_data)
+
+        if np.all(probabilities >= threshold):
+            self.logger.info(
+                f"Space {data_name} is contained with mean probability {np.mean(probabilities)}"
+            )
+            return True
+
+        self.logger.info(f"Space {data_name} has points that are not contained.")
+        for pos, prob in zip(positive_idx, probabilities):
+            if prob < threshold:
+                self.logger.info(
+                    f"Point at position {pos} with confidence {point_confidences[pos]} "
+                    f"and probability {prob} is not contained."
+                )
+        return False
 
     def same_sensors(self, space):
         """
@@ -318,10 +346,6 @@ class ClosestPointBasedSpace(PointBasedSpace):
     - If the closest point has a positive membership, the membership of the new point is that divided by the distance
     between them. Otherwise, the activation is -1.
     """
-
-    # NOTE: This method has been migrated to vectorial form, so multiple points can be evaluated at the same time.
-    # TESTING IS NEEDED TO ENSURE IT WORKS PROPERLY AND IT IS MORE EFFICIENT. OTHERWISE, REVERT TO THE ORIGINAL AND IMPLEMENT FOR LOOP OVER THE POINTS IN THE PERCEPTION.
-
     def get_probability(self, perceptions):
         """
         Calculate the new activation value for multiple perception rows.
@@ -332,7 +356,10 @@ class ClosestPointBasedSpace(PointBasedSpace):
         :rtype: np.ndarray
         """
         # Obtain the datapoint from the given perception (selects the appropriate features)
-        points = self.data_from_perception(perceptions)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
         memberships = self.memberships
@@ -359,7 +386,7 @@ class ClosestPointBasedSpace(PointBasedSpace):
         if self.parent_space:
             parent_act = self.parent_space.get_probability(perceptions)
             activation = np.minimum(activation, parent_act)
-        return activation
+        return activation.reshape(-1)
 
 
 class CentroidPointBasedSpace(PointBasedSpace):
@@ -377,9 +404,6 @@ class CentroidPointBasedSpace(PointBasedSpace):
     membership. Otherwise the activation is -1.
     """
 
-    # NOTE: This method has been migrated to vectorial form, so multiple points can be evaluated at the same time.
-    # TESTING IS NEEDED TO ENSURE IT WORKS PROPERLY AND IT IS MORE EFFICIENT. OTHERWISE, REVERT TO THE ORIGINAL AND IMPLEMENT FOR LOOP OVER THE POINTS IN THE PERCEPTION.
-
     def get_probability(self, perceptions):
         """
         Calculate the new activation value for multiple perception rows.
@@ -390,7 +414,10 @@ class CentroidPointBasedSpace(PointBasedSpace):
         :rtype: np.ndarray
         """
         # Obtain the datapoint from the given perception (selects the appropriate features)
-        points = self.data_from_perception(perceptions)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
         memberships = self.memberships
@@ -418,7 +445,9 @@ class CentroidPointBasedSpace(PointBasedSpace):
             neg_mask = closest_membership <= 0.0
             
             if np.any(neg_mask) and np.any(memberships > 0.0):
-                centroid = np.mean(members[memberships > 0.0], axis=0)
+                # Centroid of points with positive membership
+                positive_indexes = (memberships > 0.0).reshape(-1)
+                centroid = np.mean(members[positive_indexes], axis=0)
                 
                 # Distance from each point to centroid
                 dist_points_centroid = np.linalg.norm(points - centroid[None, :], axis=1)
@@ -431,8 +460,8 @@ class CentroidPointBasedSpace(PointBasedSpace):
                 update_mask = neg_mask & closer_mask
                 
                 if np.any(update_mask):
-                    pos_members = members[memberships > 0.0]
-                    pos_memberships = memberships[memberships > 0.0]
+                    pos_members = members[positive_indexes]
+                    pos_memberships = memberships[positive_indexes]
                     
                     for row_idx in np.where(update_mask)[0]:
                         dists = np.linalg.norm(pos_members - points[row_idx], axis=1)
@@ -443,7 +472,7 @@ class CentroidPointBasedSpace(PointBasedSpace):
             parent_act = self.parent_space.get_probability(perceptions)
             activation = np.minimum(activation, parent_act)
         
-        return activation
+        return activation.reshape(-1)
 
 
 class NormalCentroidPointBasedSpace(PointBasedSpace):
@@ -472,7 +501,10 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
         :rtype: np.ndarray
         """
         # Obtain the datapoint from the given perception (selects the appropriate features)
-        points = self.data_from_perception(perceptions)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
         memberships = self.memberships
@@ -500,7 +532,8 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
             neg_mask = closest_membership <= 0.0
             if np.any(neg_mask) and np.any(memberships > 0.0):
                 # Centroid of points with positive membership
-                centroid = np.mean(members[memberships > 0.0], axis=0)
+                positive_indexes = (memberships > 0.0).reshape(-1)
+                centroid = np.mean(members[positive_indexes], axis=0)
 
                 # Distance from each point to centroid
                 dist_newpoint_centroid = np.linalg.norm(points - centroid[None, :], axis=1)
@@ -527,8 +560,8 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
                 )
 
                 if np.any(update_mask):
-                    positive_members = members[memberships > 0.0]
-                    positive_memberships = memberships[memberships > 0.0]
+                    positive_members = members[positive_indexes]
+                    positive_memberships = memberships[positive_indexes]
 
                     for row_idx in np.where(update_mask)[0]:
                         row_distances = np.linalg.norm(positive_members - points[row_idx], axis=1)
@@ -541,7 +574,7 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
             parent_act = self.parent_space.get_probability(perceptions)
             activation = np.minimum(activation, parent_act)
         
-        return activation
+        return activation.reshape(-1)
     
 class ActivatedDummySpace(PointBasedSpace):
     """
@@ -592,7 +625,7 @@ class SVMSpace(PointBasedSpace):
         :rtype: float
         """
         members = self.members
-        memberships = self.memberships.copy()
+        memberships = self.memberships.copy().reshape(-1)
         memberships[memberships > 0] = 1
         memberships[memberships <= 0] = 0
         self.model.fit(members, memberships)
@@ -617,7 +650,7 @@ class SVMSpace(PointBasedSpace):
         previous_size = self.size
         members = self.members.copy()
         memberships = self.memberships.copy()
-        timestamps = self._data.read(ordered=True).coords["timestamps"].values.copy()
+        timestamps = self._data.read(ordered=True).coords["timestamp"].values.copy()
         score = 0.3
         while score < 1.0:
             # Adjusted threshold to be more aggressive in removing close points in each iteration
@@ -679,7 +712,10 @@ class SVMSpace(PointBasedSpace):
         :rtype: np.ndarray
         """
         # Obtain the datapoint from the given perception (selects the appropriate features)
-        points = self.data_from_perception(perceptions)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
         # Calculate the activation value
         if self.learnable():
             output = self.model.decision_function(points)
@@ -697,7 +733,7 @@ class ANNSpace(PointBasedSpace):
     Use and train a Neural Network to calculate the activations.
     """
 
-    def __init__(self, max_data=2000, sampled_points=200, train_every=20, batch_size=50, epochs=50, output_activation="sigmoid", hidden_activation="relu", hidden_layers=[128, 64, 32], learning_rate=0.001, validation_split=0.2, loss_function=nn.BCEWithLogitsLoss, val_function=nn.BCEWithLogitsLoss, model_file=None, **kwargs):
+    def __init__(self, max_data=2000, sampled_points=200, train_every=1, batch_size=25, epochs=1, output_activation="sigmoid", hidden_activation="relu", hidden_layers=[64, 32], learning_rate=0.05, validation_split=0.0, loss_function=nn.BCEWithLogitsLoss, val_function=nn.BCEWithLogitsLoss, model_file=None, device="cuda", **kwargs):
         self.batch_size = batch_size
         self.epochs = epochs
         self.output_activation = output_activation
@@ -705,7 +741,11 @@ class ANNSpace(PointBasedSpace):
         self.hidden_layers = hidden_layers
         self.learning_rate = learning_rate
         self.validation_split = validation_split
-
+        if device not in ["cpu", "cuda"]:
+            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+        elif device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
+        self.device = device
         self.max_data = max_data
         self.sampled_points = sampled_points
         self.train_every = train_every
@@ -809,7 +849,7 @@ class ANNSpace(PointBasedSpace):
             # Restore weights
             self.model.load_state_dict(weights)
 
-    def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, 
+    def _train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, 
               x_val=None, y_val=None, sample_weights=None, verbose=1, reset_optimizer=True):
         """Train the neural network model using PyTorch with optional validation and early stopping.
 
@@ -849,11 +889,6 @@ class ANNSpace(PointBasedSpace):
             
         epochs = epochs or self.epochs
         batch_size = batch_size or self.batch_size
-        
-        # Configure model if not done
-        if not self.configured:
-            self.configure_model(x_train.shape[1], y_train.shape[1])
-            
         if reset_optimizer:
             self.reset_model_state()
             
@@ -962,18 +997,18 @@ class ANNSpace(PointBasedSpace):
                     
                 if patience_counter >= early_stopping_patience:
                     if verbose > 0:
-                        self.logger().info(f"Early stopping at epoch {epoch+1}. Restoring weights from epoch {best_epoch+1} with val loss {best_val_loss:.4f}.")
+                        self.logger.info(f"Early stopping at epoch {epoch+1}. Restoring weights from epoch {best_epoch+1} with val loss {best_val_loss:.4f}.")
                     # Restore best weights
                     self.model.load_state_dict(self.best_weights)
                     break
                     
             if verbose > 0:
                 if val_loss is not None:
-                    self.logger().info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f} - Val Loss: {val_loss:.4f}")
+                    self.logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f} - Val Loss: {val_loss:.4f}")
                 else:
-                    self.logger().info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f}")
+                    self.logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_train_loss:.4f}")
 
-    def call(self, x):
+    def _call(self, x):
         """Make predictions with the trained model.
 
         :param x: Input data for prediction. Can be numpy array or torch tensor.
@@ -996,13 +1031,14 @@ class ANNSpace(PointBasedSpace):
         self.model.eval()
         with torch.no_grad():
             predictions = torch.sigmoid(self.model(x)) # TODO: Make activation function configurable
-            
-        return predictions.cpu().numpy()
+        
+        predictions=predictions.squeeze().cpu().numpy()
+        return predictions
     
     def get_weights(self):
         """Get the current model , uses the state dictionary."""
         if not self.configured:
-            self.logger().warning("Model not configured. Cannot get weights.")
+            self.logger.warning("Model not configured. Cannot get weights.")
             return None
         return self.model.state_dict()
 
@@ -1015,15 +1051,15 @@ class ANNSpace(PointBasedSpace):
         :rtype: bool
         """        
         if not self.configured:
-            self.logger().warning("Model not configured. Cannot set weights.")
+            self.logger.warning("Model not configured. Cannot set weights.")
             return False
             
         try:
             self.model.load_state_dict(weights)
-            self.logger().info("Weights set successfully.")
+            self.logger.info("Weights set successfully.")
             return True
         except Exception as e:
-            self.logger().error(f"Failed to set weights: {e}")
+            self.logger.error(f"Failed to set weights: {e}")
             return False
         
     def add_point(self, perceptions, confidences):
@@ -1045,43 +1081,45 @@ class ANNSpace(PointBasedSpace):
             # If the model is not built yet, build it
             if self.configured == False:
                 input_shape = self.members.shape[1]  # Get the number of features from the point
-                self.model = self.configure_model(input_shape)
-
+                self.configure_model(input_shape)
 
             if self.new_points>=self.train_every:
-                self.logger.info(f"Training on {self.new_points}")
-                if self.size > self.max_data:
-                    self.logger.info(f"Using last {self.max_data} points for training.")
-                    first_data = self.size - self.max_data
-                else:
-                    first_data = 0
-
-                members = self.members[first_data : self.size]
-                memberships = self.memberships[first_data : self.size].copy()
-                memberships[memberships <= 0] = 0.0 # Clamp negative memberships to 0
-                members_size = len(members)
-                n_samples = min(self.sampled_points, members_size)
-                idx = self.rng.choice(members_size, size=n_samples, replace=False)
-
-                X = members[idx]
-                Y = memberships[idx]
-                n_0 = int(len(Y[Y == 0.0]))
-                n_1 = int(len(Y[Y == 1.0]))
-                weight_for_0 = (
-                    (1 / n_0) * (X.shape[0] / 2.0) if n_0 != 0 else 1.0
-                )
-                weight_for_1 = (
-                    (1 / n_1) * (X.shape[0] / 2.0) if n_1 != 0 else 1.0
-                )
-                # This supports the case of points that have lower confidence (between 0 and 1) which are weighted with 1. While points and antipoints are balanced.
-                weights = np.ones_like(Y)
-                weights[Y == 0.0] = weight_for_0
-                weights[Y == 1.0] = weight_for_1
-
-                self.logger.info(f"Training data distribution: Total: {len(Y)}, 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}")
-                self.train(X, Y, validation_split=self.validation_split, sample_weights=weights)
-                self.new_points = 0
+                self.train_step()
+                self.new_points = 0 
         return pos
+
+    def train_step(self):
+        self.logger.info(f"Training on {self.new_points}")
+        if self.size > self.max_data:
+            self.logger.info(f"Using last {self.max_data} points for training.")
+            first_data = self.size - self.max_data
+        else:
+            first_data = 0
+
+        members = self.members[first_data : self.size]
+        memberships = self.memberships[first_data : self.size].copy()
+        memberships[memberships <= 0] = 0.0 # Clamp negative memberships to 0
+        members_size = len(members)
+        n_samples = min(self.sampled_points, members_size)
+        idx = self.rng.choice(members_size, size=n_samples, replace=False)
+
+        X = members[idx]
+        Y = memberships[idx]
+        n_0 = int(len(Y[Y == 0.0]))
+        n_1 = int(len(Y[Y == 1.0]))
+        weight_for_0 = (
+            (1 / n_0) * (X.shape[0] / 2.0) if n_0 != 0 else 1.0
+        )
+        weight_for_1 = (
+            (1 / n_1) * (X.shape[0] / 2.0) if n_1 != 0 else 1.0
+        )
+        # This supports the case of points that have lower confidence (between 0 and 1) which are weighted with 1. While points and antipoints are balanced.
+        weights = np.ones_like(Y)
+        weights[Y == 0.0] = weight_for_0
+        weights[Y == 1.0] = weight_for_1
+
+        self.logger.info(f"Training data distribution: Total: {len(Y)}, 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}")
+        self._train(X, Y, validation_split=self.validation_split, sample_weights=weights, reset_optimizer=False)
 
     def get_probability(self, perceptions):
         """
@@ -1093,10 +1131,13 @@ class ANNSpace(PointBasedSpace):
         :rtype: np.ndarray
         """
         # Obtain the datapoint from the given perception (selects the appropriate features)
-        points = self.data_from_perception(perceptions)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
         # Calculate the activation value
         if self.configured:
-            activation = self.call(points)
+            activation = self._call(points)
         else:
             activation = np.ones_like(points[:, 0], dtype=float)  # Default to 1.0 if model is not configured
         if self.parent_space:

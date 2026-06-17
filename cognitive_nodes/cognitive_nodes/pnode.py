@@ -16,7 +16,7 @@ class PNode(CognitiveNode):
     """
     P-Node class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, space_params=None, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, space_parameters=None, **params):
         """
         Constructor for the P-Node class.
         
@@ -36,7 +36,7 @@ class PNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space", **(space_params if space_params else {}))]
+            space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
         self.space=self.spaces[0]
         self.added_point = False
         self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(
@@ -84,9 +84,8 @@ class PNode(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """
         space_data = Container.from_msg(request.space)
-        compare_space=PointBasedSpace.populate_space(space_data)
         if self.space:
-            response.contained=self.space.contains(compare_space)
+            response.contained=self.space.contains(space_data)
         else:
             response.contained=False
         return response
@@ -111,7 +110,7 @@ class PNode(CognitiveNode):
                 return response
             self.add_points(points, confidences)
             response.added = True
-            self.get_logger().info(f'Added: {len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
+            self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
         else:
             response.added = False
         return response
@@ -150,19 +149,25 @@ class PNode(CognitiveNode):
         if activation_list!=None:
             # Uses internal readings to calculate the activation. This is used in normal execution of the architecture.
             data = [activation_list[sensor]['data'] for sensor in activation_list]
-            if self.perception is None:
+            if self.perception is None and len(data)>0:
                 self.perception = consolidate_containers(data, name="perception", container_type="perception")
+            elif len(data)==0: # Activation list may be empty when initializing the P-Node.
+                self.activation.activation = 0.0
+                self.activation.timestamp = self.get_clock().now().to_msg()
+                return self.activation
             else:
                 consolidate_containers(data, write_container=self.perception)
-            activation_value = np.min(self.space.get_probability(self.perception)) if self.space else 0.0
-            self.activation.activation = activation_value
-            self.activation.timestamp = self.perception.data.coords["timestamp"].values[-1] 
+            space_activation = self.space.get_probability(self.perception) if self.space else np.zeros(len(self.perception))
+            activation_value = max(0.0, space_activation.reshape(-1)[0])
+            self.activation.activation = float(activation_value)
+            perception_timestamp = self.perception.data.coords["timestamp"].values[-1]
+            self.activation.timestamp = Time(nanoseconds=perception_timestamp).to_msg()
             return self.activation
         
         if perception:
             # Uses the provided perception to calculate the activation. This is used when the activation is requested from outside (e.g., get_activation service).
-            activations = self.space.get_probability(perception) if self.space else np.zeros(len(perception))
-            return list(activations)
+            activations = self.space.get_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
+            return activations.tolist()
 
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
         """
@@ -304,7 +309,7 @@ class PNode(CognitiveNode):
         else:
             self.history.appendleft(False)
         self.success_rate = sum(self.history)/self.history.maxlen
-        self.get_logger().info(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
+        self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
 
 
 def main(args = None):

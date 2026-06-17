@@ -97,30 +97,28 @@ class WorldModelLearned(WorldModel):
         self.train_sample = train_sample
         self.validation_split = validation_split
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+    def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
 
         :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
+        :type input_episodes: Episode
         :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        :rtype: Episode
         """  
         if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
-            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the input episodes.")
-            output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
-            return output_episodes
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the old perceptions.")
+            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
+            return input_episodes
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         self.get_logger().info(f"Data for prediction: {input_data.shape} samples. Ex: {input_data[:2]}")
         predictions = self.learner.call(input_data)
         if predictions is None:
             self.get_logger().warning("No predictions were made by the learner. Returning the old perceptions.")
-            for episode in input_episodes:
-                episode.perception = episode.old_perception  # If the model is not configured, return the old perception
-            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
         else:
             self.get_logger().debug(f"Predictions: {predictions}")
             self.get_logger().debug(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+            predicted_episodes = self.episodic_buffer.matrix_to_output_episodes(predictions)
         self.get_logger().info(f"Prediction made: {len(predicted_episodes)} episodes")
         return predicted_episodes
     
@@ -218,10 +216,6 @@ class Sim2DWorldModel(WorldModel):
         """        
         super().__init__(name, class_name, **params)
         self.learner=Sim2D(self, wm_actuation_config, wm_perception_config, self.get_logger())
-
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
-        predicted_episodes = [Episode(perception=self.learner.call(episode.old_perception, episode.action.actuation)) for episode in input_episodes]
-        return predicted_episodes
 
     
 class Sim2D(Learner):

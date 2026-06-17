@@ -13,7 +13,7 @@ from core.container import Container
 from core.utils import class_from_classname
 from cognitive_node_interfaces.srv import SetActivation, GetSuccessRate, IsCompatible, SaveModel
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
-from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
 
 class DeliberativeModel(CognitiveNode):
     """
@@ -117,7 +117,7 @@ class DeliberativeModel(CognitiveNode):
         self.get_logger().info('Predicting ...') 
         input_episodes = container_msg_to_episode(request.input_episodes)
         output_episodes = self.predict(input_episodes)
-        response.output_episodes = container_msg_to_episode(output_episodes)
+        response.output_episodes = episode_obj_to_msg(output_episodes, "output_episodes")
         self.get_logger().info(f"Prediction made... ")
         return response
     
@@ -199,8 +199,9 @@ class DeliberativeModel(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    def predict(self, input_episodes: Container) -> Episode:
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+    def predict(self, input_episodes: Episode) -> Episode:
+        buffer = input_episodes.obtain_flattened_episode()
+        input_data = self.episodic_buffer.get_samples_from_buffer(buffer, n_samples=None)
         predictions = self.learner.call(input_data)
         if predictions is None:
             predicted_episodes = input_episodes  # If the model is not configured, return the input episodes

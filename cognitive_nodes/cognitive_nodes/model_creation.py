@@ -6,7 +6,7 @@ from rclpy.time import Time
 
 from core.service_client import ServiceClientAsync
 from core.container import Container
-from cognitive_nodes.episode import Episode, container_msg_to_episode, episode_obj_to_msg
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
@@ -244,15 +244,17 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.create_models()
         # The published episode will keep the last perception and action, but with rewards set to 0
-        self.last_episode.parent_policy = self.name
-        self.last_episode.old_perception = self.last_episode.perception
-        last_action = self.last_episode.action.read()
-        last_rewards = self.last_episode.rewards.read()
-        last_action.data = np.zeros_like(last_action.data)
-        last_rewards.data = np.zeros_like(last_rewards.data)
-        self.last_episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
-        self.last_episode.rewards = Container.from_dataarray(last_rewards, container_type="rewards", name="rewards")
-        self.episode_publisher.publish(episode_obj_to_msg(self.last_episode))
+        if self.last_episode.perception is not None:
+            self.last_episode.old_perception.push(self.last_episode.perception)
+            episode = Episode(old_perception=self.last_episode.old_perception, perception=self.last_episode.perception, parent_policy=self.name)
+            if self.last_episode.action is not None:
+                last_action = self.last_episode.action.read()
+                last_rewards = self.last_episode.rewards.read()
+                last_action.data = np.zeros_like(last_action.data)
+                last_rewards.data = np.zeros_like(last_rewards.data)
+                episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
+            episode_msg = episode_obj_to_msg(episode)
+            self.episode_publisher.publish(episode_msg)
         response.policy=self.name
         return response
     
@@ -322,7 +324,9 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         pnode_parameters = self.default_params.get("PNode", {})
         cnode_parameters = self.default_params.get("CNode", {})
         utility_model_parameters = self.default_params.get("UtilityModel", {})
-        trace = Container.from_dataarray(np.array(trace), container_type="trace", name="trace")
+        trace = container_to_episode_obj(trace)
+        perception_points = trace.old_perception
+        trace_msg = episode_obj_to_msg(trace)
 
         # Create P-Node
         pnode_name = f"pnode_{ident}"
@@ -334,7 +338,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         if pnode_points_service not in self.node_clients:
             self.node_clients[pnode_points_service] = ServiceClientAsync(self, AddPoints, pnode_points_service, self.cbgroup_client)
         confidences = list(np.ones(len(trace)))
-        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=trace, confidences=confidences)
+        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=perception_points.to_msg(), confidences=confidences)
         if not pnode_points_response.added:
             self.get_logger().error(f"Failed to add points to P-Node: {pnode_name}")
 
@@ -356,7 +360,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
         if utility_model_trace_service not in self.node_clients:
             self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
-        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace.to_msg(), reward=1.0)
+        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace_msg, reward=1.0)
         if not trace_success.added:
             self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
 

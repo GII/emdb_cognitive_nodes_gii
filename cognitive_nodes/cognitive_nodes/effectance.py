@@ -143,8 +143,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         labels_perception = set(perception.feature_labels)
         labels = list(labels_perception.intersection(labels_old_perception))
 
-        data_old_perception = old_perception.read().sel(feature_labels=labels).values
-        data_perception = perception.read().sel(feature_labels=labels).values
+        data_old_perception = old_perception.read().sel(features=labels).values
+        data_perception = perception.read().sel(features=labels).values
 
         # Work with the last sample (normally only one sample is present).
         data_old = np.asarray(data_old_perception)
@@ -636,8 +636,8 @@ class GoalRecreateEffect(GoalLearnedSpace):
         if not label in perception.feature_labels or not label in old_perception.feature_labels:
             return False, 0.0, 0.0
 
-        old_sensing=old_perception.read().sel(feature_labels=label).values[-1]
-        sensing=perception.read().sel(feature_labels=label).values[-1]
+        old_sensing=old_perception.read().sel(features=label).values[-1]
+        sensing=perception.read().sel(features=label).values[-1]
         effect=isclose(sensing-old_sensing, 1.0)
         
         return effect, old_sensing, sensing

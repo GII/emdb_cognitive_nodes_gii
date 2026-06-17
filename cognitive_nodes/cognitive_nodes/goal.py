@@ -124,7 +124,7 @@ class Goal(CognitiveNode):
                 return response
             self.add_points(points, confidences)
             response.added = True
-            self.get_logger().info(f'Added: {len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
+            self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
         else:
             response.added = False
         return response
@@ -845,7 +845,7 @@ class GoalLearnedSpace(GoalMotiven):
     """
     Class that extends the functionality of the GoalMotiven class by adding a space to store goal state space.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_params=None, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, **params):
         """
         Constructor of the GoalLearnedSpace class.
 
@@ -865,13 +865,20 @@ class GoalLearnedSpace(GoalMotiven):
         :type ltm_id: str
         :param perception: Perception to add when initializing space.
         :type perception: core.container.Container
-        :param space_params: Parameters for the space initialization.
-        :type space_params: dict
+        :param space_parameters: Parameters for the space initialization.
+        :type space_parameters: dict
         """        
         super().__init__(name, class_name, **params)
-        self.spaces = [space if space else class_from_classname(
-                space_class)(ident=name + " space", **(space_params if space_params else {}))]
-        self.space=self.spaces[0]
+        if space_class:
+            self.spaces = [space if space else class_from_classname(
+                    space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
+            self.space=self.spaces[0]
+        elif space:
+            self.spaces = [space]
+            self.space=space
+        else:
+            self.spaces = None
+            self.space = None
         self.point_msg=None
         self.added_point = False
         self.LTM_id=ltm_id
@@ -916,9 +923,8 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
         space_data = Container.from_msg(request.space)
-        compare_space=PointBasedSpace.populate_space(space_data)
         if self.space:
-            response.contained=self.space.contains(compare_space)
+            response.contained=self.space.contains(space_data)
         else:
             response.contained=False
         return response
@@ -933,12 +939,11 @@ class GoalLearnedSpace(GoalMotiven):
         :type confidence: float
         """
         if not self.space:
-            self.get_logger().error("No space defined for the P-Node. Cannot add points.")
+            self.get_logger().error("No space defined for the Goal. Cannot add points.")
             return
         self.space.add_point(point, confidences)
         self.added_point = True
 
-   #CONTINUE HERE
     async def get_reward(self, old_perception=None, perception=None):
         """
         Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
@@ -983,7 +988,8 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: float
         """
         if self.space and self.added_point:
-            reward_value = np.max(0.0, self.space.get_probability(perception))
+            reward_value = self.space.get_probability(perception)
+            reward_value = max(0.0, reward_value.reshape(-1)[0])
         else:
             reward_value = 0.0
         expected_reward = float(reward_value)
@@ -999,11 +1005,11 @@ class GoalLearnedSpace(GoalMotiven):
         :param expected_reward: Reward expected from the state space of the goal.
         :type expected_reward: float
         :param perception: Perception that corresponds to the reward obtained.
-        :type perception: dict
+        :type perception: core.container.Container
         """        
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
-            self.add_point(perception, 1.0)
+            self.add_points(perception, np.array([1.0]))
             if expected_reward>0.5:
                 self.history.appendleft(True)
             else:
@@ -1011,7 +1017,7 @@ class GoalLearnedSpace(GoalMotiven):
         else:
             #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
-                self.add_point(perception, -1.0)
+                self.add_points(perception, np.array([-1.0]))
                 if expected_reward>0.1:
                     self.history.appendleft(False)
         self.confidence=sum(self.history)/self.history.maxlen

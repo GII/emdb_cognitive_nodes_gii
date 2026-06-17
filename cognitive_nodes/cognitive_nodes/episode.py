@@ -1,5 +1,7 @@
 from __future__ import annotations
 import numpy as np
+import xarray as xr
+from copy import copy
 from rclpy.time import Time
 
 from core.container import Container, consolidate_containers
@@ -51,6 +53,13 @@ class Episode:
         self.ltm_state = {} if ltm_state is None else ltm_state
         self.parent_policy = parent_policy
 
+        self.field_type_map = {
+            "old_perception": "perception",
+            "action": "action",
+            "perception": "perception",
+            "rewards": "rewards",
+        }
+
         if old_perception is not None:
             self.old_perception = old_perception
         if action is not None:
@@ -60,10 +69,18 @@ class Episode:
         if rewards is not None:
             self.rewards = rewards
 
+    def __len__(self):
+        return self.container_size if self.container_size is not None else 0
+
 
     def _bind_container(self, field_name: str, container: Container) -> None:
+        if not hasattr(self, field_name):
+            raise ValueError(f"Invalid field name: {field_name}")
+        container = copy(container)  # Avoid modifying the original container passed in
+
         if container is None:
-            raise ValueError(f"{field_name} cannot be None")
+            setattr(self, f"_{field_name}", None)
+            return
 
         size = len(container)
         if self.container_size is None:
@@ -72,7 +89,8 @@ class Episode:
             raise ValueError(
                 f"{field_name} size {size} does not match episode size {self.container_size}"
             )
-
+        container.name = field_name
+        container.container_type = self.field_type_map.get(field_name, field_name)
         setattr(self, f"_{field_name}", container)
 
     @property
@@ -110,13 +128,13 @@ class Episode:
     @property
     def reward_list(self) -> dict|list[dict]|None:
         if self.rewards is None:
-            return None
+            return {}
         reward_dicts = []
         data = self.rewards.read().values
         for row in data:
             reward_dict = {label.split(":")[1]: row[idx] for idx, label in enumerate(self.rewards.feature_labels)}
             reward_dicts.append(reward_dict)
-        return reward_dicts if len(reward_dicts) > 1 else reward_dicts[0] if reward_dicts else None
+        return reward_dicts if len(reward_dicts) > 1 else reward_dicts[0] if reward_dicts else {}
 
     def update_reward(self, reward_dict_list: dict | list[dict], timestamp: float|Time) -> None:
         """Update the episode's rewards with new reward values.
@@ -135,25 +153,25 @@ class Episode:
         rewards_container = self.rewards
         for reward_dict in reward_dict_list:
             goals = list(reward_dict.keys())
-            labels = [f"rewards:{goal}" for goal in goals]
             if rewards_container is None:
                 # If rewards container doesn't exist, create it with the goals as labels
-                rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=labels)
+                labels = [f"rewards:{goal}" for goal in goals]
+                rewards_container = Container("rewards", max_size=self.container_size, container_type="rewards", labels=labels)
                 rewards = np.fromiter((reward_dict[g] for g in goals), dtype=rewards_container.data.dtype)
             else:
                 # If rewards container exists, update it with new goals and rewards, rewards not present in the reward_dict will be set to 0.0.
                 # If new goals are introduced, a new rewards container will be created with the updated set of goals as labels.
                 existing_goals = set([label.split(":")[1] for label in rewards_container.feature_labels])
                 new_goals = set(goals)
-                all_goals = existing_goals.union(new_goals)
+                all_goals = list(existing_goals.union(new_goals))
+                labels = [f"rewards:{goal}" for goal in all_goals]
                 rewards = np.fromiter((reward_dict.get(goal, 0.0) for goal in all_goals), dtype=rewards_container.data.dtype)
                 if not new_goals.issubset(existing_goals):
-                    all_goals = list(existing_goals.union(new_goals))
                     if self.container_size > 1:
                         # TODO: Implement handling new goals in rewards update for container_size > 1
                         # Requires reconstructing the rewards container with the new set of goals and properly aligning existing reward values with the new labels, filling in 0.0 for any missing rewards in existing entries. 
                         raise NotImplementedError("Handling new goals in rewards update is only implemented for container_size=1")
-                    rewards_container = Container("rewards", max_size=self.container_size, container_type="dict", labels=all_goals)
+                    rewards_container = Container("rewards", max_size=self.container_size, container_type="rewards", labels=labels)
             rewards_container.push(rewards, src_labels=labels, timestamps=timestamp)
         self.rewards = rewards_container
 
@@ -167,7 +185,7 @@ class Episode:
         populated_parts = [p for p in parts if p is not None]
         if not populated_parts:
             return None
-        consolidated = consolidate_containers(populated_parts, container_type="episode", attrs={"parent_policy": self.parent_policy})
+        consolidated = consolidate_containers(populated_parts, name="episode", container_type="episode", attrs={"parent_policy": self.parent_policy})
         return consolidated
 
     def __repr__(self):
@@ -180,19 +198,30 @@ def container_msg_to_episode(msg: ContainerMsg) -> Episode:
     return container_to_episode_obj(cont)
 
 
-def container_to_episode_obj(container: Container) -> Episode:
+def container_to_episode_obj(container: Container|xr.DataArray) -> Episode:
     """Convert a flattened Container back into a structured Episode (split by 'prefix:feature')."""
     epi = Episode()
-    if container.size == 0:
-        return epi
 
-    epi.parent_policy = container.attrs.get("parent_policy", "")
-    data = container.read()
+    if isinstance(container, Container):
+        if container.size == 0:
+            return epi
+        epi.parent_policy = container.data.attrs.get("parent_policy", "")
+        data = container.read()
+    elif isinstance(container, xr.DataArray):
+        data = container
+        epi.parent_policy = data.attrs.get("parent_policy", "")
+    elif container is None:
+        return epi
+    else:
+        raise ValueError(f"Input must be a Container or xarray DataArray not {type(container)}")
+
+
     values = data.values
     ts = data.coords["timestamp"].values
-    feature_labels = data.coords["feature"].values
+    feature_labels = data.coords["features"].values
     dtype = data.dtype
     attrs = data.attrs
+    attrs.pop("parent_policy", None)  # Remove parent_policy from attrs since it's now stored in the episode object
     n_rows = int(values.shape[0])
 
     # set episode container size before assigning parts so setters validate consistently
@@ -230,9 +259,6 @@ def container_to_episode_obj(container: Container) -> Episode:
             epi.perception = c
         elif prefix == "rewards":
             epi.rewards = c
-        else:
-            # attach unknown prefixes as attributes for future use
-            setattr(epi, prefix, c)
 
     return epi
 

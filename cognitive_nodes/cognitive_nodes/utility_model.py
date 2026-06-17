@@ -7,7 +7,7 @@ from math import isclose
 from rclpy.executors import SingleThreadedExecutor
 
 from core.utils import class_from_classname
-from cognitive_nodes.episode import Episode, episode_obj_to_msg, container_msg_to_episode
+from cognitive_nodes.episode import Episode, episode_obj_to_msg, container_msg_to_episode, container_to_episode_obj
 from cognitive_nodes.episodic_buffer import EpisodicBuffer, TraceBuffer
 from cognitive_processes.deliberation import Deliberation
 
@@ -93,15 +93,15 @@ class UtilityModel(DeliberativeModel):
             self.activation.activation=0.0
             self.activation.timestamp=self.get_clock().now().to_msg()
 
-    def predict(self, input_episodes: list[Episode]) -> np.ndarray:
+    def predict(self, input_episodes: Episode) -> np.ndarray:
         """Predict the expected utilities for a list of input episodes using the learner model.
 
         :param input_episodes: List of Episode objects to predict utilities for.
-        :type input_episodes: list[Episode]
+        :type input_episodes: Episode
         :return: List of predicted utility values, one for each input episode.
-        :rtype: list[float]
+        :rtype: np.ndarray
         """        
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         expected_utilities = self.learner.call(input_data)
         self.get_logger().info(f"Predictions: {expected_utilities}")
         return expected_utilities
@@ -223,7 +223,7 @@ class HardCodedUtilityModel(UtilityModel):
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=False, **params)
         self.spin_deliberation()
     
-    def predict(self, input_episodes: list[Episode]) -> list[float]:
+    def predict(self, input_episodes: list[Episode]) -> np.ndarray:
         """Predict utilities for input episodes using hard-coded heuristics for ball-to-box task.
         
         Computes utilities based on distances and angles between robot arms, ball, and target box,
@@ -231,8 +231,8 @@ class HardCodedUtilityModel(UtilityModel):
 
         :param input_episodes: List of Episode objects containing perception data to evaluate.
         :type input_episodes: list[Episode]
-        :return: List of normalized utility values (0-1 range) for each input episode.
-        :rtype: list[float]
+        :return: Array of normalized utility values (0-1 range) for each input episode.
+        :rtype: np.ndarray
         """        
         distances = []
         i = 0
@@ -472,15 +472,15 @@ class LearnedUtilityModel(UtilityModel):
         self.deliberation = Deliberation(f"{self.name}_deliberation", self, iterations=max_iterations, candidate_actions=candidate_actions, LTM_id=ltm_id, clear_buffer=True, **params)
         self.spin_deliberation()
 
-    def predict(self, input_episodes: list[Episode]) -> list[float]:
+    def predict(self, input_episodes: list[Episode]) -> np.ndarray:
         """Predict utilities for input episodes using the learner model.
 
         :param input_episodes: List of Episode objects to predict utilities for.
         :type input_episodes: list[Episode]
-        :return: List of predicted utility values for each input episode.
-        :rtype: list[float]
+        :return: Array of predicted utility values for each input episode.
+        :rtype: np.ndarray
         """        
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         predictions = self.learner.call(input_data)
         if predictions is None:
             self.get_logger().warn("Learner not configured, using alternative learner for predictions")
@@ -529,12 +529,12 @@ class LearnedUtilityModel(UtilityModel):
         :param msg: The episode message received from the subscription, containing perception data,
                     rewards, and parent policy information.
         :type msg: cognitive_node_interfaces.msg.Episode
-        """        
-        if msg.parent_policy == "reset_world":
+        """
+        episode = container_msg_to_episode(msg)
+        if episode.parent_policy == "reset_world":
             self.get_logger().info("World reset detected, clearing buffer")
             self.episodic_buffer.clear()
-        elif msg.parent_policy!=self.name: # Filter self generated episodes as those are handled by the deliberation process
-            episode = container_msg_to_episode(msg)
+        elif episode.parent_policy != self.name: # Filter self generated episodes as those are handled by the deliberation process
             linked_goals = self.deliberation.get_linked_goals()
             reward_list = episode.reward_list
             rewards = [reward_list[goal] for goal in linked_goals if goal in reward_list]
@@ -739,11 +739,13 @@ class QUtilityModel(LearnedUtilityModel):
             self.get_logger().info(
                 f"Training on {sample_size} new traces. Total traces: {self.episodic_buffer.n_traces}"
             )
-            episodes, rewards = self.episodic_buffer.get_flattened_traces(n_samples=sample_size)
-            x_train = self.episodic_buffer.buffer_to_matrix(episodes, self.episodic_buffer.input_labels)
+            x_train, rewards = self.episodic_buffer.get_dataset(n_samples=sample_size, shuffle=False)
+            timestamps = np.zeros(x_train.shape[0])  # Placeholder for timestamps
+            perceptions = self.episodic_buffer._matrix_to_buffer(x_train, timestamps, self.episodic_buffer.input_labels)
+            episodes = container_to_episode_obj(perceptions)
 
             # Compute target Q-values
-            candidate_states_actions = self.generate_candidates_matrix(episodes)
+            candidate_states_actions = self.deliberation.generate_candidate_actions(episodes.perception)
             if self.deliberation.current_world is None:
                 self.deliberation.current_world = self.deliberation.get_linked_world_model()[0]
             next_states = self.deliberation.predict_perceptions(self.deliberation.current_world, candidate_states_actions)
@@ -766,17 +768,17 @@ class QUtilityModel(LearnedUtilityModel):
                 self.target_learner.set_weights(weights)
                 self.train_step_count = 0
 
-    def predict(self, input_episodes: list[Episode], target_learner=False) -> list[float]:
+    def predict(self, input_episodes: list[Episode], target_learner=False) -> np.ndarray:
         """Predict Q-values for input episodes using either main or target learner.
         
         :param input_episodes: List of Episode objects to predict Q-values for.
         :type input_episodes: list[Episode]
         :param target_learner: If True, use target network for predictions; otherwise use main learner, defaults to False
         :type target_learner: bool, optional
-        :return: List of predicted Q-values for each input episode.
-        :rtype: list[float]
+        :return: Array of predicted Q-values for each input episode.
+        :rtype: np.ndarray
         """
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         learner = self.target_learner if target_learner else self.learner
         predictions = learner.call(input_data)
         if predictions is None:

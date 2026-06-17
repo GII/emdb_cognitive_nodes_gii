@@ -1,4 +1,4 @@
-import rclpy
+import threading
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -52,8 +52,8 @@ class EpisodicBuffer:
         self.outputs=outputs #Fields of the episode that are considered outputs (Predicted), or a post calculated value (e.g. Value)
         self.input_labels=[]
         self.output_labels=[]
-        self.main_size=main_size
-        self.secondary_size=secondary_size
+        self._main_size=main_size
+        self._secondary_size=secondary_size
         self.main_buffer=None # Main buffer, used for training
         self.secondary_buffer=None # Secondary buffer, used for testing
         self.main_dataframe_inputs=None # DataFrame for the main buffer
@@ -63,6 +63,7 @@ class EpisodicBuffer:
         self.new_sample_count_main=0 # Counter for new samples in the main buffer
         self.new_sample_count_secondary=0 # Counter for new samples in the secondary buffer
         self.rng = np.random.default_rng(random_seed) # Configuration of the random number generator
+        self.semaphore = threading.Semaphore() # Semaphore for thread-safe operations on the buffer
 
     def configure_labels(self, episode: Episode):
         """
@@ -74,10 +75,10 @@ class EpisodicBuffer:
         self.node.get_logger().info(f"Configuring labels for episodic buffer: {episode}")
         self.input_labels.clear()
         self.output_labels.clear()
-        self.input_labels = self._extract_labels(self.inputs, episode, self.input_labels)
-        self.output_labels = self._extract_labels(self.outputs, episode, self.output_labels)
-        self.main_buffer = Container("MainBuffer", self.main_size, container_type="buffer", labels=self.input_labels + self.output_labels)
-        self.secondary_buffer = Container("SecondaryBuffer", self.secondary_size, container_type="buffer", labels=self.input_labels + self.output_labels)
+        self.input_labels = self._extract_labels(self.inputs, episode)
+        self.output_labels = self._extract_labels(self.outputs, episode)
+        self.main_buffer = Container("MainBuffer", self._main_size, container_type="buffer", labels=self.input_labels + self.output_labels)
+        self.secondary_buffer = Container("SecondaryBuffer", self._secondary_size, container_type="buffer", labels=self.input_labels + self.output_labels)
         self.node.get_logger().info(f"Configuration finished - Input labels: {self.input_labels}, Output labels: {self.output_labels}")
 
     def update_labels(self, episode: Episode):
@@ -88,10 +89,8 @@ class EpisodicBuffer:
         :type episode: cognitive_node_interfaces.msg.Episode
         """
         self.node.get_logger().debug(f"Updating labels for episodic buffer: {episode}")
-        new_input_labels = []
-        new_output_labels = []
-        self._extract_labels(self.inputs, episode, new_input_labels)
-        self._extract_labels(self.outputs, episode, new_output_labels)
+        new_input_labels = self._extract_labels(self.inputs, episode)
+        new_output_labels = self._extract_labels(self.outputs, episode)
         # Add new input labels and log warnings
         new_inputs = set(new_input_labels) - set(self.input_labels)
         if new_inputs:
@@ -122,7 +121,8 @@ class EpisodicBuffer:
         Notes:
         - Empty episodes (w.r.t configured inputs/outputs) are skipped with a warning.
         - Labels are configured lazily on the first episode and updated when new dimensions appear.
-        """        
+        """
+        self.semaphore.acquire()
         if self.empty_episode(episode, self.inputs, self.outputs):
             self.node.get_logger().warning("The episode is empty, not adding to buffer.")
         else:
@@ -138,6 +138,7 @@ class EpisodicBuffer:
                 # Add to secondary buffer
                 self.secondary_buffer.push(episode.obtain_flattened_episode())
                 self.new_sample_count_secondary += 1
+        self.semaphore.release()
         
     def remove_episode(self, index=None, remove_from_main=True):
         """Remove an episode from the buffer.
@@ -153,8 +154,10 @@ class EpisodicBuffer:
         :return: None
         :rtype: None
 
-        """        
+        """
+        self.semaphore.acquire() # Remember to apply the semaphore once the method is implemented to ensure thread safety
         raise NotImplementedError("remove_episode method is not implemented yet.")
+        self.semaphore.release()
 
     def clear(self):
         """
@@ -398,8 +401,9 @@ class EpisodicBuffer:
         :return: Tuple of (inputs, outputs) numpy arrays
         :rtype: tuple
         """
-        inputs = buffer.read(None, ordered=True).sel(features=self.input_labels).values if self.input_labels else np.empty((0, 0)) 
-        outputs = buffer.read(None, ordered=True).sel(features=self.output_labels).values if self.output_labels else np.empty((0, 0))
+        data= buffer.read(None, ordered=True)
+        inputs = data.sel(features=self.input_labels).values if self.input_labels else np.empty((0, 0)) 
+        outputs = data.sel(features=self.output_labels).values if self.output_labels else np.empty((0, 0))
         if shuffle:
             inputs, outputs = self._shuffle_dataset(inputs, outputs)
 
@@ -413,23 +417,23 @@ class EpisodicBuffer:
                     outputs = outputs[idx]
         return inputs, outputs
     
-    def matrix_to_buffer(self, matrix: np.ndarray, labels: list[str], name: str = "result_buffer") -> Container:
-        """
-        Helper method to convert a numpy array back into a Container buffer.
-
-        :param matrix: Numpy array containing episode data.
-        :type matrix: np.ndarray
-        :param labels: List of labels corresponding to the columns in the matrix.
-        :type labels: list[str]
-        :return: Container object populated with the data from the matrix.
-        :rtype: Container
-        """
-        if matrix.shape[1] != len(labels):
-            raise ValueError(f"Number of columns in matrix ({matrix.shape[1]}) does not match number of labels ({len(labels)}).")
-        
-        buffer = Container(name, max_size=matrix.shape[0], container_type="buffer", labels=labels)
-        buffer.push(matrix, src_labels=labels, src_dtype=matrix.dtype)
-        return buffer
+    def input_episodes_to_matrix(self, episodes: Episode):
+        buffer = episodes.obtain_flattened_episode()
+        data = buffer.read(ordered=True)
+        inputs = data.sel(features=self.input_labels).values if self.input_labels else np.empty((0,0))
+        return inputs
+    
+    def matrix_to_output_episodes(self, matrix, timestamps=None):
+        if not timestamps:
+            timestamps = np.zeros(matrix.shape[0])
+        if not self.output_labels:
+            return Episode()
+        buffer = self._matrix_to_buffer(matrix, timestamps, self.output_labels)
+        episode = container_to_episode_obj(buffer)
+        return episode
+    
+    
+    
 
     def _shuffle_dataset(self, inputs, outputs):
         """
@@ -472,6 +476,28 @@ class EpisodicBuffer:
             else:
                 label_list.append(io)  # If it's not an attribute, treat it as a direct label
         return label_list
+    
+    @staticmethod
+    def _matrix_to_buffer(matrix: np.ndarray, timestamps: np.ndarray, labels: list[str], name: str = "result_buffer") -> Container:
+        """
+        Helper method to convert a numpy array back into a Container buffer.
+
+        :param matrix: Numpy array containing episode data.
+        :type matrix: np.ndarray
+        :param labels: List of labels corresponding to the columns in the matrix.
+        :type labels: list[str]
+        :return: Container object populated with the data from the matrix.
+        :rtype: Container
+        """
+        if matrix.shape[1] != len(labels):
+            raise ValueError(f"Number of columns in matrix ({matrix.shape[1]}) does not match number of labels ({len(labels)}).")
+        
+        if matrix.shape[0] != len(timestamps):
+            raise ValueError(f"Number of rows in matrix ({matrix.shape[0]}) does not match number of timestamps ({len(timestamps)}).")
+        
+        buffer = Container(name, max_size=matrix.shape[0], container_type="buffer", labels=labels)
+        buffer.push(matrix, src_labels=labels, src_dtype=matrix.dtype, timestamps=timestamps)
+        return buffer
 
 class TraceBuffer(EpisodicBuffer):
     """
@@ -535,8 +561,9 @@ class TraceBuffer(EpisodicBuffer):
         :type episode: Episode
         """
         super().configure_labels(episode)
-        self.traces_buffer = MultiContainer("TracesBuffer", max_size=self.max_traces, container_type="trace_buffer", labels=self.input_labels + self.output_labels + ["utility"])
-        self.antitraces_buffer = MultiContainer("AntitracesBuffer", max_size=self.max_antitraces, container_type="trace_buffer", labels=self.input_labels + self.output_labels + ["utility"])
+        self.traces_buffer = MultiContainer("TracesBuffer", max_traces=self.max_traces, max_size=self.main_max_size, container_type="trace_buffer", labels=self.input_labels + self.output_labels + ["utility"])
+        self.antitraces_buffer = MultiContainer("AntitracesBuffer", max_traces=self.max_antitraces, max_size=self.main_max_size, container_type="trace_buffer", labels=self.input_labels + self.output_labels + ["utility"])
+        self.node.get_logger().info(f"Configured labels for trace buffers")
 
     def add_episode(self, episode, reward=0.0):
         """Add an episode to the trace buffer and complete the trace if reward is positive.
@@ -560,6 +587,7 @@ class TraceBuffer(EpisodicBuffer):
         - Positive rewards trigger utility evaluation and trace storage.
         - The buffer is cleared after storing a successful trace.
         """
+        self.semaphore.acquire()
         if type(episode) is not Episode:
             raise ValueError("The episode must be of type Episode.")
         if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
@@ -569,32 +597,33 @@ class TraceBuffer(EpisodicBuffer):
 
         #Add corresponding trace
         if reward > 0: # If the reward is positive, consider it a successful trace
-            trace=self.main_buffer.read() # Read the current trace from the main buffer
+            trace=self.main_buffer # Trace corresponds to the contents of the main buffer
             self._add_trace(trace, reward, clear_main_buffer=True) # Add the trace to the traces buffer with the corresponding reward, and clear the main buffer for the next trace
-            self.clear()
+        self.semaphore.release()
 
-    def add_trace (self, trace: Container, reward: float = 0, reward_trace: np.ndarray = None):
+    def add_trace (self, trace: Episode, reward: float = 0, reward_trace: np.ndarray = None):
         """Public method to add a trace to the buffer with an associated reward.
 
         This method serves as the public interface for adding complete traces along
         with their rewards. It validates the trace format and delegates to the internal
         _add_trace method for processing.
-        :param trace: Container object containing the sequence of episodes to add as a trace.
-        :type trace: Container
+        :param trace: Episodes that belong to the trace.
+        :type trace: Episode
         :param reward: Reward value for the trace; positive values indicate success, defaults to 0
         :type reward: float, optional
         :param reward_trace: Optional precomputed utility values for the trace; if None, utilities are computed using the evaluation method, defaults to None
         :type reward_trace: np.ndarray | None, optional
         """
+        self.semaphore.acquire()
         if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
-            episode = container_to_episode_obj(trace)
-            self.configure_labels(episode)
+            self.configure_labels(trace)
 
-        trace_array = trace.read()
-        self._add_trace(trace_array, reward, reward_trace, clear_main_buffer=False)
+        flat_episodes = trace.obtain_flattened_episode()
+        self._add_trace(flat_episodes, reward, reward_trace, clear_main_buffer=False)
+        self.semaphore.release()
 
 
-    def _add_trace(self, trace: xr.DataArray, reward: float = 0, reward_trace: np.ndarray = None, clear_main_buffer: bool = True):
+    def _add_trace(self, trace: Container, reward: float = 0, reward_trace: np.ndarray = None, clear_main_buffer: bool = True):
         """Add a trace directly to the buffer with an associated reward.
 
         This method allows adding a complete trace (sequence of episodes) along with
@@ -608,24 +637,23 @@ class TraceBuffer(EpisodicBuffer):
         :param reward_trace: Optional precomputed utility values for the trace; if None, utilities are computed using the evaluation method, defaults to None
         :type reward_trace: np.ndarray | None, optional
         """
+        trace_array = trace.read(ordered=True)
         if not reward_trace:
-            reward_trace = self.evaluate_trace(reward)
-        trace_data = np.concatenate((np.trace.values, reward_trace), axis=1) # Combine episode data with utility values
-        trace_labels = self.main_buffer.feature_labels + ["utility"]
-        trace_timestamps = trace.coords["timestamp"].values 
-        dtype = self.main_buffer.data.dtype
+            reward_trace = self.evaluate_trace(reward, n=trace_array.shape[0])
+        trace_data = np.concatenate((trace_array.values, reward_trace), axis=1) # Combine episode data with utility values
+        trace_labels = trace.feature_labels + ["utility"]
+        trace_timestamps = trace_array.coords["timestamp"].values 
+        dtype = trace_array.dtype
         self.traces_buffer.push(trace_data, src_labels=trace_labels, src_dtype=dtype, timestamps=trace_timestamps)
         self.new_traces += 1
-        self.node.get_logger().info(f"Adding trace with {self.main_size} episodes. New traces: {self.new_traces}")
+        self.node.get_logger().info(f"Adding trace with {trace_array.shape[0]} episodes. New traces: {self.new_traces}")
         if clear_main_buffer:
             self.clear()
-        
-
-
 
     def add_antitrace(self):
         """Add an antitrace to the buffer if enough traces exist.
         """        
+        self.semaphore.acquire()
         if self.n_traces >= self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
             self.node.get_logger().info("Adding antitrace")
             trace=self.main_buffer.read(None, ordered=True) # Ensure the buffer is ordered for correct utility assignment
@@ -635,8 +663,9 @@ class TraceBuffer(EpisodicBuffer):
             dtype = self.main_buffer.data.dtype
             self.antitraces_buffer.push(trace_data, src_labels=trace_labels, src_dtype=dtype, timestamps=trace_timestamps)
             self.clear()
+        self.semaphore.release()
 
-    def evaluate_trace(self, reward):
+    def evaluate_trace(self, reward, n=None):
         """Compute utility values for each episode in the current trace.
 
         Uses the configured evaluation method to assign utility values to all episodes
@@ -645,16 +674,20 @@ class TraceBuffer(EpisodicBuffer):
 
         :param reward: Final reward value for the trace used to compute utilities.
         :type reward: float
+        :param n: Optional number of episodes in the trace; if None, uses the current size of the main buffer, defaults to None
+        :type n: int | None, optional
         :return: List of utility values, one per episode in the trace.
         :rtype: np.ndarray
         """
-        n = len(self.main_buffer)
-        if n == 0:
-            return []
+        if n is None:
+            n = len(self.main_buffer)
+            if n == 0:
+                return []
         min_val = reward * self.min_utility_fraction
         values = getattr(self, f"eval_{self.evaluation_method}", self.eval_default)(reward, min_val, self.reward_factor, n, self.main_max_size)
         values = np.array(values).reshape(-1, 1)
         return values
+    
 
     def _get_samples_from_traces(self, traces_buffer: MultiContainer, n_samples=None, shuffle=True):
         """Flatten stored traces into a single buffer with corresponding utilities.
@@ -675,8 +708,8 @@ class TraceBuffer(EpisodicBuffer):
                 flattened_traces = traces_buffer.read_flattened(None)
         else:
             flattened_traces = traces_buffer.read_flattened(None)
-        utilities = flattened_traces["utility"].values
-        buffer = flattened_traces.drop("utility", axis=1).values
+        utilities = flattened_traces.sel(features="utility").values.reshape(-1)
+        buffer = flattened_traces.drop_sel(features=["utility"]).values
         if shuffle:
             buffer, utilities = self._shuffle_dataset(buffer, utilities)
         return buffer, utilities
@@ -694,8 +727,11 @@ class TraceBuffer(EpisodicBuffer):
         :return: Tuple of (states, utilities) numpy arrays for training.
         :rtype: tuple[np.ndarray, np.ndarray]
         """
-        x_train, y_train = self._get_samples_from_traces(n_samples, shuffle=shuffle)
+        x_train, y_train = self._get_samples_from_traces(self.traces_buffer, n_samples=n_samples, shuffle=shuffle)
         return x_train, y_train
+
+    def episodes_to_matrix(self):
+        pass
     
     def reset_new_sample_count(self, main=True, secondary=True):
         """
