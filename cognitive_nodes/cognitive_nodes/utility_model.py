@@ -107,6 +107,31 @@ class UtilityModel(DeliberativeModel):
         self.get_logger().info(f"Predictions: {expected_utilities}")
         return expected_utilities
     
+    def predict_callback(self, request, response):
+        self.get_logger().info("Predicting ...")
+
+        try:
+            input_episodes = episode_msg_list_to_obj_list(request.episodes)
+            expected_utilities = self.predict(input_episodes)
+            expected_utilities = [float(x) for x in expected_utilities]
+
+            response.expected_utilities = expected_utilities
+            response.valid = True
+
+            self.get_logger().info(
+                f"Prediction made: {len(input_episodes)} episodes"
+            )
+            self.get_logger().info(
+                f"Predictions: {expected_utilities}"
+            )
+
+        except Exception as exc:
+            self.get_logger().error(f"Prediction failed: {exc}")
+            response.expected_utilities = []
+            response.valid = False
+
+        return response
+    
     def execute_callback(self, request, response):
         """
         Callback for the execute service.

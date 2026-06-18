@@ -654,6 +654,16 @@ class PolicyDreamingDummy(Policy):
         self.declare_parameter("world_model_name", "WorldModel_0")
         self.declare_parameter("perception_size", 11)
         self.declare_parameter("action_size", 4)
+        self.declare_parameter("utility_model_name", "UtilityModel_0")
+
+        self.utility_model_name = self.get_parameter(
+            "utility_model_name"
+        ).get_parameter_value().string_value
+
+        self.utility_model_predict_service_name = self._build_utility_model_predict_service_name(
+            self.utility_model_name
+        )
+        self.utility_model_client = None
 
         self.world_model_name = self.get_parameter(
             "world_model_name"
@@ -683,12 +693,16 @@ class PolicyDreamingDummy(Policy):
         self.get_logger().info(
             f"PolicyDreamingDummy initialized. "
             f"world model service={self.world_model_predict_service_name}, "
+            f"utility model service={self.utility_model_predict_service_name}, "
             f"manual service=/{self.name}/manual_world_model_predict, "
             f"perception_size={self.perception_size}, action_size={self.action_size}"
         )
 
     def _build_world_model_predict_service_name(self, world_model_name: str) -> str:
         return f"/world_model/{world_model_name}/predict"
+
+    def _build_utility_model_predict_service_name(self, utility_model_name: str) -> str:
+        return f"/utility_model/{utility_model_name}/predict"
 
     def _ensure_world_model_predict_client(self):
         if self.world_model_predict_client is not None:
@@ -705,6 +719,24 @@ class PolicyDreamingDummy(Policy):
             self.world_model_predict_service_name
         )
 
+    def _ensure_utility_model_client(self):
+        if self.utility_model_client is not None:
+            return
+
+        tmp_client = self.create_client(
+            PredictUtility,
+            self.utility_model_predict_service_name
+        )
+        if not tmp_client.wait_for_service(timeout_sec=2.0):
+            raise RuntimeError(
+                f"{self.utility_model_predict_service_name} not available yet"
+            )
+
+        self.utility_model_client = ServiceClient(
+            PredictUtility,
+            self.utility_model_predict_service_name
+        )
+
     def _recreate_world_model_predict_client(self):
         self.world_model_predict_service_name = self._build_world_model_predict_service_name(
             self.world_model_name
@@ -712,6 +744,15 @@ class PolicyDreamingDummy(Policy):
         self.world_model_predict_client = None
         self.get_logger().info(
             f"World model predict client reset to {self.world_model_predict_service_name}"
+        )
+
+    def _recreate_utility_model_client(self):
+        self.utility_model_predict_service_name = self._build_utility_model_predict_service_name(
+            self.utility_model_name
+        )
+        self.utility_model_client = None
+        self.get_logger().info(
+            f"Utility model predict client reset to {self.utility_model_predict_service_name}"
         )
 
     def _on_parameters_changed(self, params):
@@ -725,6 +766,14 @@ class PolicyDreamingDummy(Policy):
                     return result
                 self.world_model_name = str(param.value).strip()
                 self._recreate_world_model_predict_client()
+
+            elif param.name == "utility_model_name":
+                if not param.value or not str(param.value).strip():
+                    result.successful = False
+                    result.reason = "utility_model_name cannot be empty"
+                    return result
+                self.utility_model_name = str(param.value).strip()
+                self._recreate_utility_model_client()
 
             elif param.name == "perception_size":
                 if int(param.value) <= 0:
@@ -783,15 +832,17 @@ class PolicyDreamingDummy(Policy):
     def manual_world_model_predict_trigger_callback(self, request, response):
         try:
             self._ensure_world_model_predict_client()
+            self._ensure_utility_model_client()
         except Exception as exc:
-            self.get_logger().error(f"[proxy] failed to create predict client: {exc}")
+            self.get_logger().error(f"[proxy] failed to create clients: {exc}")
             response.output_episodes = []
             response.valid = False
             return response
 
         self.get_logger().info(
             f"Manual world model predict trigger called. "
-            f"Using world model service {self.world_model_predict_service_name}"
+            f"Using world model service {self.world_model_predict_service_name} "
+            f"and utility model service {self.utility_model_predict_service_name}"
         )
 
         input_episode = EpisodeMsg()
@@ -879,7 +930,7 @@ class PolicyDreamingDummy(Policy):
             self.get_logger().info(
                 "[proxy] calling world model predict with 1 episode..."
             )
-            result = self.world_model_predict_client.send_request(
+            wm_result = self.world_model_predict_client.send_request(
                 input_episodes=[input_episode]
             )
         except Exception as exc:
@@ -890,17 +941,69 @@ class PolicyDreamingDummy(Policy):
             response.valid = False
             return response
 
-        self.get_logger().info(
-            f"[proxy] result.n_output_episodes={len(result.output_episodes)}"
-        )
-
-        response.output_episodes = list(getattr(result, "output_episodes", []))
-        response.valid = getattr(result, "valid", True)
+        output_episodes = list(getattr(wm_result, "output_episodes", []))
+        response.output_episodes = output_episodes
+        response.valid = getattr(wm_result, "valid", True)
 
         self.get_logger().info(
-            f"[proxy] response: valid={response.valid}, "
-            f"n_output_episodes={len(response.output_episodes)}"
+            f"[proxy] world model result.valid={response.valid}, "
+            f"n_output_episodes={len(output_episodes)}"
         )
+
+        if not output_episodes:
+            self.get_logger().warning("[proxy] no output episodes returned")
+            return response
+
+        episode = output_episodes[0]
+        predicted_perception_msg = episode.perception
+        predicted_action_msg = episode.action.actuation
+
+        predicted_perception = list(getattr(predicted_perception_msg, "data", []))
+        predicted_action = list(getattr(predicted_action_msg, "data", []))
+
+        self.get_logger().info(
+            f"[proxy] predicted perception ({len(predicted_perception)}): "
+            f"{predicted_perception}"
+        )
+        self.get_logger().info(
+            f"[proxy] predicted action ({len(predicted_action)}): "
+            f"{predicted_action}"
+        )
+
+        try:
+            self.get_logger().info("[proxy] calling utility model predict...")
+            utility_episode = EpisodeMsg()
+            utility_episode.old_perception = input_episode.old_perception
+            utility_episode.perception = predicted_perception_msg
+            utility_episode.action = episode.action
+            utility_episode.reward_list = RewardList()
+            utility_episode.reward_list.goals = []
+            utility_episode.reward_list.rewards = []
+            utility_episode.parent_policy = self.name
+            utility_episode.timestamp = self.get_clock().now().to_msg()
+
+            utility_result = self.utility_model_client.send_request(
+                input_episodes=[utility_episode]
+            )
+        except Exception as exc:
+            self.get_logger().error(f"[proxy] utility model predict failed: {exc}")
+            return response
+
+        predicted_utility = getattr(utility_result, "reward", None)
+        if predicted_utility is None:
+            predicted_utility = getattr(utility_result, "utility", None)
+        if predicted_utility is None:
+            self.get_logger().warning("[proxy] utility model returned no reward/utility")
+            predicted_utility = 0.0
+
+        predicted_utility = float(predicted_utility)
+
+        utility_rl = RewardList()
+        utility_rl.goals = ["utility_model"]
+        utility_rl.rewards = [predicted_utility]
+        episode.reward_list = utility_rl
+
+        response.output_episodes = [episode]
         return response
 
     async def execute_callback(self, request, response):
