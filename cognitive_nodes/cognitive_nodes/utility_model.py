@@ -111,18 +111,16 @@ class UtilityModel(DeliberativeModel):
         self.get_logger().info("Predicting ...")
 
         try:
-            input_episodes = episode_msg_list_to_obj_list(request.episodes)
+            input_episodes = episode_msg_list_to_obj_list(request.input_episodes)
             expected_utilities = self.predict(input_episodes)
-            expected_utilities = [float(x) for x in expected_utilities]
-
-            response.expected_utilities = expected_utilities
+            response.expected_utilities = [float(x) for x in expected_utilities]
             response.valid = True
 
             self.get_logger().info(
                 f"Prediction made: {len(input_episodes)} episodes"
             )
             self.get_logger().info(
-                f"Predictions: {expected_utilities}"
+                f"Predictions: {response.expected_utilities}"
             )
 
         except Exception as exc:

@@ -989,12 +989,21 @@ class PolicyDreamingDummy(Policy):
             self.get_logger().error(f"[proxy] utility model predict failed: {exc}")
             return response
 
-        predicted_utility = getattr(utility_result, "reward", None)
-        if predicted_utility is None:
-            predicted_utility = getattr(utility_result, "utility", None)
-        if predicted_utility is None:
-            self.get_logger().warning("[proxy] utility model returned no reward/utility")
+        expected_utilities = list(getattr(utility_result, "expected_utilities", []))
+        self.get_logger().info(
+            f"[proxy] utility model result.valid={getattr(utility_result, 'valid', False)}, "
+            f"expected_utilities={expected_utilities}"
+            )
+        if not getattr(utility_result, "valid", False):
+            self.get_logger().warning("[proxy] utility model returned invalid result")
             predicted_utility = 0.0
+        else:
+            expected_utilities = list(getattr(utility_result, "expected_utilities", []))
+            if not expected_utilities:
+                self.get_logger().warning("[proxy] utility model returned no expected_utilities")
+                predicted_utility = 0.0
+            else:
+                predicted_utility = float(expected_utilities[0])
 
         predicted_utility = float(predicted_utility)
 
