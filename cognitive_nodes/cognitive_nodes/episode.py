@@ -132,7 +132,11 @@ class Episode:
         reward_dicts = []
         data = self.rewards.read().values
         for row in data:
-            reward_dict = {label.split(":")[1]: row[idx] for idx, label in enumerate(self.rewards.feature_labels)}
+            reward_dict = {
+                label.split(":", 1)[1]: value
+                for label, value in zip(self.rewards.feature_labels, row)
+                if not np.isnan(value)
+            }
             reward_dicts.append(reward_dict)
         return reward_dicts if len(reward_dicts) > 1 else reward_dicts[0] if reward_dicts else {}
 
@@ -153,26 +157,14 @@ class Episode:
         rewards_container = self.rewards
         for reward_dict in reward_dict_list:
             goals = list(reward_dict.keys())
+            labels = [f"rewards:{goal}" for goal in goals]
             if rewards_container is None:
                 # If rewards container doesn't exist, create it with the goals as labels
-                labels = [f"rewards:{goal}" for goal in goals]
                 rewards_container = Container("rewards", max_size=self.container_size, container_type="rewards", labels=labels)
                 rewards = np.fromiter((reward_dict[g] for g in goals), dtype=rewards_container.data.dtype)
             else:
-                # If rewards container exists, update it with new goals and rewards, rewards not present in the reward_dict will be set to 0.0.
-                # If new goals are introduced, a new rewards container will be created with the updated set of goals as labels.
-                existing_goals = set([label.split(":")[1] for label in rewards_container.feature_labels])
-                new_goals = set(goals)
-                all_goals = list(existing_goals.union(new_goals))
-                labels = [f"rewards:{goal}" for goal in all_goals]
-                rewards = np.fromiter((reward_dict.get(goal, 0.0) for goal in all_goals), dtype=rewards_container.data.dtype)
-                if not new_goals.issubset(existing_goals):
-                    if self.container_size > 1:
-                        # TODO: Implement handling new goals in rewards update for container_size > 1
-                        # Requires reconstructing the rewards container with the new set of goals and properly aligning existing reward values with the new labels, filling in 0.0 for any missing rewards in existing entries. 
-                        raise NotImplementedError("Handling new goals in rewards update is only implemented for container_size=1")
-                    rewards_container = Container("rewards", max_size=self.container_size, container_type="rewards", labels=labels)
-            rewards_container.push(rewards, src_labels=labels, timestamps=timestamp)
+                rewards = np.fromiter((reward_dict.get(goal) for goal in goals), dtype=rewards_container.data.dtype)
+            rewards_container.push(rewards, src_labels=labels, timestamps=timestamp, extend_labels=True, allow_missing=True, fill_value=np.nan)
         self.rewards = rewards_container
 
     def obtain_flattened_episode(self) -> Container:

@@ -17,7 +17,7 @@ class EpisodicBuffer:
     Class that creates a buffer of episodes to be used as a STM and learn models. 
     It supports a main buffer for training and a secondary buffer for testing.
     """    
-    def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=1.0, inputs=[], outputs=[], random_seed=0, **params) -> None:
+    def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=1.0, inputs=[], outputs=[], random_seed=0, flexible_labels=False, **params) -> None:
         """Initialize an EpisodicBuffer.
 
         Creates bounded buffers for episodes and configures label extraction and RNG.
@@ -64,6 +64,7 @@ class EpisodicBuffer:
         self.new_sample_count_secondary=0 # Counter for new samples in the secondary buffer
         self.rng = np.random.default_rng(random_seed) # Configuration of the random number generator
         self.semaphore = threading.Semaphore() # Semaphore for thread-safe operations on the buffer
+        self.flexible_labels = flexible_labels # Whether to allow dynamic label updates based on incoming episodes
 
     def configure_labels(self, episode: Episode):
         """
@@ -132,14 +133,14 @@ class EpisodicBuffer:
                 self.update_labels(episode)
             if self.rng.uniform() < self.train_split:
                 # Add to main buffer
-                self.main_buffer.push(episode.obtain_flattened_episode())
+                self.main_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
                 self.new_sample_count_main += 1
             else:
                 # Add to secondary buffer
-                self.secondary_buffer.push(episode.obtain_flattened_episode())
+                self.secondary_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
                 self.new_sample_count_secondary += 1
         self.semaphore.release()
-        
+
     def remove_episode(self, index=None, remove_from_main=True):
         """Remove an episode from the buffer.
 
