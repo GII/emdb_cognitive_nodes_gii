@@ -58,6 +58,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetActivationTopic.srv"
   "srv/SetInputs.srv"
   "srv/SetWeight.srv"
+  "srv/GetDreamingSelection.srv"
   DEPENDENCIES builtin_interfaces cognitive_processes_interfaces
 )
 
