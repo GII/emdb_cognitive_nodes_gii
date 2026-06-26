@@ -1,19 +1,22 @@
 import rclpy
 import numpy as np
-from rclpy.time import Time
 from collections import deque
+from rclpy.time import Time
 
 from core.cognitive_node import CognitiveNode
 from cognitive_nodes.space import PointBasedSpace
-from core.utils import class_from_classname, perception_msg_to_dict, separate_perceptions
-from cognitive_node_interfaces.srv import AddPoint, AddPoints, SendSpace, ContainsSpace, SaveModel
-from cognitive_node_interfaces.msg import Perception, PerceptionStamped, SuccessRate
+from core.container import Container, consolidate_containers
+from core.utils import class_from_classname
+
+from cognitive_node_interfaces.srv import AddPoints, SendSpace, ContainsSpace, SaveModel
+from cognitive_node_interfaces.msg import SuccessRate
+from core_interfaces.msg import Container as ContainerMsg
 
 class PNode(CognitiveNode):
     """
     P-Node class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, space_parameters=None, **params):
         """
         Constructor for the P-Node class.
         
@@ -33,11 +36,9 @@ class PNode(CognitiveNode):
         """
         super().__init__(name, class_name, **params)
         self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space")]
-        self.space=None
+            space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
+        self.space=self.spaces[0]
         self.added_point = False
-        self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
-            name) + '/add_point', self.add_point_callback, callback_group=self.cbgroup_server)
         self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(
             name) + '/add_points', self.add_points_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
@@ -46,6 +47,7 @@ class PNode(CognitiveNode):
             name) + '/contains_space', self.contains_space_callback, callback_group=self.cbgroup_server)
         self.save_model_service = self.create_service(SaveModel, "pnode/" + str(
             name) + '/save_model', self.save_model_callback, callback_group=self.cbgroup_server)
+        self.perception = None
         self.history_size = history_size
         self.history = deque([], history_size)
         self.success_rate = 0.0
@@ -54,19 +56,6 @@ class PNode(CognitiveNode):
             SuccessRate, f'pnode/{str(name)}/success_rate', 0)
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
-
-    def configure_labels(self): #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
-        """
-        Configure the labels of the space.
-        """  
-        self.point_msg:Perception
-        i = 0
-        for dim in self.point_msg.layout.dim:
-            sensor = dim.object[:-1]
-            for label in dim.labels:
-                data_label = str(i) + "-" + sensor + "-" + label
-                self.data_labels.append(data_label)
-            i = i+1            
 
     def send_pnode_space_callback(self, request, response):
         """
@@ -78,21 +67,9 @@ class PNode(CognitiveNode):
         :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
         :return: Response that contains the space of the P-Node.
         :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
-        """     
+        """
         if self.space:
-            if not self.data_labels:
-                self.configure_labels()
-            response.labels = self.data_labels
-            
-            data = []
-            for perception in self.space.members[0:self.space.size]:
-                for value in perception:
-                    data.append(value)
-            response.data = data
-
-            confidences = list(self.space.memberships[0:self.space.size])
-            response.confidences = confidences
-            
+            response.space = self.space.to_msg()
         return response
     
     def contains_space_callback(self, request, response):
@@ -105,41 +82,14 @@ class PNode(CognitiveNode):
         :type response: cognitive_node_interfaces.srv.ContainsSpace.Response
         :return: Response that indicates if the space is contained.
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
-        """           
-        labels=request.labels
-        data = request.data  # Flattened list of data values
-        confidences = request.confidences  # List of confidence values
-        compare_space=PointBasedSpace(len(confidences))
-        compare_space.populate_space(labels, data, confidences)
+        """
+        space_data = Container.from_msg(request.space)
         if self.space:
-            response.contained=self.space.contains(compare_space)
+            response.contained=self.space.contains(space_data)
         else:
             response.contained=False
-        return response   
-
-    def add_point_callback(self, request, response):
-        """
-        DEPRECATED: SEE add_points_callback
-        Callback method for adding a point (or anti-point) to a specific P-Node.
-
-        :param request: The request that contains the point that is added and its confidence.
-        :type request: cognitive_node_interfaces.srv.AddPoint.Request
-        :param response: The response indicating if the point was added to the P-Node.
-        :type response: cognitive_node_interfaces.srv.AddPoint.Response
-        :return: The response indicating if the point was added to the P-Node.
-        :rtype: cognitive_node_interfaces.srv.AddPoint.Response
-        """
-        self.point_msg = request.point
-        confidence = request.confidence
-        point = perception_msg_to_dict(self.point_msg)
-        response.added = self.add_point(point,confidence)
-        if response.added:
-            self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
-        else:
-            self.get_logger().warn(f'Ignored empty/invalid point for {self.name}: {point}')
-
         return response
-    
+
     def add_points_callback(self, request, response):
         """
         Callback method for adding a point (or anti-point) to a specific P-Node.
@@ -152,39 +102,35 @@ class PNode(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.AddPoints.Response
         """
         if request.points:
-            self.point_msg = request.points[0]
-            added_count = 0
-            for point, confidence in zip(request.points, request.confidences):
-                point_dict = perception_msg_to_dict(point)
-                if self.add_point(point_dict, confidence):
-                    added_count += 1
-            response.added = added_count > 0
-            self.get_logger().info(f'Added: {added_count}/{len(request.points)} points with mean confidence: {np.mean(request.confidences)}')
+            points = Container.from_msg(request.points) 
+            confidences = np.asarray(request.confidences)
+            if len(points) != len(confidences):
+                self.get_logger().error(f"Number of points and confidences do not match. Points: {len(points)}, Confidences: {len(confidences)}")
+                response.added = False
+                return response
+            self.add_points(points, confidences)
+            response.added = True
+            self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
         else:
             response.added = False
         return response
     
-    def add_point(self, point, confidence):
+    def add_points(self, points, confidences):
         """
-        Add a new point (or anti-point) to the P-Node.
-        
-        :param point: The point that is added to the P-Node.
-        :type point: dict
-        :param confidence: Indicates if the perception added is a point or an antipoint.
-        :type confidence: float
-        """
-        points = separate_perceptions(point)
-        if not points:
-            return False
+        Add new points (or anti-points) to the P-Node.
 
-        for point in points:
-            self.space = self.spaces[0]
-            if not self.space:
-                self.space = self.spaces[0].__class__()
-                self.spaces.append(self.space)
-            self.space.add_point(point, confidence)
+        :param points: The points that are added to the P-Node.
+        :type points: core.container.Container
+        :param confidences: The confidences associated with each point.
+        :type confidences: numpy.ndarray
+        """
+        if not self.space:
+            self.get_logger().error("No space defined for the P-Node. Cannot add points.")
+            return
+        self.space.add_point(points, confidences)
         self.added_point = True
-        self.update_history(confidence)
+        for confidence in confidences:
+            self.update_history(confidence)
         self.publish_success_rate()
         self.get_logger().info(f"P-Node success rate: {self.success_rate}")
         return True
@@ -194,7 +140,7 @@ class PNode(CognitiveNode):
         Calculate the new activation value for a given perception.
 
         :param perception: The perception for which P-Node activation is calculated.
-        :type perception: dict
+        :type perception: container.Container
         :param activation_list: The list of activations to be used for the calculation.
         :type activation_list: list
         :return: If there is space, returns the activation of the P-Node. If not, returns 0. 
@@ -203,65 +149,34 @@ class PNode(CognitiveNode):
         """
         confidences = None
         if activation_list!=None:
-            perception={}
-            confidences = []
-            for sensor in activation_list:
-                activation_list[sensor]['updated']=False
-                perception[sensor]=activation_list[sensor]['data']
-                # Use provided confidence if present, otherwise default to 1.0
-                confidences.append(float(activation_list[sensor].get('confidence', 1.0)))
-
-        if perception:
-            activations = []
-            perceptions = separate_perceptions(perception)
-            if not perceptions:
+            # Uses internal readings to calculate the activation. This is used in normal execution of the architecture.
+            data = [activation_list[sensor]['data'] for sensor in activation_list]
+            if self.perception is None and len(data)>0:
+                self.perception = consolidate_containers(data, name="perception", container_type="perception")
+            elif len(data)==0: # Activation list may be empty when initializing the P-Node.
                 self.activation.activation = 0.0
                 self.activation.timestamp = self.get_clock().now().to_msg()
                 return self.activation
+            else:
+                consolidate_containers(data, write_container=self.perception)
+            space_activation = self.space.get_probability(self.perception) if self.space else np.zeros(len(self.perception))
+            activation_value = max(0.0, space_activation.reshape(-1)[0])
+            self.activation.activation = float(activation_value)
+            perception_timestamp = self.perception.data.coords["timestamp"].values[-1]
+            self.activation.timestamp = Time(nanoseconds=perception_timestamp).to_msg()
+            return self.activation
+        
+        if perception:
+            # Uses the provided perception to calculate the activation. This is used when the activation is requested from outside (e.g., get_activation service).
+            activations = self.space.get_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
+            return activations.tolist()
 
-            for idx, perception_line in enumerate(perceptions):
-                space = self.spaces[0]
-                if space and self.added_point:
-                    base_activation = max(0.0, space.get_probability(perception_line))
-                    # weight activation by confidence (if provided), default 1.0
-                    conf = confidences[idx] if confidences is not None and idx < len(confidences) else 1.0
-                    activation_value = float(base_activation) * float(conf)
-                    if activation_list is None:
-                        self.get_logger().info(f'PNODE DEBUG: Perception: {perception_line} Space provided activation: {activation_value}')
-                else:
-                    activation_value = 0.0
-
-                activations.append(activation_value)
-
-            # If multiple perceptions, take the max weighted activation
-            self.activation.activation = activations[0] if len(activations) == 1 else float(max(activations))
-            self.activation.timestamp = self.get_clock().now().to_msg()
-        return self.activation
-    
     def calculate_confidence(self, perception=None, activation_list=None):
         """
         This method use the already calculated success rate as confidence value, 
         stored in 
         """
         return self.success_rate
-
-    def get_space(self, perception):
-        """
-        Return the compatible space with perception.
-        (Ugly hack just to see if this works. In that case, everything need to be checked to reduce the number of
-        conversions between sensing, perception and space).
-
-        :param perception: The perception for which P-Node activation is calculated.
-        :type perception: dict
-        :return: If there is space, returns it. If not, returns None.
-        :rtype: cognitive_nodes.space or None
-        """
-        temp_space = self.spaces[0].__class__()
-        temp_space.add_point(perception, 1.0)
-        for space in self.spaces:
-            if (not space.size) or space.same_sensors(temp_space):
-                return space
-        return None
     
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
         """
@@ -273,33 +188,36 @@ class PNode(CognitiveNode):
         name=node['name']
         node_type=node['node_type']
         if node_type == "Perception":
-            subscriber=self.create_subscription(PerceptionStamped, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
-            data=Perception()
+            subscriber=self.create_subscription(ContainerMsg, "perception/" + str(name) + "/value", self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
+            data=None
             updated=False
-            timestamp=Time()
-            new_input=dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
+            new_input=dict(subscriber=subscriber, data=data, updated=updated)
             self.activation_inputs[name]=new_input
             self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
 
-
-    def read_activation_callback(self, msg: PerceptionStamped):
+    def read_activation_callback(self, msg: ContainerMsg):
         """
         Callback method that reads a perception and stores it in the activation inputs list.
 
         :param msg: PerceptionStamped message that contains the perception and its timestamp.
         :type msg: cognitive_node_interfaces.msg.PerceptionStamped
         """        
-        perception_dict=perception_msg_to_dict(msg=msg.perception)
-        if len(perception_dict)>1:
-            self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')
-        if len(perception_dict)==1:
-            node_name=list(perception_dict.keys())[0]
+        if msg.max_size>1:
+            self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')
+        elif msg.max_size==1:
+            node_name=msg.name
             if node_name in self.activation_inputs:
-                self.activation_inputs[node_name]['data']=perception_dict[node_name]
+                if self.activation_inputs[node_name]['data'] is None:
+                    self.activation_inputs[node_name]['data']=Container.from_msg(msg)
+                else:
+                    self.activation_inputs[node_name]['data'].push_from_msg(msg)
                 self.activation_inputs[node_name]['updated']=True
-                self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
+            else:
+                self.get_logger().error(
+                    "Received perception not registered in local perception cache!!!"
+                )
         else:
-            self.get_logger().warn("Empty perception recieved in P-Node. No activation calculated")
+            self.get_logger().warn("Empty perception recieved in P-Node")
     
     def add_neighbor_callback(self, request, response):
         """
@@ -400,7 +318,7 @@ class PNode(CognitiveNode):
         else:
             self.history.appendleft(False)
         self.success_rate = sum(self.history)/self.history.maxlen
-        self.get_logger().info(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
+        self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
 
 
 def main(args = None):

@@ -2,18 +2,18 @@ import rclpy
 import numpy as np
 from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-import random
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
-
+from cognitive_nodes.episode import Episode, container_msg_to_episode
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from simulators.scenarios_2D import SimpleScenario, EntityType
-from cognitive_node_interfaces.msg import Perception, Actuation, SuccessRate
-from core.utils import actuation_dict_to_msg, actuation_msg_to_dict, perception_dict_to_msg, perception_msg_to_dict
-from rclpy.impl.rcutils_logger import RcutilsLogger
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list 
+from core.utils import class_from_classname
 
-from cognitive_node_interfaces.msg import Episode as EpisodeMsg
+
+from cognitive_node_interfaces.msg import SuccessRate, Perception
+
+
 
 
 class WorldModel(DeliberativeModel):
@@ -38,16 +38,16 @@ class WorldModel(DeliberativeModel):
         self.activation.activation = 1.0
         self.activation.metacognitive_params.confidence = 1.0
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+    def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
 
         :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
+        :type input_episodes: Episode
         :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        :rtype: Episode
         """        
         self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the input episodes.")
-        output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
+        output_episodes = input_episodes
         return output_episodes
     
 
@@ -56,7 +56,7 @@ class WorldModelLearned(WorldModel):
     """
     WorldModelLearned class: A world model that uses episodes to learn the dynamics of the world.
     """
-    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
+    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_msg=None, episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
         """
         Constructor of the WorldModelLearned class.
 
@@ -75,7 +75,7 @@ class WorldModelLearned(WorldModel):
             raise ValueError("episodes_topic must be provided for WorldModelLearned")
 
         self.episode_subscription = self.create_subscription(
-            EpisodeMsg,
+            class_from_classname(episodes_msg),
             self.episodes_topic,
             self.episode_callback,
             10,
@@ -99,42 +99,40 @@ class WorldModelLearned(WorldModel):
         self.train_sample = train_sample
         self.validation_split = validation_split
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+    def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
 
         :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
+        :type input_episodes: Episode
         :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        :rtype: Episode
         """  
         if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
-            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the input episodes.")
-            output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
-            return output_episodes
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the old perceptions.")
+            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
+            return input_episodes
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         self.get_logger().info(f"Data for prediction: {input_data.shape} samples. Ex: {input_data[:2]}")
         predictions = self.learner.call(input_data)
         if predictions is None:
             self.get_logger().warning("No predictions were made by the learner. Returning the old perceptions.")
-            for episode in input_episodes:
-                episode.perception = episode.old_perception  # If the model is not configured, return the old perception
-            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
         else:
             self.get_logger().debug(f"Predictions: {predictions}")
             self.get_logger().debug(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+            predicted_episodes = self.episodic_buffer.matrix_to_output_episodes(predictions)
         self.get_logger().info(f"Prediction made: {len(predicted_episodes)} episodes")
         return predicted_episodes
     
 
-    def episode_callback(self, msg: EpisodeMsg):
+    def episode_callback(self, msg):
             """
             Callback for the episode subscription. It receives an episode message and adds it to the episodic buffer.
 
             :param msg: The episode message received.
-            :type msg: cognitive_node_interfaces.msg.Episode
+            :type msg: core_interfaces.msg.Container
             """
-            episode = episode_msg_to_obj(msg)
+            episode = container_msg_to_episode(msg)
             if episode.parent_policy != "reset_world":
                 self.episodic_buffer.add_episode(episode)
                 self.get_logger().info(f"Episode added to buffer \n New train samples: {self.episodic_buffer.new_sample_count_main}, New test samples: {self.episodic_buffer.new_sample_count_secondary}")
@@ -230,10 +228,6 @@ class Sim2DWorldModel(WorldModel):
         """        
         super().__init__(name, class_name, **params)
         self.learner=Sim2D(self, wm_actuation_config, wm_perception_config, self.get_logger())
-
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
-        predicted_episodes = [Episode(perception=self.learner.call(episode.old_perception, episode.action.actuation)) for episode in input_episodes]
-        return predicted_episodes
 
     
 class Sim2D(Learner):

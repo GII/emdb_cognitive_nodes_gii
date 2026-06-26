@@ -4,23 +4,24 @@ from collections import deque
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.time import Time
-import threading
+import numpy as np
 import inspect
+from math import isclose
 
 from core.cognitive_node import CognitiveNode
 from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import AddPoint, SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
+from cognitive_nodes.space import PointBasedSpace
+from core.utils import class_from_classname, compare_perceptions
+from core.container import Container
+
+from core_interfaces.msg import Container as ContainerMsg
+from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
-from cognitive_nodes.space import PointBasedSpace
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 from builtin_interfaces.msg import Time as TimeMsg
 
-from core.utils import class_from_classname, perception_dict_to_msg, perception_msg_to_dict, separate_perceptions, compare_perceptions
-from math import isclose
-import numpy
 
-import random
 
 class Goal(CognitiveNode):
     """
@@ -72,9 +73,9 @@ class Goal(CognitiveNode):
         )
 
         self.add_point_service = self.create_service(
-            AddPoint,
-            'goal/' + str(name) + '/add_point',
-            self.add_point_callback,
+            AddPoints,
+            'goal/' + str(name) + '/add_points',
+            self.add_points_callback,
             callback_group=self.cbgroup_server
         )
 
@@ -103,23 +104,30 @@ class Goal(CognitiveNode):
         response.set = True
         return response
     
-    def add_point_callback(self, request, response):
+    def add_points_callback(self, request, response):
         """
         Callback method for adding a point (or anti-point) to a specific Goal.
 
         :param request: The request that contains the point that is added and its confidence.
-        :type request: cognitive_node_interfaces.srv.AddPoint.Request
+        :type request: cognitive_node_interfaces.srv.AddPoints.Request
         :param response: The response indicating if the point was added to the Goal.
-        :type response: cognitive_node_interfaces.srv.AddPoint.Response
+        :type response: cognitive_node_interfaces.srv.AddPoints.Response
         :return: The response indicating if the point was added to the Goal.
-        :rtype: cognitive_node_interfaces.srv.AddPoint.Response
+        :rtype: cognitive_node_interfaces.srv.AddPoints.Response
         """
-        self.point_msg = request.point
-        confidence = request.confidence
-        point = perception_msg_to_dict(self.point_msg)
-        self.add_point(point,confidence)
-        self.get_logger().info('Adding point: ' + str(point) + 'Confidence: ' + str(confidence))
-        response.added = True
+        if request.points:
+            points = Container.from_msg(request.points) 
+            confidences = np.asarray(request.confidences)
+            if len(points) != len(confidences):
+                self.get_logger().error(f"Number of points and confidences do not match. Points: {len(points)}, Confidences: {len(confidences)}")
+                response.added = False
+                return response
+            self.add_points(points, confidences)
+            response.added = True
+            self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
+        else:
+            response.added = False
+        return response
 
         return response
 
@@ -134,10 +142,8 @@ class Goal(CognitiveNode):
         :return: Response containing the goal space data.
         :rtype: cognitive_node_interfaces.srv.SendSpace.Response
         """
-        response.labels = []
-        response.data = []
-        response.confidences = []
-
+        # The default goal class does not have a space, returns an empty message. See GoalLearnedSpace for an example of goal with space.
+        response.space = ContainerMsg()
         return response
 
     def calculate_confidence(self, perception=None, activation_list=None):
@@ -160,8 +166,8 @@ class Goal(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.IsReached.Response
         """
         self.get_logger().info('Checking if is reached..')
-        self.old_perception = perception_msg_to_dict(request.old_perception)
-        self.perception = perception_msg_to_dict(request.perception)
+        self.old_perception = Container.from_msg(request.old_perception)
+        self.perception = Container.from_msg(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
             reward = await self.get_reward(self.old_perception, self.perception)
         else:
@@ -184,8 +190,8 @@ class Goal(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.GetReward.Response
         """
         self.point_msg=request.perception
-        self.old_perception = perception_msg_to_dict(request.old_perception)
-        self.perception = perception_msg_to_dict(request.perception)
+        self.old_perception = Container.from_msg(request.old_perception)
+        self.perception = Container.from_msg(request.perception)
         if inspect.iscoroutinefunction(self.get_reward):
             reward, timestamp = await self.get_reward(self.old_perception, self.perception)
         else:
@@ -214,12 +220,12 @@ class Goal(CognitiveNode):
         """
         raise NotImplementedError
     
-    def add_point(self, point, confidence):
+    def add_points(self, point, confidence):
         """
         Placeholder method in base goals. To be implemented in derived classes.
         
         :param point: The point that is added to the Goal.
-        :type point: dict
+        :type point: core.container.Container
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
@@ -230,7 +236,7 @@ class GoalObjectInBoxStandalone(Goal):
     """
     Goal representing the desire of putting an object in a box.
     
-    --DEPRECATED, prefer the use of GoalMotiven class--
+    --DEPRECATED, Use the GoalMotiven class--
     """
 
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, robot_service='simulator', normalize_data=None, **params):
@@ -251,8 +257,11 @@ class GoalObjectInBoxStandalone(Goal):
         :type robot_service: str
         :param normalize_data: Normalization data for sensor values
         :type normalize_data: dict
+
+        raises DeprecationWarning: This class is deprecated, use GoalMotiven instead.
         """
         super().__init__(name, class_name, **params)
+        raise DeprecationWarning("GoalObjectInBoxStandalone is deprecated, use GoalMotiven instead")
         self.robot_service = robot_service
 
         #Service clients
@@ -647,112 +656,6 @@ class GoalObjectInBoxStandalone(Goal):
 
         return raw
     
-class GoalReadPublishedReward(Goal):
-    """
-    Goal that reads the reward obtained from a topic.
-
-    --DEPRECATED, prefer the use of GoalMotiven class--
-    """
-    def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', default_topic=None, default_msg=None, **params):
-        """
-        Constructor of the GoalReadPublishedReward class.
-
-        :param name: Name of the node.
-        :type name: str
-        :param data: Configuration data for the goal.
-        :type data: dict
-        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
-        :type class_name: str
-        :param default_topic: Topic from where the reward is read.
-        :type default_topic: str
-        :param default_msg: Message type of the reward message.
-        :type default_msg: ROS Message (Typically std_msgs.Float32)
-        """        
-        super().__init__(name, class_name, **params)
-        self.reward_cbg=MutuallyExclusiveCallbackGroup()
-        msg_type=class_from_classname(class_name=default_msg)
-        self.reward_subscription=self.create_subscription(msg_type, default_topic, self.reward_topic_callback, 1, callback_group=self.reward_cbg)
-        self.flag=threading.Event()
-
-        self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
-
-        if data:
-            self.new_from_configuration_file(data)
-        else:
-            self.get_logger().error(f'{self.name}: No configuration data passed to node!')
-
-
-    def new_from_configuration_file(self, data):
-        """
-        Create attributes from the data configuration dictionary.
-
-        :param data: The configuration file.
-        :type data: dict
-        """
-        self.start = data.get("start")
-        self.end = data.get("end")
-        self.period = data.get("period")
-        for point in data.get("points", []):
-            self.space.add_point(point, 1.0)
-
-
-    def reward_topic_callback(self, msg):
-        """
-        Callback that reads the reward message. Sets a flag that indicates that reward is updated.
-
-        :param msg: Reward message.
-        :type msg: ROS Message (Typically std_msgs.Float32)
-        """        
-        self.reward=msg.data
-        self.flag.set()
-
-    def get_reward(self, old_perception=None, perception=None):
-        """
-        Returns the reward obtained.
-
-        :param old_perception: Unused perception.
-        :type old_perception: Any
-        :param perception: Unused perception.
-        :type perception: Any
-        :return: Obtained reward
-        :rtype: float
-        """        
-        self.flag.wait()
-        reward=self.reward
-        self.flag.clear()
-        return reward
-    
-    def get_iteration_callback(self, msg:ControlMsg):
-        """
-        Get the iteration of the experiment, if necessary
-
-        :return: The iteration of the experiment
-        :rtype: int
-        """
-        self.iteration=msg.iteration
-    
-    def calculate_activation(self, perception = None, activation_list = None):
-        """
-        Returns the the activation value of the goal
-
-        :param perception: Perception does not influence the activation. 
-        :type perception: dict
-        :param activation_list: List of activations. Not used.
-        :type activation_list: list
-        :return: The activation of the goal and its timestamp.
-        :rtype: cognitive_node_interfaces.msg.Activation
-        """
-        iteration=self.iteration
-        if self.end:
-            if(iteration % self.period >= self.start) and (
-                iteration % self.period <= self.end 
-            ):
-                self.activation.activation = 1.0
-            else:
-                self.activation.activation = 0.0
-        self.activation.timestamp = self.get_clock().now().to_msg()
-        return self.activation
-    
 class GoalMotiven(Goal):
     """
     Class that implements a Goal that aims at minimizing a drive.
@@ -950,7 +853,7 @@ class GoalLearnedSpace(GoalMotiven):
     """
     Class that extends the functionality of the GoalMotiven class by adding a space to store goal state space.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, **params):
         """
         Constructor of the GoalLearnedSpace class.
 
@@ -969,16 +872,21 @@ class GoalLearnedSpace(GoalMotiven):
         :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
         :param perception: Perception to add when initializing space.
-        :type perception: dict
+        :type perception: core.container.Container
+        :param space_parameters: Parameters for the space initialization.
+        :type space_parameters: dict
         """        
         super().__init__(name, class_name, **params)
         if space_class:
             self.spaces = [space if space else class_from_classname(
-                space_class)(ident=name + " space")]
-        if space:
+                    space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
+            self.space=self.spaces[0]
+        elif space:
+            self.spaces = [space]
             self.space=space
         else:
-            self.space=None
+            self.spaces = None
+            self.space = None
         self.point_msg=None
         self.added_point = False
         self.LTM_id=ltm_id
@@ -995,21 +903,6 @@ class GoalLearnedSpace(GoalMotiven):
         if perception:
             self.add_point(perception, 1.0)
 
-    #TODO This method creates one label for each sensor even if there are multiple objects in the sensor. Spaces use separated perceptions. 
-    def configure_labels(self):
-        """
-        Configure the labels of the space.
-        """        
-        if self.point_msg:
-            self.point_msg:Perception
-            i = 0
-            for dim in self.point_msg.layout.dim:
-                sensor = dim.object[:-1]  #TODO: THIS DOES NOT WORK FOR MORE THAN 10 SENSORS!!
-                for label in dim.labels:
-                    data_label = str(i) + "-" + sensor + "-" + label
-                    self.data_labels.append(data_label)
-                i = i+1
-
     def send_goal_space_callback(self, request, response):
         """
         Callback that sends the space of the goal.
@@ -1022,19 +915,7 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
         """        
         if self.space:
-            if not self.data_labels:
-                self.configure_labels()
-            if self.data_labels:
-                response.labels = self.data_labels
-                
-                data = []
-                for perception in self.space.members[0:self.space.size]:
-                    for value in perception:
-                        data.append(value)
-                response.data = data
-
-                confidences = list(self.space.memberships[0:self.space.size])
-                response.confidences = confidences
+            response.space = self.space.to_msg()
             
         return response
 
@@ -1049,34 +930,26 @@ class GoalLearnedSpace(GoalMotiven):
         :return: Response that indicates if the space is contained.
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
-        labels=request.labels
-        data = request.data  # Flattened list of data values
-        confidences = request.confidences  # List of confidence values
-        compare_space=PointBasedSpace(len(confidences))
-        compare_space.populate_space(labels, data, confidences)
+        space_data = Container.from_msg(request.space)
         if self.space:
-            response.contained=self.space.contains(compare_space)
+            response.contained=self.space.contains(space_data)
         else:
             response.contained=False
         return response
     
-    def add_point(self, point, confidence):
+    def add_points(self, point, confidences):
         """
         Add a new point (or anti-point) to the Goal.
         
         :param point: The point that is added to the Goal.
-        :type point: dict
+        :type point: core.container.Container
         :param confidence: Indicates if the perception added is a point or an antipoint.
         :type confidence: float
         """
-        self.get_logger().info(f"DEBUG - Adding point: {point} ({confidence})")
-        points = separate_perceptions(point)
-        for point in points:
-            self.space = self.spaces[0]
-            if not self.space:
-                self.space = self.spaces[0].__class__()
-                self.spaces.append(self.space)
-            added_point_pos = self.space.add_point(point, confidence)
+        if not self.space:
+            self.get_logger().error("No space defined for the Goal. Cannot add points.")
+            return
+        self.space.add_point(point, confidences)
         self.added_point = True
 
     async def get_reward(self, old_perception=None, perception=None):
@@ -1084,9 +957,9 @@ class GoalLearnedSpace(GoalMotiven):
         Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
 
         :param old_perception: First perception. Not used.
-        :type old_perception: dict
+        :type old_perception: core.container.Container
         :param perception: Second perception. Not used.
-        :type perception: dict
+        :type perception: core.container.Container
         :return: The reward obtained and its timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """        
@@ -1113,25 +986,21 @@ class GoalLearnedSpace(GoalMotiven):
         
         return reward, timestamp
     
-    def get_expected_reward(self, perception:dict):
+    def get_expected_reward(self, perception:Container):
         """
         Calculate the expected reward of the goal based on the perception and the goal state.
 
         :param perception: Perception to evaluate. 
-        :type perception: dict
+        :type perception: core.container.Container
         :return: Expected reward.
         :rtype: float
-        """        
-        reward_list = []
-        perceptions = separate_perceptions(perception)
-        for perception_line in perceptions:
-            space = self.spaces[0]
-            if space and self.added_point:
-                reward_value = max(0.0, space.get_probability(perception_line))
-            else:
-                reward_value = 0.0
-            reward_list.append(reward_value)    
-        expected_reward = reward_list[0] if len(reward_list) == 1 else float(max(reward_list))
+        """
+        if self.space and self.added_point:
+            reward_value = self.space.get_probability(perception)
+            reward_value = max(0.0, reward_value.reshape(-1)[0])
+        else:
+            reward_value = 0.0
+        expected_reward = float(reward_value)
         return expected_reward
 
 
@@ -1144,11 +1013,11 @@ class GoalLearnedSpace(GoalMotiven):
         :param expected_reward: Reward expected from the state space of the goal.
         :type expected_reward: float
         :param perception: Perception that corresponds to the reward obtained.
-        :type perception: dict
+        :type perception: core.container.Container
         """        
         if reward>0.01:
             #All rewarded points are saved and accounted to the confidence according to the prediction
-            self.add_point(perception, 1.0)
+            self.add_points(perception, np.array([1.0]))
             if expected_reward>0.5:
                 self.history.appendleft(True)
             else:
@@ -1156,7 +1025,7 @@ class GoalLearnedSpace(GoalMotiven):
         else:
             #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
-                self.add_point(perception, -1.0)
+                self.add_points(perception, np.array([-1.0]))
                 if expected_reward>0.1:
                     self.history.appendleft(False)
         self.confidence=sum(self.history)/self.history.maxlen

@@ -148,7 +148,9 @@ class Drive(CognitiveNode):
         :return: The latest reward and its timestamp.
         :rtype: Tuple[float, builtin_interfaces.msg.Time]
         """
-        return self.reward, self.get_clock().now().to_msg()
+        reward = self.reward
+        self.reward = 0.0
+        return reward, self.get_clock().now().to_msg()
 
     def calculate_activation(self, perception=None, activation_list=None):
         """
@@ -162,7 +164,7 @@ class Drive(CognitiveNode):
         self.calculate_activation_max(activation_list)
         self.activation.activation=self.activation.activation*self.evaluation.evaluation
         timestamp_activation = Time.from_msg(self.activation.timestamp).nanoseconds
-        timestamp_evaluation = Time.from_msg(self.activation.timestamp).nanoseconds
+        timestamp_evaluation = Time.from_msg(self.evaluation.timestamp).nanoseconds
         if timestamp_evaluation<timestamp_activation:
             self.activation.timestamp = self.evaluation.timestamp
         return self.activation
@@ -231,8 +233,10 @@ class DriveTopicInput(Drive):
 
         :return: Reward and timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
-        """        
-        return self.reward, self.reward_timestamp
+        """
+        reward = self.reward
+        self.reward = 0.0
+        return reward, self.reward_timestamp
 
     async def publish_activation_callback(self): #Timed publish of the activation value
         """

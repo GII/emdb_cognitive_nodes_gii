@@ -4,17 +4,15 @@ import numpy as np
 from math import isclose
 from copy import copy
 
-from cognitive_nodes.robot_purpose import RobotPurpose
 from cognitive_nodes.drive import Drive
-from cognitive_nodes.goal import Goal, GoalMotiven, GoalLearnedSpace
+from cognitive_nodes.goal import GoalLearnedSpace
 from cognitive_nodes.policy import Policy
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
+from cognitive_nodes.episode import container_msg_to_episode
+from core.utils import compare_perceptions
 
-from std_msgs.msg import String
-from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor
 from cognitive_node_interfaces.msg import SuccessRate
 from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace
-from core.utils import perception_dict_to_msg, perception_msg_to_dict, compare_perceptions
 from cognitive_nodes.utils import PNodeSuccess, EpisodeSubscription
 
 
@@ -126,9 +124,10 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
 
         :param msg: Episode message.
         :type msg: ROS Message (most cases: cognitive_node_interfaces.msg.Episode)
-        """        
-        perception=perception_msg_to_dict(msg.perception)
-        old_perception=perception_msg_to_dict(msg.old_perception)
+        """
+        episode = container_msg_to_episode(msg)
+        perception=episode.perception
+        old_perception=episode.old_perception
         self.find_effects(perception, old_perception)
 
     def find_effects(self, perception, old_perception):
@@ -136,21 +135,47 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         Checks consecutive perceptions if effects were generated.
 
         :param perception: Current perception.
-        :type perception: dict
+        :type perception: core.container.Container
         :param old_perception: Previous perception.
-        :type old_perception: dict
-        """        
-        for sensor, data in perception.items():
-            for index, object in enumerate(data):
-                for attribute, _ in object.items():
-                    sensing=perception[sensor][index][attribute]
-                    old_sensing=old_perception[sensor][index][attribute]
-                    if isclose(sensing-old_sensing, 1.0):
-                        existing_effect=self.effects.get(sensor, None)
-                        if existing_effect!=attribute:
-                            self.effects[sensor]=attribute
-                            self.new_effects[sensor]=attribute
-                            self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
+        :type old_perception: core.container.Container
+        """
+        labels_old_perception = set(old_perception.feature_labels)
+        labels_perception = set(perception.feature_labels)
+        labels = list(labels_perception.intersection(labels_old_perception))
+
+        data_old_perception = old_perception.read().sel(features=labels).values
+        data_perception = perception.read().sel(features=labels).values
+
+        # Work with the last sample (normally only one sample is present).
+        data_old = np.asarray(data_old_perception)
+        data_new = np.asarray(data_perception)
+
+        if data_old.size == 0 or data_new.size == 0:
+            return
+
+        # Take last row (safe for 1D or 2D arrays)
+        row_old = data_old[-1] if data_old.ndim > 1 else data_old
+        row_new = data_new[-1] if data_new.ndim > 1 else data_new
+
+        row_old = np.asarray(row_old).reshape(-1)
+        row_new = np.asarray(row_new).reshape(-1)
+
+        # Element-wise difference and find exact 0->1 transitions
+        diff = row_new - row_old
+        matches = np.where(np.isclose(diff, 1.0))[0]
+
+        for idx in matches:
+            label = labels[idx]
+            try:
+                sensor, attribute = label.split(":", 1)
+            except ValueError:
+                continue
+
+            existing_effect = self.effects.get(sensor, None)
+            if existing_effect != attribute:
+                self.effects[sensor] = attribute
+                self.new_effects[sensor] = attribute
+                self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
 
     def get_effects_callback(self, request, response:GetEffects.Response):
         """
@@ -513,7 +538,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         :return: Boolean that indicates if the space is contained inside the goal.
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
-        response = await self.pnode_contains_client.send_request_async(labels=request.labels, data=request.data, confidences=request.confidences)
+        response = await self.pnode_contains_client.send_request_async(space=request.space)
         return response
 
     async def get_reward(self, old_perception=None, perception=None):
@@ -521,16 +546,16 @@ class GoalActivatePNode(GoalLearnedSpace):
         Method that obtains the reward for the goal. It recieves two consecutive perceptions, calculates the related P-Node activation for each and detects if the P-Node was activated.
 
         :param old_perception: First state perception dictionary.
-        :type old_perception: dict
+        :type old_perception: core.container.Container
         :param perception: Second state perception dictionary.
-        :type perception: dict
+        :type perception: core.container.Container
         :return: Reward and current timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """        
-        old_perception_msg=perception_dict_to_msg(old_perception)
-        perception_msg=perception_dict_to_msg(perception)
-        old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation
-        activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation
+        old_perception_msg = old_perception.to_msg() if old_perception else None
+        perception_msg = perception.to_msg() if perception else None
+        old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
+        activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
         if activation-old_activation>self.threshold_delta:
             self.reward = 1.0
         else:
@@ -570,9 +595,9 @@ class GoalRecreateEffect(GoalLearnedSpace):
         Method that obtains reward for the goal. It recieves two consecutive perceptions, checks if the effect was recreated (the related attribute went from 0 to 1).
 
         :param old_perception: First state perception dictionary.
-        :type old_perception: dict
+        :type old_perception: core.container.Container
         :param perception: Second state perception dictionary
-        :type perception: dict
+        :type perception: core.container.Container
         :return: Reward and current timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """        
@@ -599,19 +624,22 @@ class GoalRecreateEffect(GoalLearnedSpace):
         
 
         :param old_perception: First state perception dictionary.
-        :type old_perception: dict
+        :type old_perception: core.container.Container
         :param perception: Second state perception dictionary.
-        :type perception: dict
+        :type perception: core.container.Container
         :return: Tuple with a boolean True if effect is found and the raw readings of the sensor's attribute for both perceptions.
         :rtype: tuple (bool, float, float)
         """        
         effect=False
-        for index, _ in enumerate(perception[self.sensor]):
-            old_sensing=old_perception[self.sensor][index][self.attribute]
-            sensing=perception[self.sensor][index][self.attribute]
-            effect=isclose(sensing-old_sensing, 1.0)
-            if effect:
-                break
+        label = f"{self.sensor}:{self.attribute}"
+
+        if not label in perception.feature_labels or not label in old_perception.feature_labels:
+            return False, 0.0, 0.0
+
+        old_sensing=old_perception.read().sel(features=label).values[-1]
+        sensing=perception.read().sel(features=label).values[-1]
+        effect=isclose(sensing-old_sensing, 1.0)
+        
         return effect, old_sensing, sensing
     
     def calculate_activation(self, perception, activation_list):

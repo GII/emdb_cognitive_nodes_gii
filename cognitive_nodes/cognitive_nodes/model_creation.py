@@ -5,8 +5,8 @@ from copy import deepcopy
 from rclpy.time import Time
 
 from core.service_client import ServiceClientAsync
-from core.utils import perception_dict_to_msg
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_obj_to_msg, episode_obj_list_to_msg_list
+from core.container import Container
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
@@ -132,10 +132,11 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
 
 
     def episode_callback(self, msg):
-        episode = episode_msg_to_obj(msg)
+        episode = container_msg_to_episode(msg)
         self.get_logger().debug(f"Received episode with parent policy: {episode.parent_policy} and rewards: {episode.reward_list}")
         if not episode.parent_policy: # Parent policy is empty if no specific Utility Model/Policy is being executed
-            for goal, reward in episode.reward_list.items():
+            reward_list = episode.reward_list
+            for goal, reward in reward_list.items():
                 if not isclose(reward, 0.0):
                     if goal in self.unlinked_drives:
                         self.get_logger().info(f"Unlinked drive found: {goal}. Goal node to be created.")
@@ -208,14 +209,15 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             self.activation.timestamp=self.get_clock().now().to_msg()
 
     def episode_callback(self, msg):
-        episode = episode_msg_to_obj(msg)
+        episode = container_msg_to_episode(msg)
         self.last_episode = episode
-        if msg.parent_policy == "reset_world":
+        if self.last_episode.parent_policy == "reset_world":
             self.get_logger().info("World reset detected, clearing buffer")
             self.episodic_buffer.clear()
         elif episode.parent_policy != self.name: 
             self.episodic_buffer.add_episode(episode)
-            for goal, reward in episode.reward_list.items():
+            reward_list = episode.reward_list
+            for goal, reward in reward_list.items():
                 if not isclose(reward, 0.0):
                     if goal in self.unlinked_drives:
                         drive = goal
@@ -223,7 +225,8 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
                         self.node_data.append(dict(node_type="Goal", drive=drive))
                         self.get_logger().info(f"Unlinked drive found: {drive}. Goal node to be created.")
                     if not self.linked_cnode(goal):
-                        self.node_data.append(dict(node_type="UtilityModel", goal=goal, trace=deepcopy(self.episodic_buffer.main_buffer)))
+                        trace = self.episodic_buffer.main_buffer.read()
+                        self.node_data.append(dict(node_type="UtilityModel", goal=goal, trace=trace))
                         self.episodic_buffer.clear()
                         self.get_logger().info(f"Goal {goal} not linked to any CNode. Utility Model to be created.")
 
@@ -240,11 +243,18 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         """        
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.create_models()
-        self.last_episode.parent_policy = self.name
-        self.last_episode.old_perception = self.last_episode.perception
-        self.last_episode.action = Action()
-        self.last_episode.reward_list = {goal:0.0 for goal in self.last_episode.reward_list}
-        self.episode_publisher.publish(episode_obj_to_msg(self.last_episode))
+        # The published episode will keep the last perception and action, but with rewards set to 0
+        if self.last_episode.perception is not None:
+            self.last_episode.old_perception.push(self.last_episode.perception)
+            episode = Episode(old_perception=self.last_episode.old_perception, perception=self.last_episode.perception, parent_policy=self.name)
+            if self.last_episode.action is not None:
+                last_action = self.last_episode.action.read()
+                last_rewards = self.last_episode.rewards.read()
+                last_action.data = np.zeros_like(last_action.data)
+                last_rewards.data = np.zeros_like(last_rewards.data)
+                episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
+            episode_msg = episode_obj_to_msg(episode)
+            self.episode_publisher.publish(episode_msg)
         response.policy=self.name
         return response
     
@@ -314,6 +324,9 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         pnode_parameters = self.default_params.get("PNode", {})
         cnode_parameters = self.default_params.get("CNode", {})
         utility_model_parameters = self.default_params.get("UtilityModel", {})
+        trace = container_to_episode_obj(trace)
+        perception_points = trace.old_perception
+        trace_msg = episode_obj_to_msg(trace)
 
         # Create P-Node
         pnode_name = f"pnode_{ident}"
@@ -324,9 +337,8 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         pnode_points_service = f"pnode/{pnode_name}/add_points"
         if pnode_points_service not in self.node_clients:
             self.node_clients[pnode_points_service] = ServiceClientAsync(self, AddPoints, pnode_points_service, self.cbgroup_client)
-        points = [perception_dict_to_msg(episode.old_perception) for episode in trace]
-        confidences = list(np.ones(len(points)))
-        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=points, confidences=confidences)
+        confidences = list(np.ones(len(trace)))
+        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=perception_points.to_msg(), confidences=confidences)
         if not pnode_points_response.added:
             self.get_logger().error(f"Failed to add points to P-Node: {pnode_name}")
 
@@ -348,12 +360,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
         if utility_model_trace_service not in self.node_clients:
             self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
-        if drive:
-            reward_node = drive
-        else:
-            reward_node = goal
-        rewards = [episode.reward_list.get(reward_node, 0.0) for episode in trace]
-        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=episode_obj_list_to_msg_list(trace), rewards=rewards)
+        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace_msg, reward=1.0)
         if not trace_success.added:
             self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
 

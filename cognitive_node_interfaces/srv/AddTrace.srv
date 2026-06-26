@@ -1,4 +1,5 @@
-Episode[] episodes
-float32[] rewards
+core_interfaces/Container episodes
+float32 reward # Reward for the last episode of the trace. The evaluation method will populate the rest of the trace with rewards.
+float32[] reward_trace # Option: The reward for each episode in the trace to override the evaluation method.
 ---
 bool added

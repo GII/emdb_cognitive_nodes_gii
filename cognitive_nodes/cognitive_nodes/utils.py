@@ -16,7 +16,7 @@ class LTMSubscription:
         :param ltm: LTM ID.
         :type ltm: str
         """        
-        self.ltm_suscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=callback_group)
+        self.ltm_subscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=callback_group)
 
     def ltm_change_callback(self, msg):
         """
@@ -92,7 +92,7 @@ class EpisodeSubscription:
         :type episode_msg: str
         """        
         msg_obj=class_from_classname(episode_msg)
-        self.ltm_suscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=callback_group)
+        self.episode_subscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=callback_group)
 
     def episode_callback(self, msg):
         """

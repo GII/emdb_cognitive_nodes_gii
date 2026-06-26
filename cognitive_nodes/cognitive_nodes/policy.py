@@ -4,19 +4,17 @@ import os
 import threading
 import time
 import rclpy
-from rclpy.node import Node
 from core.cognitive_node import CognitiveNode
-import random
 import numpy
 
-from std_msgs.msg import Int64
-from core.service_client import ServiceClient, ServiceClientAsync
-from cognitive_node_interfaces.srv import GetActivation, SetActivation, Execute
-from cognitive_node_interfaces.msg import Episode
 
-from core.utils import perception_dict_to_msg, perception_msg_to_dict, class_from_classname, actuation_dict_to_msg
+from core.service_client import ServiceClientAsync
+from cognitive_node_interfaces.srv import GetActivation, SetActivation, Execute
+
+from core.utils import class_from_classname
+from core.container import Container
 from cognitive_nodes.utils import EpisodeSubscription
-from cognitive_nodes.episode import episode_msg_to_obj, reward_msg_to_dict
+from cognitive_nodes.episode import container_msg_to_episode, episode_obj_to_msg
 from cognitive_nodes.episodic_buffer import TraceBuffer
 
 class Policy(CognitiveNode):
@@ -57,7 +55,8 @@ class Policy(CognitiveNode):
         )
 
         episodes_topic = getattr(self, "Control", {}).get("episodes_topic", "")
-        self.episode_publisher = self.create_publisher(Episode, episodes_topic, 0)
+        episodes_msg = getattr(self, "Control", {}).get("episodes_msg", "")
+        self.episode_publisher = self.create_publisher(class_from_classname(episodes_msg), episodes_topic, 0)
         
         self.configure_activation_inputs(self.neighbors) 
 
@@ -67,7 +66,7 @@ class Policy(CognitiveNode):
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
 
         :param perception: Arbitrary perception.
-        :type perception: dict
+        :type perception: core_interfaces.msg.Container
         :param activation_list: List of activations of the neighbors.
         :type activation_list: list
         :return: The activation of the Policy and its timestamp.
@@ -78,7 +77,7 @@ class Policy(CognitiveNode):
             if cnodes:
                 cnode_activations = []
                 for cnode in cnodes:
-                    perception_msg = perception_dict_to_msg(perception)
+                    perception_msg = perception.to_msg()
                     service_name = 'cognitive_node/' + str(cnode) + '/get_activation'
                     if not service_name in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
@@ -96,7 +95,7 @@ class Policy(CognitiveNode):
             else:
                 self.activation.activation=0.0
                 self.activation.timestamp=self.get_clock().now().to_msg()
-        return self.activation
+            return self.activation
     
     def calculate_confidence(self, perception=None, activation_list=None):
         """TODO: this is a dummy method, WIP,
@@ -279,7 +278,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
         name='policy_learned',
         class_name='cognitive_nodes.policy.PolicyLearned',
         episodes_topic=None,
-        episodes_msg='cognitive_node_interfaces.msg.Episode',
+        episodes_msg='core_interfaces.msg.Container',
         actuation_config=None,
         obs_dim=7,
         buffer_size=100_000,
@@ -373,7 +372,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
             main_size=max_steps + 10,
             max_traces=10000,  # effectively unbounded — SAC replay buffer handles capacity
             min_traces=min_traces,
-            inputs=['old_perception', 'action'],
+            inputs=['old_perception', 'action', 'perception'],
             outputs=[],
         )
 
@@ -536,7 +535,6 @@ class PolicyLearned(Policy, EpisodeSubscription):
 
         Mirrors ``UtilityModel.execute_callback`` with ``Deliberation``.
         """
-        from cognitive_nodes.episode import episode_obj_to_msg
         self.get_logger().info(f'Executing PolicyLearned: {self.name}')
         self.reaction.start_flag.set()
         self.reaction.finished_flag.wait()
@@ -564,19 +562,19 @@ class PolicyLearned(Policy, EpisodeSubscription):
         and ``train_every`` new traces have arrived, a training thread is spawned.
         """
         try:
-            if msg.parent_policy == 'reset_world':
+            episode = container_msg_to_episode(msg)
+            if episode.parent_policy == 'reset_world':
                 self.episodic_buffer.clear()
                 self._current_trace_steps = 0
                 self.get_logger().info(f'PolicyLearned {self.name}: world reset — trace discarded')
                 return
 
-            reward_dict = reward_msg_to_dict(msg.reward_list)
+            reward_dict = episode.reward_list
             if self.target_reward is not None:
                 reward = float(reward_dict.get(self.target_reward, 0.0))
             else:
                 reward = float(sum(reward_dict.values()))
 
-            episode = episode_msg_to_obj(msg)
             n_traces_before = self.episodic_buffer.n_traces
             # add_episode with reward > 0 triggers evaluate_trace + stores the trace
             self.episodic_buffer.add_episode(episode, reward)
@@ -585,12 +583,12 @@ class PolicyLearned(Policy, EpisodeSubscription):
             n_traces = self.episodic_buffer.n_traces
             # A new trace was stored — log it and reset the step counter
             if n_traces > n_traces_before:
-                self._log_trace(reward, self._current_trace_steps, msg.parent_policy)
+                self._log_trace(reward, self._current_trace_steps, episode.parent_policy)
                 self._current_trace_steps = 0
 
             new_traces = self.episodic_buffer.new_traces
             self.get_logger().info(
-                f'PolicyLearned {self.name}: step added from [{msg.parent_policy}] '
+                f'PolicyLearned {self.name}: step added from [{episode.parent_policy}] '
                 f'(reward={reward:.3f}, traces={n_traces}/{self.min_traces}, '
                 f'new_traces={new_traces}/{self.train_every})'
             )
@@ -613,21 +611,22 @@ class PolicyLearned(Policy, EpisodeSubscription):
         with self._sac_lock:
             # Flush every (episode, utility) pair from every stored trace
             episodes, utilities = self.episodic_buffer.get_flattened_traces()
-            for ep, utility in zip(episodes, utilities):
-                obs      = self._perception_dict_to_obs(ep.old_perception)
-                next_obs = self._perception_dict_to_obs(ep.perception)
-                act_dict = ep.action.actuation
-                action_vec = []
-                for actuator, attrs in self.actuation_config.items():
-                    for attr in attrs:
-                        v = act_dict.get(actuator, [{}])[0].get(attr, 0.0)
-                        action_vec.append(float(v) * 2.0 - 1.0)
-                action_arr = numpy.array(action_vec, dtype=numpy.float32)
+
+            old_perceptions = episodes.old_perception
+            perceptions = episodes.perception
+            actions = episodes.action
+            
+            dataset_obs = old_perceptions.read().values
+            dataset_next_obs = perceptions.read().values
+            dataset_actions = actions.read().values
+
+            for obs, next_obs, action, utility in zip(dataset_obs, dataset_next_obs, dataset_actions, utilities):
+                action_vec = action*2.0-1.0
                 ep_done = float(utility > 0.0)
                 self._sac.replay_buffer.add(
                     obs=obs,
                     next_obs=next_obs,
-                    action=action_arr,
+                    action=action_vec,
                     reward=numpy.array([float(utility)], dtype=numpy.float32),
                     done=numpy.array([ep_done], dtype=numpy.float32),
                     infos=[{}],

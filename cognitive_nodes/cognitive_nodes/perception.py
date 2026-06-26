@@ -1,11 +1,13 @@
 import rclpy
 from rclpy.node import Node
+import numpy as np
 from math import isclose, cos, sin, pi
 
 from core.cognitive_node import CognitiveNode
+from core.container import Container
+from core_interfaces.msg import Container as ContainerMsg
 from cognitive_node_interfaces.srv import SetActivation, SetInputs
-from cognitive_node_interfaces.msg import PerceptionStamped
-from core.utils import class_from_classname, perception_dict_to_msg
+from core.utils import class_from_classname
 
 import random
 
@@ -39,7 +41,7 @@ class Perception(CognitiveNode):
         self.threshold = threshold
 
         #N: Value topic
-        self.perception_publisher = self.create_publisher(PerceptionStamped, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
+        self.perception_publisher = self.create_publisher(ContainerMsg, "perception/" + str(name) + "/value", 0) #TODO Implement the message's publication
 
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
@@ -57,11 +59,10 @@ class Perception(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
-        self.publish_msg = PerceptionStamped()
-
         self.normalize_values = normalize_data
 
         self.default_suscription = self.create_subscription(class_from_classname(default_msg), default_topic, self.read_perception_callback, 1)
+        self.container = None
         
     def calculate_activation(self, perception = None, activation_list=None):
         """
@@ -179,9 +180,10 @@ class DiscreteEventSimulatorPerception(Perception):
         """
         Method that processes the sensor values received.
         """
-        sensor = {}
-        value = []
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             for perception in self.reading.data:
                 distance = (
                     perception.distance - self.normalize_values["distance_min"]
@@ -199,23 +201,21 @@ class DiscreteEventSimulatorPerception(Perception):
                     self.normalize_values["diameter_max"]
                     - self.normalize_values["diameter_min"]
                 )
-                value.append(
-                    dict(
-                        distance=distance,
-                        angle=angle,
-                        diameter=diameter,
-                        # id=perception.id,
-                    )
-                )
-        else:
-            value.append(dict(data=self.reading.data))
+                labels = ["distance", "angle", "diameter"]
+                data = np.array([distance, angle, diameter])
 
-        sensor[self.name] = value
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
-        sensor_msg = perception_dict_to_msg(sensor)
-        self.publish_msg.perception=sensor_msg
-        self.publish_msg.timestamp=self.get_clock().now().to_msg()
-        self.perception_publisher.publish(self.publish_msg)
+                break # Only the first perception is processed. Legacy code used perceptions as lists with dictionaries. Now, the perception message is a labeled DataArray.
+        else:
+            labels = ["data"]
+            data = np.array([self.reading.data])
+
+        if self.container is None:
+            self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
+
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        sensor_msg = self.container.to_msg()
+        self.perception_publisher.publish(sensor_msg)
 
 class FruitShopPerception(Perception):
     """Fruit Shop Perception class"""
@@ -241,9 +241,10 @@ class FruitShopPerception(Perception):
         """
         Method that processes the sensor values received.
         """
-        sensor = {}
-        value = []
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             if "scales" in self.name:
                 for perception in self.reading.data:
                     distance = (
@@ -259,14 +260,10 @@ class FruitShopPerception(Perception):
                     state = perception.state/(self.normalize_values["n_states"] - 1) # Normalize 0,1,2 states between 0 and 1
                     state = 0.98 if isclose(state, 1.0) else state
                     active = perception.active
-                    value.append(
-                        dict(
-                            distance=distance,
-                            angle=angle,
-                            state=state,
-                            active=active
-                        )
-                    )
+                    labels = ["distance", "angle", "state", "active"]
+                    data = np.array([distance, angle, state, active])
+                    break # Only the first perception is processed. Legacy code used perceptions as lists with dictionaries. Now, the perception message is a labeled DataArray.
+
             elif "fruits" in self.name:
                 for perception in self.reading.data:
                     distance = (
@@ -286,24 +283,20 @@ class FruitShopPerception(Perception):
                         self.normalize_values["dim_max"]
                         - self.normalize_values["dim_min"]
                     )
-
-                    
-                    value.append(
-                        dict(
-                            distance = distance,
-                            angle = angle,
-                            dim_max = dim_max
-                        )
-                    )
+                    labels = ["distance", "angle", "dim_max"]
+                    data = np.array([distance, angle, dim_max])
+                    break # Only the first perception is processed. Legacy code used perceptions as lists with dictionaries. Now, the perception message is a labeled DataArray.
         else:
-            value.append(dict(data=self.reading.data))
+            labels = ["data"]
+            data = np.array([self.reading.data])
         
-        sensor[self.name] = value
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
-        sensor_msg = perception_dict_to_msg(sensor)
-        self.publish_msg.perception=sensor_msg
-        self.publish_msg.timestamp=self.get_clock().now().to_msg()
-        self.perception_publisher.publish(self.publish_msg)
+        if self.container is None:
+            self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
+
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        sensor_msg = self.container.to_msg()
+        self.perception_publisher.publish(sensor_msg)
 
 
 
@@ -331,9 +324,10 @@ class OscarLLMPerception(Perception):
         """
         Method that processes the sensor values received.
         """
-        sensor = {}
-        value = []
         if isinstance(self.reading.data, list):
+            if len(self.reading.data) == 0:
+                self.get_logger().warning("Received an empty list of perceptions.")
+                return
             if "object" in self.name:
                 for perception in self.reading.data:
                     label = perception.label
@@ -355,16 +349,9 @@ class OscarLLMPerception(Perception):
                     color = (perception.color
                     )
                     state = perception.state
-                    value.append(
-                        dict(
-                            label=label,
-                            x_position=x_position,
-                            y_position=y_position,
-                            diameter= diameter,
-                            color=color,
-                            state=state
-                            )
-                            )
+                    labels = ["label", "x_position", "y_position", "diameter", "color", "state"]
+                    data = np.array([label, x_position, y_position, diameter, color, state])
+                    break # Only the first perception is processed. Legacy code used perceptions as lists with dictionaries. Now, the perception message is a labeled DataArray.
             
             elif "robot_hand" in self.name:
                 for perception in self.reading.data:
@@ -381,27 +368,20 @@ class OscarLLMPerception(Perception):
                         self.normalize_values["y_max"]
                         - self.normalize_values["y_min"]
                         )
-                    value.append(
-                        dict(
-                            x_position=x,
-                            y_position=y,
-                            state = state
-                            )
-                            )
+                    labels = ["x_position", "y_position", "state"]
+                    data = np.array([x, y, state])
+                    break # Only the first perception is processed. Legacy code used perceptions as lists with dictionaries. Now, the perception message is a labeled DataArray.
         else:
-            value.append(dict(data=self.reading.data))
+            labels = ["data"]
+            data = np.array([self.reading.data])
         
-        sensor[self.name] = value
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(sensor))
-        sensor_msg = perception_dict_to_msg(sensor)
-        self.publish_msg.perception=sensor_msg
-        self.publish_msg.timestamp=self.get_clock().now().to_msg()
-        self.perception_publisher.publish(self.publish_msg)
+        if self.container is None:
+            self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
+        self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
-
-        
-
-
+        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        sensor_msg = self.container.to_msg()
+        self.perception_publisher.publish(sensor_msg)
 
 def main(args=None):
     rclpy.init(args=args)

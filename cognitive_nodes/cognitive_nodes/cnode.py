@@ -1,9 +1,8 @@
 import numpy
 import rclpy
 from core.cognitive_node import CognitiveNode
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from cognitive_node_interfaces.srv import GetActivation
-from core.utils import perception_dict_to_msg
 
 
 class CNode(CognitiveNode):
@@ -42,7 +41,7 @@ class CNode(CognitiveNode):
         final activation of the C-Node for that perception.
 
         :param perception: Arbitrary perception.
-        :type perception: dict
+        :type perception: core.container.Container
         :param activation_list: Dictionary with the activation of multiple nodes. 
         :type activation_list: dict
         :return: The activation of the C-Node and its timestamp.
@@ -53,8 +52,8 @@ class CNode(CognitiveNode):
             neighbors_name = [
                 neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"
             ]
+            perception_msg = perception.to_msg()
             for name in neighbors_name:
-                perception_msg = perception_dict_to_msg(perception)
                 service_name = "cognitive_node/" + str(name) + "/get_activation"
                 if not service_name in self.node_clients:
                     self.node_clients[service_name] = ServiceClientAsync(
