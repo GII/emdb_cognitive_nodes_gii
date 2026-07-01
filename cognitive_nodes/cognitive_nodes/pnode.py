@@ -30,8 +30,10 @@ class PNode(CognitiveNode):
         :type history_size: int
         """
         super().__init__(name, class_name, **params)
+        # Propagate the node's random_seed to its space so that stochastic space
+        # operations (and NN weight initialisation) can be made reproducible.
         self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space")]
+            space_class)(ident=name + " space", random_seed=getattr(self, 'random_seed', None))]
         self.space=None
         self.added_point = False
         self.add_point_service = self.create_service(AddPoint, 'pnode/' + str(
@@ -144,7 +146,7 @@ class PNode(CognitiveNode):
         for point in points:
             self.space = self.spaces[0]
             if not self.space:
-                self.space = self.spaces[0].__class__()
+                self.space = self.spaces[0].__class__(random_seed=getattr(self, 'random_seed', None))
                 self.spaces.append(self.space)
             added_point_pos = self.space.add_point(point, confidence)
         self.added_point = True
@@ -197,7 +199,7 @@ class PNode(CognitiveNode):
         :return: If there is space, returns it. If not, returns None.
         :rtype: cognitive_nodes.space or None
         """
-        temp_space = self.spaces[0].__class__()
+        temp_space = self.spaces[0].__class__(random_seed=getattr(self, 'random_seed', None))
         temp_space.add_point(perception, 1.0)
         for space in self.spaces:
             if (not space.size) or space.same_sensors(temp_space):

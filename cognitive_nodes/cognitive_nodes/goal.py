@@ -224,7 +224,10 @@ class GoalObjectInBoxStandalone(Goal):
             self.space = (
                 space
                 if space
-                else class_from_classname(space_class)(ident=self.name + " space")
+                else class_from_classname(space_class)(
+                    ident=self.name + " space",
+                    random_seed=getattr(self, 'random_seed', None),
+                )
             )
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
@@ -236,7 +239,10 @@ class GoalObjectInBoxStandalone(Goal):
         :param data: The configuration file.
         :type data: dict
         """
-        self.space = class_from_classname(data.get("space"))(ident=self.name + " space")
+        self.space = class_from_classname(data.get("space"))(
+            ident=self.name + " space",
+            random_seed=getattr(self, 'random_seed', None),
+        )
         self.start = data.get("start")
         self.end = data.get("end")
         self.period = data.get("period")
@@ -928,7 +934,7 @@ class GoalLearnedSpace(GoalMotiven):
         super().__init__(name, class_name, **params)
         if space_class:
             self.spaces = [space if space else class_from_classname(
-                space_class)(ident=name + " space")]
+                space_class)(ident=name + " space", random_seed=getattr(self, 'random_seed', None))]
         if space:
             self.space=space
         else:
@@ -1028,7 +1034,7 @@ class GoalLearnedSpace(GoalMotiven):
         for point in points:
             self.space = self.spaces[0]
             if not self.space:
-                self.space = self.spaces[0].__class__()
+                self.space = self.spaces[0].__class__(random_seed=getattr(self, 'random_seed', None))
                 self.spaces.append(self.space)
             added_point_pos = self.space.add_point(point, confidence)
         self.added_point = True

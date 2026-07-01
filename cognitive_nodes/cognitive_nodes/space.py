@@ -8,19 +8,27 @@ from rclpy.node import Node
 from rclpy.logging import get_logger
 
 from core.utils import separate_perceptions
+from cognitive_nodes.random_utils import get_rng, set_global_seeds
 
 
 class Space(object):
     """A n-dimensional state space."""
 
-    def __init__(self, ident=None, **kwargs):
+    def __init__(self, ident=None, random_seed=None, **kwargs):
         """Init attributes when a new object is created.
 
         :param ident: The name of the space.
         :type ident: str
+        :param random_seed: Seed for the space's random number generator. Set it
+            to make stochastic space operations reproducible. ``None`` (default)
+            keeps the previous non-deterministic behaviour.
+        :type random_seed: int or None
         """
         self.ident = ident
         self.parent_space = None
+        self.random_seed = random_seed
+        # Isolated generator: use self.rng instead of the global numpy.random.
+        self.rng = get_rng(random_seed)
         self.logger = get_logger("space_" + str(ident))
         self.logger.info(f"CREATING SPACE: {ident}")
 
@@ -523,7 +531,7 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
                 )
             )
             if (dist_newpoint_centroid < dist_antipoint_centroid) or (
-                numpy.random.uniform()
+                self.rng.uniform()
                 < dist_antipoint_centroid * separation / dist_newpoint_centroid
             ):
                 distances = distances[memberships > 0.0]
@@ -576,7 +584,9 @@ class SVMSpace(PointBasedSpace):
         """
         Init attributes when a new object is created.
         """
-        self.model = svm.SVC(kernel="poly", degree=32, max_iter=200000)
+        # random_seed is read from kwargs because super().__init__ (which stores
+        # self.random_seed) has not run yet at this point.
+        self.model = svm.SVC(kernel="poly", degree=32, max_iter=200000, random_state=kwargs.get('random_seed'))
         super().__init__(**kwargs)
 
 
@@ -744,6 +754,10 @@ class ANNSpace(PointBasedSpace):
         :param input_shape: The shape of the input data.
         :type input_shape: tuple
         """
+        # Seed TF/Keras (and python/numpy) so weight initialisation is
+        # reproducible when a random_seed has been configured for the space.
+        set_global_seeds(self.random_seed)
+
         # Define train values
         output_activation = "sigmoid"
         optimizer = tf.optimizers.Adam()
@@ -936,6 +950,10 @@ class PyTorchOnlineSGDSpace(PointBasedSpace):
     
     def build_model(self, input_dim):
         self.logger.info(f"[SGD] build_model input_dim={input_dim}")
+        # Seed torch (and python/numpy) so weight initialisation and any
+        # subsequent torch ops (e.g. randperm) are reproducible when a
+        # random_seed has been configured for the space.
+        set_global_seeds(self.random_seed)
         nn_ref = self.nn
         torch_ref = self.torch
         
@@ -1069,4 +1087,4 @@ class randomSpace(PointBasedSpace):
         :return: The activation value, which is a random number between 0 and 1.
         :rtype: float
         """
-        return numpy.random.uniform()
+        return self.rng.uniform()

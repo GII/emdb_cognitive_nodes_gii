@@ -4,7 +4,7 @@ from rclpy.node import Node
 from core.cognitive_node import CognitiveNode
 from cognitive_node_interfaces.srv import SetActivation, Evaluate, GetSuccessRate
 
-import random
+from cognitive_nodes.random_utils import get_rng
 
 class UtilityModel(CognitiveNode):
     """
@@ -22,7 +22,11 @@ class UtilityModel(CognitiveNode):
         :type class_name: str
         """
         super().__init__(name, class_name, **params)
-        
+
+        # Seeded generator for the (dummy) activation. Set the node's
+        # random_seed parameter to make it reproducible.
+        self.rng = get_rng(getattr(self, 'random_seed', None))
+
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
             SetActivation,
@@ -107,7 +111,7 @@ class UtilityModel(CognitiveNode):
         :return: The activation of the instance.
         :rtype: float
         """
-        self.activation = random.random()
+        self.activation = float(self.rng.random())
         if self.activation_topic:
             self.publish_activation(self.activation)
         return self.activation
