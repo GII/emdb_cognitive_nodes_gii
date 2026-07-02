@@ -19,13 +19,15 @@ class UtilityModel(DeliberativeModel):
     """
     Utility Model class
     """
-    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions = 5, ltm_id="", **params):
+    def __init__(self, name='utility_model', class_name = 'cognitive_nodes.utility_model.UtilityModel', node_type="UtilityModel", service_prefix="utility_model", prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions = 5, ltm_id="", **params):
         """Initialize the Utility Model with deliberation and learning capabilities.
 
         :param name: The name of the Utility Model instance, defaults to 'utility_model'
         :type name: str, optional
         :param class_name: The fully qualified class name for the Utility Model, defaults to 'cognitive_nodes.utility_model.UtilityModel'
         :type class_name: str, optional
+        :param node_type: The type of the node, defaults to "UtilityModel"
+        :type node_type: str, optional
         :param prediction_srv_type: The service type for predictions, defaults to "cognitive_node_interfaces.srv.PredictUtility"
         :type prediction_srv_type: str, optional
         :param trace_length: Maximum number of traces to store in the episodic buffer, defaults to 20
@@ -39,7 +41,7 @@ class UtilityModel(DeliberativeModel):
         :param params: Additional keyword parameters reserved for future use.
         :type params: dict
         """        
-        super().__init__(name, class_name, prediction_srv_type=prediction_srv_type, node_type="utility_model", **params)
+        super().__init__(name, class_name, node_type=node_type, service_prefix=service_prefix, prediction_srv_type=prediction_srv_type, **params)
         self.configure_activation_inputs(self.neighbors)
         self.setup_model(trace_length=trace_length, max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
         self.execute_service = self.create_service(

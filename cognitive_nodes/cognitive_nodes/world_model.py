@@ -20,7 +20,7 @@ class WorldModel(DeliberativeModel):
     """
     World Model class: A static world model that is always active
     """
-    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', episodes_topic=None, prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
+    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', node_type="WorldModel", service_prefix="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
         """
         Constructor of the World Model class.
 
@@ -31,7 +31,7 @@ class WorldModel(DeliberativeModel):
         :param class_name: The name of the World Model class.
         :type class_name: str
         """
-        super().__init__(name, class_name, node_type="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params)
+        super().__init__(name, class_name, node_type=node_type, service_prefix=service_prefix, prediction_srv_type=prediction_srv_type, **params)
         self.episodic_buffer=None
         self.learner=None
         self.confidence_evaluator=None

@@ -15,19 +15,18 @@ from core.utils import class_from_classname, compare_perceptions
 from core.container import Container
 
 from core_interfaces.msg import Container as ContainerMsg
-from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, GetActivation, Evaluate, SendSpace, ContainsSpace
+from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, DuplicateGoal, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
 from builtin_interfaces.msg import Time as TimeMsg
 
 
-
 class Goal(CognitiveNode):
     """
     Goal class.
     """
-    def __init__(self, name='goal', class_name = 'cognitive_nodes.goal.Goal', **params):
+    def __init__(self, name='goal', class_name = 'cognitive_nodes.goal.Goal', node_type="Goal", duplicate_from=None, **params):
         """
         Constructor of the Goal class
 
@@ -37,14 +36,17 @@ class Goal(CognitiveNode):
         :type name: str
         :param class_name: The name of the Goal class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "Goal".
+        :type node_type: str
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, duplicate_from=None, **params)
         self.reward = 0.0
-        self.embedded = set()
-        self.start = None
-        self.end = None
-        self.period = None
-        self.iteration=0
+        self.duplicate_from = duplicate_from
+        if self.duplicate_from:
+            service_name = f"goal/{self.duplicate_from}/duplicate_goal" 
+            self.node_clients[service_name] = ServiceClientAsync(self, service_name=service_name, service_type=DuplicateGoal, callback_group=self.cbgroup_client)
+        self.duplicate_count = 0
+        self.base_params = params
 
         self.cbgroup_reward=MutuallyExclusiveCallbackGroup()
         
@@ -85,6 +87,9 @@ class Goal(CognitiveNode):
             self.send_goal_space_callback, 
             callback_group=self.cbgroup_server
         )
+
+        self.duplicate_goal_service = self.create_service(DuplicateGoal, 'goal/' + str(
+            name) + '/duplicate_goal', self.duplicate_goal_callback, callback_group=self.cbgroup_server)
 
     def set_activation_callback(self, request, response):
         """
@@ -203,6 +208,21 @@ class Goal(CognitiveNode):
             response.updated = False
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
+    
+    async def duplicate_goal_callback(self, request, response):
+        """
+        Callback method to duplicate the goal.
+
+        :param request: Request that includes the new perception to check the reward.
+        :type request: cognitive_node_interfaces.srv.DuplicateGoal.Request
+        :param response: Response that contais the name of the duplicated goal.
+        :type response: cognitive_node_interfaces.srv.DuplicateGoal.Response
+        :return: Response that contais the name of the duplicated goal.
+        :rtype: cognitive_node_interfaces.srv.DuplicateGoal.Response
+        """
+        new_goal = await self.duplicate_goal()
+        response.duplicate_goal_name = new_goal
+        return response
 
     async def get_reward(self, old_perception=None, perception=None):
         """
@@ -230,6 +250,26 @@ class Goal(CognitiveNode):
         :type confidence: float
         """
         return False
+    
+    async def duplicate_goal(self):
+        """
+        Duplicates the current goal and returns the new goal instance.
+
+        :return: The duplicated goal instance.
+        :rtype: Goal
+        """
+        if self.duplicate_from is None:
+            new_goal = self.name + f"_dup_{self.duplicate_count}"
+            self.duplicate_count += 1
+            params = {"neighbors": self.neighbors, **self.base_params}
+            success = await self.create_node_client(name=new_goal, class_name=self.class_name, parameters=params)
+            if not success:
+                self.get_logger().error(f"Failed to duplicate goal {self.name} as {new_goal}")
+            self.get_logger().info(f"Duplicated goal {self.name} as {new_goal}")
+        else:
+            response = await self.node_clients[f"goal/{self.duplicate_from}/duplicate_goal"].send_request_async()
+            new_goal = response.duplicate_goal_name
+        return new_goal
 
 
 class GoalObjectInBoxStandalone(Goal):
@@ -655,7 +695,7 @@ class GoalObjectInBoxStandalone(Goal):
             
 
         return raw
-    
+
 class GoalMotiven(Goal):
     """
     Class that implements a Goal that aims at minimizing a drive.
@@ -876,7 +916,18 @@ class GoalLearnedSpace(GoalMotiven):
         :param space_parameters: Parameters for the space initialization.
         :type space_parameters: dict
         """        
-        super().__init__(name, class_name, **params)
+        super().__init__(
+            name,
+            class_name,
+            space_class=space_class,
+            space=space,
+            history_size=history_size,
+            min_confidence=min_confidence,
+            ltm_id=ltm_id,
+            perception=perception,
+            space_parameters=space_parameters,
+            **params,
+        )
         if space_class:
             self.spaces = [space if space else class_from_classname(
                     space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
@@ -916,7 +967,7 @@ class GoalLearnedSpace(GoalMotiven):
         """        
         if self.space:
             response.space = self.space.to_msg()
-            
+
         return response
 
     def contains_space_callback(self, request, response):
@@ -936,7 +987,7 @@ class GoalLearnedSpace(GoalMotiven):
         else:
             response.contained=False
         return response
-    
+
     def add_points(self, point, confidences):
         """
         Add a new point (or anti-point) to the Goal.
@@ -973,19 +1024,19 @@ class GoalLearnedSpace(GoalMotiven):
                 self.update_space(reward, expected_reward, perception)
                 timestamp=self.reward_timestamp
             else:
-                #TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
+                # TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
                 drive_reward=0.0
                 prob_reward=expected_reward
-                #Threshold reward according to probability obtained from space
+                # Threshold reward according to probability obtained from space
                 reward= 1.0 if prob_reward>0.75 else 0.0
             timestamp=self.get_clock().now().to_msg()
             self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {drive_reward} PRED_REWARD: {expected_reward} CONF: {self.confidence}")
         else:
             reward=0.0
             timestamp=self.get_clock().now().to_msg()
-        
+
         return reward, timestamp
-    
+
     def get_expected_reward(self, perception:Container):
         """
         Calculate the expected reward of the goal based on the perception and the goal state.
@@ -1003,7 +1054,6 @@ class GoalLearnedSpace(GoalMotiven):
         expected_reward = float(reward_value)
         return expected_reward
 
-
     def update_space(self, reward, expected_reward, perception):
         """
         Update the space of the goal based on the reward obtained and the expected reward. Adds point or antipoint to the space, updates the confidence score of the goal.
@@ -1016,23 +1066,23 @@ class GoalLearnedSpace(GoalMotiven):
         :type perception: core.container.Container
         """        
         if reward>0.01:
-            #All rewarded points are saved and accounted to the confidence according to the prediction
+            # All rewarded points are saved and accounted to the confidence according to the prediction
             self.add_points(perception, np.array([1.0]))
             if expected_reward>0.5:
                 self.history.appendleft(True)
             else:
                 self.history.appendleft(False)
         else:
-            #Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
+            # Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
             if expected_reward>0.01:
                 self.add_points(perception, np.array([-1.0]))
                 if expected_reward>0.1:
                     self.history.appendleft(False)
         self.confidence=sum(self.history)/self.history.maxlen
-        #Set goal as learned if min_confidence is exceeded
+        # Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence>self.min_confidence:
             self.learned_space=True
-        #Flag goal if confidence goes below 75% of learned confidence
+        # Flag goal if confidence goes below 75% of learned confidence
         if self.learned_space and self.confidence<self.min_confidence*0.75:
             self.learned_space=False
         self.publish_success_rate()
@@ -1070,7 +1120,7 @@ class GoalLearnedSpace(GoalMotiven):
         for neighbor in self.neighbors:
             if neighbor["node_type"]=="Drive":
                 return neighbor["name"]         
-        
+
 def main(args=None):
     rclpy.init(args=args)
 

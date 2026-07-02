@@ -13,7 +13,7 @@ class RobotPurpose(CognitiveNode):
     """"
     Robot Purpose Class.
     """
-    def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
+    def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
         """
         Constructor of the Robot Purpose class
 
@@ -23,6 +23,8 @@ class RobotPurpose(CognitiveNode):
         :type name: str
         :param class_name: The name of the RobotPurpose class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "RobotPurpose".
+        :type node_type: str
         :param weight: The weight of the RobotPurpose.
         :type weight: float
         :param drive_id: The ID of the Drive node associated with the RobotPurpose.
@@ -30,7 +32,7 @@ class RobotPurpose(CognitiveNode):
         :param purpose_type: The type of the RobotPurpose (Need or Mission).
         :type purpose_type: str
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.cbgroup_satisfaction = MutuallyExclusiveCallbackGroup()
         

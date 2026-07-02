@@ -15,7 +15,7 @@ class Perception(CognitiveNode):
     """
     Perception class
     """
-    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, threshold=0.9, **params):
+    def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', node_type="Perception", default_msg = None, default_topic = None, normalize_data = None, threshold=0.9, **params):
         """
         Constructor for the Perception class.
 
@@ -25,6 +25,8 @@ class Perception(CognitiveNode):
         :type name: str
         :param class_name: The name of the Perception class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "Perception".
+        :type node_type: str
         :param default_msg: The msg of the default subscription.
         :type default_msg: str
         :param default_topic: The topic of the default subscription.
@@ -34,7 +36,7 @@ class Perception(CognitiveNode):
         :param threshold: The activation threshold for processing.
         :type threshold: float
         """
-        super().__init__(name, class_name, **params)       
+        super().__init__(name, class_name, node_type=node_type, **params)       
         # We set 1.0 as the default activation value
         self.activation.activation = 1.0
         #Activation threshold for processing
@@ -174,7 +176,7 @@ class DiscreteEventSimulatorPerception(Perception):
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
-        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+        super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
      
     def process_and_send_reading(self):
         """
@@ -235,7 +237,7 @@ class FruitShopPerception(Perception):
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
-        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+        super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 
     def process_and_send_reading(self):
         """
@@ -318,7 +320,7 @@ class OscarLLMPerception(Perception):
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
         """
-        super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+        super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 
     def process_and_send_reading(self):
         """

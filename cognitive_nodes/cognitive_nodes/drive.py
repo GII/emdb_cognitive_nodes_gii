@@ -20,7 +20,7 @@ class Drive(CognitiveNode):
     Drive class
     """
 
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", node_type="Drive", **params):
         """
         Constructor of the Drive class.
         Initializes a Drive instance with the given name and registers it in the LTM.
@@ -29,8 +29,10 @@ class Drive(CognitiveNode):
         :type name: str
         :param class_name: The name of the Drive class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "Drive".
+        :type node_type: str
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.cbgroup_evaluation = MutuallyExclusiveCallbackGroup()
 

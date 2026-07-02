@@ -16,7 +16,7 @@ class PNode(CognitiveNode):
     """
     P-Node class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, space_parameters=None, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', node_type="PNode", space_class = None, space = None, history_size=100, space_parameters=None, **params):
         """
         Constructor for the P-Node class.
         
@@ -27,6 +27,8 @@ class PNode(CognitiveNode):
         :type name: str
         :param class_name: The name of the P-Node class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "PNode".
+        :type node_type: str
         :param space_class: The class of the space used to define the P-Node.
         :type space_class: str
         :param space: The space used to define the P-Node.
@@ -34,7 +36,7 @@ class PNode(CognitiveNode):
         :param history_size: The size of the history of the P-Node.
         :type history_size: int
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
         self.spaces = [space if space else class_from_classname(
             space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
         self.space=self.spaces[0]

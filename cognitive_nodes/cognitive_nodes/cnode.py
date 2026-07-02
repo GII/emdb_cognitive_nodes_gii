@@ -12,7 +12,7 @@ class CNode(CognitiveNode):
     It is assumed that there is only one element of each type connected to the C-Node.
     """
 
-    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", **params):
+    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", node_type="CNode", **params):
         """
         Constructor of the C-Node class.
         Initializes a C-Node with the given name and registers it in the LTM.
@@ -21,8 +21,10 @@ class CNode(CognitiveNode):
         :type name: str
         :param class_name: The name of the C-Node class.
         :type str
+        :param node_type: The type of the C-Node.
+        :type node_type: str
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
         self.configure_activation_inputs(self.neighbors)
 
     def calculate_confidence(self, perception=None, activation_list=None):

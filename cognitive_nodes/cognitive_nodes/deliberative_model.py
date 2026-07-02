@@ -19,7 +19,7 @@ class DeliberativeModel(CognitiveNode):
     """
     Deliberative Model class, this class is a generic model that can be used to implement different types of deliberative models. 
     """
-    def __init__(self, name='model', class_name = 'cognitive_nodes.deliberative_model.DeliberativeModel', node_type="deliberative_model", prediction_srv_type=None, **params):
+    def __init__(self, name='model', class_name = 'cognitive_nodes.deliberative_model.DeliberativeModel', node_type="DeliberativeModel", service_prefix="deliberative_model", prediction_srv_type=None, **params):
         """
         Constructor of the Deliberative Model class.
 
@@ -29,12 +29,14 @@ class DeliberativeModel(CognitiveNode):
         :type name: str
         :param class_name: The name of the DeliberativeModel class.
         :type class_name: str
-        :param node_type: The type of the node, defaults to "deliberative_model".
-        :type node_type: str
+        :param service_prefix: The prefix for the services.
+        :type service_prefix: str
+        :param prediction_srv_type: The type of the prediction service.
+        :type prediction_srv_type: str
         :param params: Additional keyword parameters reserved for future use.
         :type params: dict
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.episodic_buffer=None
         self.learner=None
@@ -43,7 +45,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
             SetActivation,
-            node_type+ "/" + str(name) + '/set_activation',
+            service_prefix+ "/" + str(name) + '/set_activation',
             self.set_activation_callback,
             callback_group=self.cbgroup_server
         )
@@ -55,7 +57,7 @@ class DeliberativeModel(CognitiveNode):
             raise ValueError("prediction_srv_type must be provided and be a valid class name.")
         self.predict_service = self.create_service(
             prediction_srv_type,
-            node_type+ "/" + str(name) + '/predict',
+            service_prefix+ "/" + str(name) + '/predict',
             self.predict_callback,
             callback_group=self.cbgroup_server
         )
@@ -63,7 +65,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Get Success Rate Service
         self.get_success_rate_service = self.create_service(
             GetSuccessRate,
-            node_type+ "/" + str(name) + '/get_success_rate',
+            service_prefix+ "/" + str(name) + '/get_success_rate',
             self.get_success_rate_callback,
             callback_group=self.cbgroup_server
         )
@@ -71,7 +73,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Is Compatible Service
         self.is_compatible_service = self.create_service(
             IsCompatible,
-            node_type+ "/" + str(name) + '/is_compatible',
+            service_prefix+ "/" + str(name) + '/is_compatible',
             self.is_compatible_callback,
             callback_group=self.cbgroup_server
         )
@@ -79,7 +81,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Save Model Service
         self.save_model_service = self.create_service(
             SaveModel,
-            node_type+ "/" + str(name) + '/save_model',
+            service_prefix+ "/" + str(name) + '/save_model',
             self.save_model_callback,
             callback_group=self.cbgroup_server
         )
@@ -268,7 +270,7 @@ class ANNLearner(Learner):
 
     def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', 
                  hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, loss_function=nn.MSELoss, val_function=nn.L1Loss, 
-                 model_file=None, device='cpu', **params):
+                 model_file=None, device='cuda', **params):
         """Initialize the ANNLearner with PyTorch-based neural network configuration.
 
         :param node: The cognitive node that uses this learner.
@@ -300,8 +302,12 @@ class ANNLearner(Learner):
         """
         super().__init__(node, buffer, **params)
         
-        # PyTorch specific setup
-        self.device = torch.device(device if torch.cuda.is_available() and device == 'cuda' else 'cpu')
+        # Device configuration
+        if device not in ["cpu", "cuda"]:
+            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+        elif device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
+        self.device = device
 
         self.batch_size = batch_size
         self.epochs = epochs

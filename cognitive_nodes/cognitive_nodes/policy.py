@@ -21,7 +21,7 @@ class Policy(CognitiveNode):
     """
     Policy class.
     """
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher_msg = None, publisher_topic = None, **params):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', node_type="Policy", **params):
         """
         Constructor for the Policy class.
 
@@ -38,7 +38,7 @@ class Policy(CognitiveNode):
         :type publisher: str
         """
         
-        super().__init__(name, 'cognitive_nodes.policy.Policy', **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.set_activation_service = self.create_service(
             SetActivation,
@@ -153,7 +153,7 @@ class PolicyAsync(Policy):
         :param publisher_topic: The publisher topic to publicate the execution of the policy.
         :type publisher: str
         """        
-        super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
+        super().__init__(name, class_name, **params)
         self.publisher_msg = publisher_msg
         self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)    
     
@@ -194,7 +194,7 @@ class PolicyBlocking(Policy):
         :param service_name: Name of the service that executes the policy.
         :type service_name: str
         """        
-        super().__init__(name, class_name, service_msg, service_name, **params)
+        super().__init__(name, class_name, **params)
         self.service_msg=service_msg
         self.service_name=service_name
         self.policy_service=ServiceClientAsync(self, class_from_classname(service_msg), service_name, self.cbgroup_client)

@@ -583,7 +583,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
         :type attribute: str
         :raises Exception: Raises exeption if the sensor or the attribute are missing.
         """        
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, sensor=sensor, attribute=attribute, **params)
         if not sensor or not attribute:
             raise Exception("Effect not configured")
         else:

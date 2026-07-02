@@ -33,6 +33,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/AddNeighbor.srv"
   "srv/ContainsSpace.srv"
   "srv/DeleteNeighbor.srv"
+  "srv/DuplicateGoal.srv"
   "srv/Evaluate.srv"
   "srv/Execute.srv"
   "srv/GetActivation.srv"
