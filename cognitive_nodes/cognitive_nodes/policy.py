@@ -369,6 +369,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
 
         self.episodic_buffer = TraceBuffer(
             self,
+            random_seed=getattr(self, 'random_seed', 0),
             main_size=max_steps + 10,
             max_traces=10000,  # effectively unbounded — SAC replay buffer handles capacity
             min_traces=min_traces,

@@ -279,7 +279,10 @@ class GoalObjectInBoxStandalone(Goal):
             self.space = (
                 space
                 if space
-                else class_from_classname(space_class)(ident=self.name + " space")
+                else class_from_classname(space_class)(
+                    ident=self.name + " space",
+                    random_seed=getattr(self, 'random_seed', 0),
+                )
             )
 
         self.iteration_subscriber = self.create_subscription(ControlMsg, 'main_loop/control', self.get_iteration_callback, 1)
@@ -291,7 +294,10 @@ class GoalObjectInBoxStandalone(Goal):
         :param data: The configuration file.
         :type data: dict
         """
-        self.space = class_from_classname(data.get("space"))(ident=self.name + " space")
+        self.space = class_from_classname(data.get("space"))(
+            ident=self.name + " space",
+            random_seed=getattr(self, 'random_seed', 0),
+        )
         self.start = data.get("start")
         self.end = data.get("end")
         self.period = data.get("period")
@@ -878,8 +884,12 @@ class GoalLearnedSpace(GoalMotiven):
         """        
         super().__init__(name, class_name, **params)
         if space_class:
+            # Forward the node's random_seed to the space (explicit
+            # space_parameters random_seed takes precedence).
+            space_kwargs = dict(space_parameters) if space_parameters else {}
+            space_kwargs.setdefault('random_seed', getattr(self, 'random_seed', 0))
             self.spaces = [space if space else class_from_classname(
-                    space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
+                    space_class)(ident=name + " space", **space_kwargs)]
             self.space=self.spaces[0]
         elif space:
             self.spaces = [space]

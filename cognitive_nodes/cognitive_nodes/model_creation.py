@@ -195,7 +195,7 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
 class ModelCreationPolicy(Policy, ModelCreationMixin):
     def __init__(self, name="model_creation", class_name="cognitive_nodes.drive.Policy", max_iterations=20, episodes_topic=None, episodes_msg=None, **params):
         super().__init__(name, class_name, **params)
-        self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception"], main_size=max_iterations, secondary_size=0)
+        self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception"], main_size=max_iterations, secondary_size=0, random_seed=getattr(self, "random_seed", 0))
         self.node_data = []
         self.configure_model_creation(episodes_topic, episodes_msg)
         self.last_episode = Episode()

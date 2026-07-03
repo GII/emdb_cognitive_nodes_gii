@@ -13,7 +13,7 @@ import yaml
 from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import String
 
-from core.utils import actuation_dict_to_msg
+from core.utils import actuation_dict_to_msg, resolve_seed
 from core_interfaces.srv import GetNodeFromLTM
 
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
@@ -52,7 +52,7 @@ from stable_baselines3 import SAC
 from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import String
 
-from core.utils import actuation_dict_to_msg
+from core.utils import actuation_dict_to_msg, resolve_seed
 from core_interfaces.srv import GetNodeFromLTM
 
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
@@ -2170,7 +2170,7 @@ class PolicyRandomAction(PolicyBlocking):
             self.cbgroup_client
         )
         random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(resolve_seed(random_seed))
         for actuator in self.actuation_config:
             self.actuation[actuator] = [{}]
             for param in self.actuation_config[actuator]:

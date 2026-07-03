@@ -7,6 +7,7 @@ from collections import deque
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
+from core.utils import resolve_seed
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
@@ -72,7 +73,7 @@ class PolicyNovelty(Policy):
         """        
         ltm = self.request_ltm()
         random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(resolve_seed(random_seed))
         self.configure_policies(ltm)
         self.get_logger().info("Configured Novelty Policy.")
 

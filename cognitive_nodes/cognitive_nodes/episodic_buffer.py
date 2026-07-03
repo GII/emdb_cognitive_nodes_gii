@@ -8,6 +8,7 @@ from copy import deepcopy
 from core.cognitive_node import CognitiveNode
 from core.container import Container, MultiContainer
 from cognitive_nodes.episode import Episode, container_to_episode_obj
+from core.utils import resolve_seed
 
 
 
@@ -62,7 +63,7 @@ class EpisodicBuffer:
         self.secondary_dataframe_outputs=None # DataFrame for the secondary buffer
         self.new_sample_count_main=0 # Counter for new samples in the main buffer
         self.new_sample_count_secondary=0 # Counter for new samples in the secondary buffer
-        self.rng = np.random.default_rng(random_seed) # Configuration of the random number generator
+        self.rng = np.random.default_rng(resolve_seed(random_seed)) # Configuration of the random number generator
         self.semaphore = threading.Semaphore() # Semaphore for thread-safe operations on the buffer
         self.flexible_labels = flexible_labels # Whether to allow dynamic label updates based on incoming episodes
 
