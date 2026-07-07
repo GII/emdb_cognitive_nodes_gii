@@ -15,7 +15,7 @@ class Episode:
     """
     Episode class that represents a single episode in the cognitive architecture.
     """
-    def __init__(self, old_perception: Container = None, parent_policy='', action: Container = None, perception: Container = None, rewards: Container = None, old_ltm_state: dict = {}, ltm_state: dict = {}) -> None:
+    def __init__(self, old_perception: Container = None, parent_policy='', domain_name='', action: Container = None, perception: Container = None, rewards: Container = None, old_ltm_state: dict = {}, ltm_state: dict = {}) -> None:
         """Initialize a new Episode.
 
         Captures the transition from a previous perceptual state to a new one,
@@ -52,6 +52,7 @@ class Episode:
         self.old_ltm_state = {} if old_ltm_state is None else old_ltm_state
         self.ltm_state = {} if ltm_state is None else ltm_state
         self.parent_policy = parent_policy
+        self.domain_name = domain_name
 
         self.field_type_map = {
             "old_perception": "perception",
@@ -177,11 +178,11 @@ class Episode:
         populated_parts = [p for p in parts if p is not None]
         if not populated_parts:
             return None
-        consolidated = consolidate_containers(populated_parts, name="episode", container_type="episode", attrs={"parent_policy": self.parent_policy})
+        consolidated = consolidate_containers(populated_parts, name="episode", container_type="episode", attrs={"parent_policy": self.parent_policy, "domain_name": self.domain_name})
         return consolidated
 
     def __repr__(self):
-        return f"Episode(old_perception={self.old_perception}, parent_policy={self.parent_policy}, action={self.action}, perception={self.perception}, rewards={self.rewards})"
+        return f"Episode(old_perception={self.old_perception}, parent_policy={self.parent_policy}, domain_name={self.domain_name}, action={self.action}, perception={self.perception}, rewards={self.rewards})"
 
 
 def container_msg_to_episode(msg: ContainerMsg) -> Episode:
@@ -198,10 +199,12 @@ def container_to_episode_obj(container: Container|xr.DataArray) -> Episode:
         if container.size == 0:
             return epi
         epi.parent_policy = container.data.attrs.get("parent_policy", "")
+        epi.domain_name = container.data.attrs.get("domain_name", "")
         data = container.read()
     elif isinstance(container, xr.DataArray):
         data = container
         epi.parent_policy = data.attrs.get("parent_policy", "")
+        epi.domain_name = data.attrs.get("domain_name", "")
     elif container is None:
         return epi
     else:

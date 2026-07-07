@@ -151,13 +151,6 @@ class Goal(CognitiveNode):
         response.space = ContainerMsg()
         return response
 
-    def calculate_confidence(self, perception=None, activation_list=None):
-        """
-        TODO: this is a dummy method, WIP,
-        This method can be extended to include other factors, such as the distance to the points in the space,
-        the number of points in the space, etc.
-        """
-        return self.activation.metacognitive_params.confidence
 
     async def is_reached_callback(self, request, response):
         """
@@ -261,7 +254,7 @@ class Goal(CognitiveNode):
         if self.duplicate_from is None:
             new_goal = self.name + f"_dup_{self.duplicate_count}"
             self.duplicate_count += 1
-            params = {"neighbors": self.neighbors, **self.base_params}
+            params = {"neighbors": self.neighbors, "duplicate_from": self.name, **self.base_params}
             success = await self.create_node_client(name=new_goal, class_name=self.class_name, parameters=params)
             if not success:
                 self.get_logger().error(f"Failed to duplicate goal {self.name} as {new_goal}")

@@ -1,2 +1,2 @@
-float32 confidence
-string hyperparameters
+string[] parameter_names
+float32[] parameter_values

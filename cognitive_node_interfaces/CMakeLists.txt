@@ -49,6 +49,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/IsCompatible.srv"
   "srv/IsReached.srv"
   "srv/IsSatisfied.srv"
+  "srv/LogExecution.srv"
   "srv/Policy.srv"
   "srv/Predict.srv"
   "srv/PredictUtility.srv"

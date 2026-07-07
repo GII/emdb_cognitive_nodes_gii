@@ -80,19 +80,6 @@ class Perception(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
     
-    def calculate_confidence(self, perception=None, activation_list=None):
-        """
-        TODO: this is a dummy method, WIP,
-        Returns dummy confidence value, to be implemented in the future.
-        :param perception: Perception does not influence the confidence of the instance.
-        :type perception: dict
-        :param activation_list: List of activations. Not used in this case.
-        :type activation_list: list
-        :return: The confidence of the instance and its timestamp.
-        :rtype: cognitive_node_interfaces.msg.Confidence
-        """        
-        return 1.0
-    
     def set_activation_callback(self, request, response):
         """
         Attention mechanisms can modify the activation of a perception instance.

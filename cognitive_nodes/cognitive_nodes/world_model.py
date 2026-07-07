@@ -36,7 +36,7 @@ class WorldModel(DeliberativeModel):
         self.learner=None
         self.confidence_evaluator=None
         self.activation.activation = 1.0
-        self.activation.metacognitive_params.confidence = 1.0
+        self.metacognitive_params["confidence"] = 1.0
 
     def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
@@ -174,7 +174,7 @@ class EvaluatorWorldModel(Evaluator):
         """        
         super().__init__(node, learner, buffer, **params)
         self.prediction_error = 0.0
-        self.node.activation.metacognitive_params.confidence = 0.0
+        self.node.metacognitive_params["confidence"] = 0.0
         self.prediction_error_publisher = self.node.create_publisher(SuccessRate, f"world_model/{self.node.name}/prediction_error", 0)
 
     def evaluate(self):
@@ -183,6 +183,7 @@ class EvaluatorWorldModel(Evaluator):
         """        
         x_test, y_test = self.buffer.get_test_samples()
         self.prediction_error = self.learner.evaluate(x_test, y_test)
+        self.calculate_metacognitive_parameters()
         self.node.get_logger().info(f"World Model Prediction Error: {self.prediction_error}")
 
     def publish_prediction_error(self):
@@ -194,15 +195,13 @@ class EvaluatorWorldModel(Evaluator):
         prediction_error_msg.node_type = self.node.node_type
         prediction_error_msg.success_rate = self.prediction_error
         self.prediction_error_publisher.publish(prediction_error_msg)
-        self.calculate_confidence() #TODO: this is ungly hack to update the confidence of the node after evaluating the prediction error. It should be done in a more elegant way.
 
-    def calculate_confidence(self, perception=None, activation_list=None):
+    def calculate_metacognitive_parameters(self):
         """
         Calculate the confidence of the world model based on its prediction error.
         """
         self.node.get_logger().info(f"Calculating confidence for World Model {self.node.name} with prediction error {self.prediction_error}")
-        self.node.activation.metacognitive_params.confidence = self.prediction_error
-        return self.node.activation.metacognitive_params.confidence
+        self.metacognitive_params["confidence"] = self.prediction_error
 
 
 

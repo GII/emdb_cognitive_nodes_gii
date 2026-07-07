@@ -173,12 +173,14 @@ class PNode(CognitiveNode):
             activations = self.space.get_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
             return activations.tolist()
 
-    def calculate_confidence(self, perception=None, activation_list=None):
+    def calculate_metacognitive_params(self):
         """
-        This method use the already calculated success rate as confidence value, 
-        stored in 
+        Calculate the metacognitive parameters of the P-Node.
+
+        :return: The metacognitive parameters of the P-Node.
+        :rtype: cognitive_node_interfaces.msg.MetacognitiveParams
         """
-        return self.success_rate
+        self.metacognitive_params["confidence"] = self.success_rate
     
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
         """
@@ -320,6 +322,7 @@ class PNode(CognitiveNode):
         else:
             self.history.appendleft(False)
         self.success_rate = sum(self.history)/self.history.maxlen
+        self.calculate_metacognitive_params()
         self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
 
 
