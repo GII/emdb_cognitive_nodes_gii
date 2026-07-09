@@ -1,4 +1,5 @@
 import yaml
+import inspect
 
 from std_msgs.msg import String
 from cognitive_node_interfaces.msg import SuccessRate
@@ -18,7 +19,7 @@ class LTMSubscription:
         """        
         self.ltm_subscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=callback_group)
 
-    def ltm_change_callback(self, msg):
+    async def ltm_change_callback(self, msg):
         """
         Callback that processes the LTM message.
 
@@ -27,9 +28,13 @@ class LTMSubscription:
         """        
         self.get_logger().info("Processing change from LTM...")
         ltm_dump = yaml.safe_load(msg.data)
-        self.read_ltm(ltm_dump=ltm_dump)
 
-    def read_ltm(self, ltm_dump):
+        if inspect.iscoroutinefunction(self.read_ltm):
+            await self.read_ltm(ltm_dump=ltm_dump)
+        else:
+            self.read_ltm(ltm_dump=ltm_dump)
+
+    async def read_ltm(self, ltm_dump):
         """
         Placeholder for LTM processing.
 

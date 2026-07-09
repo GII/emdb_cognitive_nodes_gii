@@ -8,11 +8,11 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import GoalLearnedSpace
 from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClientAsync
-from cognitive_nodes.episode import container_msg_to_episode
+from cognitive_nodes.episode import container_msg_to_episode, episode_obj_to_msg
 from core.utils import compare_perceptions
 
 from cognitive_node_interfaces.msg import SuccessRate
-from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace
+from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace, AddPoints, LogExecution
 from cognitive_nodes.utils import PNodeSuccess, EpisodeSubscription
 
 
@@ -114,6 +114,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
             self.episode_msg = episodes_msg
         self.effects={} 
         self.new_effects={}
+        self.new_effects_data={}
         self.get_effects_service = self.create_service(GetEffects, 'drive/' + str(
             name) + '/get_effects', self.get_effects_callback, callback_group=self.cbgroup_server)
         self.configure_episode_subscription(episodes_topic, episodes_msg, self.cbgroup_activation)
@@ -126,11 +127,9 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :type msg: ROS Message (most cases: cognitive_node_interfaces.msg.Episode)
         """
         episode = container_msg_to_episode(msg)
-        perception=episode.perception
-        old_perception=episode.old_perception
-        self.find_effects(perception, old_perception)
+        self.find_effects(episode)
 
-    def find_effects(self, perception, old_perception):
+    def find_effects(self, episode):
         """
         Checks consecutive perceptions if effects were generated.
 
@@ -139,6 +138,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :param old_perception: Previous perception.
         :type old_perception: core.container.Container
         """
+        old_perception = episode.old_perception
+        perception = episode.perception
         labels_old_perception = set(old_perception.feature_labels)
         labels_perception = set(perception.feature_labels)
         labels = list(labels_perception.intersection(labels_old_perception))
@@ -175,6 +176,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
             if existing_effect != attribute:
                 self.effects[sensor] = attribute
                 self.new_effects[sensor] = attribute
+                self.new_effects_data[sensor] = episode_obj_to_msg(episode)
                 self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
 
     def get_effects_callback(self, request, response:GetEffects.Response):
@@ -190,13 +192,16 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         """        
         sensors=[]
         attributes=[]
+        data=[]
         if self.new_effects:
             effects=copy(self.new_effects)
             for sensor in effects:
                 sensors.append(sensor)
                 attributes.append(self.new_effects.pop(sensor))
+                data.append(self.new_effects_data.pop(sensor))
         response.sensors=sensors
         response.attributes=attributes
+        response.effects_episodes = data
         return response
 
     def evaluate(self, perception=None):
@@ -391,7 +396,7 @@ class PolicyEffectanceExternal(Policy):
 
     This class inherits from the general Policy class.
     """  
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', drive_name=None, ltm_id=None, goal_class=None, space_class=None, **params):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', drive_name=None, ltm_id=None, goal_class=None, goal_params={}, space_class=None, space_params={}, pnode_class=None, pnode_params={}, **params):
         """
         Constructor of the PolicyEffectanceExternal class.
 
@@ -425,13 +430,39 @@ class PolicyEffectanceExternal(Policy):
             raise RuntimeError('No goal class was provided.')
         else:    
             self.goal_class = goal_class
+            self.goal_params = goal_params
+        self.setup_connectors() # Sets up the default classes for the cognitive nodes based on the Connectors attribute if it exists.
+
+        # Setup the space class and parameters.
+        # TODO: A custom space must be developed that represents the external effects. Currently, a custom reward function is used to provide reward when the effect is recreated.
+        #       For compatibility with other consolidation processes, a space is learned from rewarded points. This is not optimal, since the space can be represented by the effect itself, but it is a temporary solution. 
         if space_class is None:
-            raise RuntimeError('No space class for the goal was provided.')
+            self.get_logger().warning('No space class was provided. Using default space class defined in the connectors.')
+            self.space_class = self.default_class.get("Space", None)
+            self.space_params = self.default_params.get("Space", {})
+            if self.space_class is None:
+                raise RuntimeError('No default space class was defined in the parameters nor in the connectors. Please provide a space class.')
         else:    
             self.space_class = space_class
-            
+            self.space_params = space_params
+
+        # Get the P-Node class and parameters.
+        if pnode_class is None:
+            self.get_logger().warning('No P-Node class was provided. Using default P-Node class defined in the connectors.')
+            self.pnode_class = self.default_class.get("PNode", None)
+            self.pnode_params = self.default_params.get("PNode", {})
+            if self.pnode_class is None:
+                raise RuntimeError('No default P-Node class was defined in the parameters nor in the connectors. Please provide a P-Node class.')
+        else:    
+            self.pnode_class = pnode_class
+            self.pnode_params = pnode_params
+        
+        self.cnode_class = self.default_class.get("CNode", None)
+        self.cnode_params = self.default_params.get("CNode", {})
+        if self.cnode_class is None:
+            raise RuntimeError('No default C-Node class was defined in the parameters nor in the connectors. Please provide a C-Node class.')
         self.effects_client = ServiceClientAsync(self, GetEffects, f"drive/{self.drive}/get_effects", callback_group=self.cbgroup_client)
-    
+
     async def execute_callback(self, request, response):
         """
         Callback that executes the policy.
@@ -445,12 +476,28 @@ class PolicyEffectanceExternal(Policy):
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
         effects_msg = await self.effects_client.send_request_async()
-        for sensor, attribute in zip(effects_msg.sensors, effects_msg.attributes):
-            await self.create_goal(sensor, attribute)
+        for sensor, attribute, episode_msg in zip(effects_msg.sensors, effects_msg.attributes, effects_msg.effects_episodes):
+            episode = container_msg_to_episode(episode_msg)
+            await self.create_cnode(sensor, attribute, episode)
         response.policy=self.name
         return response
     
-    async def create_goal(self, sensor, attribute):
+    async def log_cnode_execution(self, cnode_name, success):
+        """
+        This method logs the execution of a C-Node.
+
+        :param cnode_name: Name of the C-Node that was executed.
+        :type cnode_name: str
+        :param success: Boolean indicating whether the execution was successful.
+        :type success: bool
+        """
+        logging_service = f"cnode/{cnode_name}/log_execution"
+        if logging_service not in self.node_clients:
+            self.node_clients[logging_service] = ServiceClientAsync(self, LogExecution, logging_service, self.cbgroup_client)
+        response = await self.node_clients[logging_service].send_request_async(success=success)
+        return response.added
+    
+    async def create_goal(self, sensor, attribute, point):
         """
         Method that creates a goal related to an effect and registers it in the LTM.
 
@@ -461,10 +508,84 @@ class PolicyEffectanceExternal(Policy):
         """        
         self.get_logger().info(f"Creating goal linked to effect in sensor {sensor}, attribute {attribute}")
         goal_name=f"effect_{sensor}_{attribute}"
-        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class, history_size=300, min_confidence=0.95)
+        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class, space_parameters=self.space_params, **self.goal_params)
         goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
         if not goal_response.created:
-            self.get_logger().fatal(f"Failed creation of Goal {goal_name}")
+            raise RuntimeError(f"Failed creation of Goal {goal_name}")
+        service_name = f"goal/{goal_name}/add_points"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(self, AddPoints, service_name, self.cbgroup_client)
+
+        perception_msg = point.to_msg()
+        response = await self.node_clients[service_name].send_request_async(points=perception_msg, confidences=[1.0])
+        if not response.added:
+            raise RuntimeError(f"Failed to add point to Goal {goal_name}")
+        return goal_name
+    
+    async def create_pnode(self, ident, point):
+        """
+        Method that creates a P-Node related to an effect and registers it in the LTM.
+
+        :param ident: Identifier for the P-Node.
+        :type ident: str
+        :param point: Point in the space that represents the effect.
+        :type point: core.container.Container
+        """
+        pnode_name=f"pnode_{ident}"
+        pnode_params = self.pnode_params
+        response = await self.create_node_client(name=pnode_name, class_name=self.pnode_class, parameters=pnode_params)
+        if not response.created:
+            raise RuntimeError(f"Failed creation of P-Node {pnode_name}")
+        service_name = f"pnode/{pnode_name}/add_points"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(self, AddPoints, service_name, self.cbgroup_client)
+
+        perception_msg = point.to_msg()
+        response = await self.node_clients[service_name].send_request_async(points=perception_msg, confidences=[1.0])
+        if not response.added:
+            raise RuntimeError(f"Failed to add point to P-Node {pnode_name}")
+
+        return pnode_name
+
+    async def create_cnode(self, sensor, attribute, episode):
+        """
+        Method that creates all the nodes that correspond to the 
+
+        :param sensor: Name of the sensor to which the effect is related.
+        :type sensor: str
+        :param attribute: Attribute in the sensor to which the effect is related.
+        :type attribute: str
+        :param episode: Episode that generated the effect.
+        :type episode: cognitive_nodes.episode.Episode
+        """
+        # Load the parameters for the C-Node, P-Node, and Goal from the connectors or defaults.
+        cnode_class = self.cnode_class
+        cnode_params = self.cnode_params
+        world_model = episode.domain_name
+        policy = episode.parent_policy
+
+        # Create the goal and P-Node, and set up their relationships.
+        goal = await self.create_goal(sensor, attribute, episode.perception)
+        ident = f"{world_model}__{goal}__{policy}"
+        pnode_name = await self.create_pnode(ident, episode.old_perception)
+        neighbor_dict = {world_model: "WorldModel", pnode_name: "PNode", goal: "Goal"}
+        neighbors = {
+            "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
+        }
+
+        # Create the C-Node with the specified parameters and neighbors.
+        cnode_name = f"cnode_{ident}"
+        cnode = await self.create_node_client(
+            name=cnode_name, class_name=cnode_class, parameters={**cnode_params, **neighbors}
+        )
+        if not cnode.created:
+            raise RuntimeError(f"Failed creation of C-Node {cnode_name}")
+
+        #Add new C-Node as neighbor of the corresponding policy
+        updated_policy = await self.update_neighbor_client(policy, cnode_name, operation=True)
+        if not updated_policy.success:
+            raise RuntimeError(f"Failed to add C-Node {cnode_name} as neighbor of policy {policy}")
+        await self.log_cnode_execution(cnode_name, success=True)
 
 class GoalActivatePNode(GoalLearnedSpace):
     """
@@ -583,7 +704,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
         :type attribute: str
         :raises Exception: Raises exeption if the sensor or the attribute are missing.
         """        
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, sensor=sensor, attribute=attribute, **params)
         if not sensor or not attribute:
             raise Exception("Effect not configured")
         else:
@@ -642,24 +763,18 @@ class GoalRecreateEffect(GoalLearnedSpace):
         
         return effect, old_sensing, sensing
     
-    def calculate_activation(self, perception, activation_list):
-        """
-        This method extends the default calculate activation method for goals and provides activation based on the goal's confidence.
+    # def calculate_activation(self, perception, activation_list):
+    #     """
+    #     This method extends the default calculate activation method for goals and provides activation based on the goal's confidence.
 
-        :param perception: The perception for which the activation will be calculated. None can be passed.
-        :type perception: dict
-        :param activation_list: List of activations considered in the node.
-        :type activation_list: dict
-        """        
-        #Calculates activation as any goal
-        super().calculate_activation(perception, activation_list)
-        #Provides activation if not learned depending on confidence
-        if not self.learned_space:
-            self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
+    #     :param perception: The perception for which the activation will be calculated. None can be passed.
+    #     :type perception: dict
+    #     :param activation_list: List of activations considered in the node.
+    #     :type activation_list: dict
+    #     """        
+    #     #Calculates activation as any goal
+    #     super().calculate_activation(perception, activation_list)
+    #     #Provides activation if not learned depending on confidence
+    #     if not self.learned_space:
+    #         self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
 
-    def calculate_confidence(self, perception, activation_list):
-        """
-        TODO: this is a dummy method, WIP,
-        This method extends the default calculate confidence method for goals and provides confidence based on the goal's activation.
-        """      
-        return 1.0

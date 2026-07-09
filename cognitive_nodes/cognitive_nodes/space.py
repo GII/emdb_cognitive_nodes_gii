@@ -739,6 +739,14 @@ class ANNSpace(PointBasedSpace):
     """
 
     def __init__(self, max_data=2000, sampled_points=200, train_every=1, batch_size=25, epochs=1, output_activation="sigmoid", hidden_activation="relu", hidden_layers=[64, 32], learning_rate=0.05, validation_split=0.0, loss_function=nn.BCEWithLogitsLoss, val_function=nn.BCEWithLogitsLoss, model_file=None, device="cuda", **kwargs):
+        
+        # Device configuration
+        if device not in ["cpu", "cuda"]:
+            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+        elif device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
+        self.device = device
+        
         self.batch_size = batch_size
         self.epochs = epochs
         self.output_activation = output_activation
@@ -746,11 +754,6 @@ class ANNSpace(PointBasedSpace):
         self.hidden_layers = hidden_layers
         self.learning_rate = learning_rate
         self.validation_split = validation_split
-        if device not in ["cpu", "cuda"]:
-            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
-        elif device == "cuda" and not torch.cuda.is_available():
-            raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
-        self.device = device
         self.max_data = max_data
         self.sampled_points = sampled_points
         self.train_every = train_every

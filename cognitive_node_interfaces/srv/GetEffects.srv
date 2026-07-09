@@ -1,3 +1,4 @@
 ---
 string[] sensors
 string[] attributes
+core_interfaces/Container[] effects_episodes

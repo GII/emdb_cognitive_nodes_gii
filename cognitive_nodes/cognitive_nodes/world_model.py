@@ -20,7 +20,7 @@ class WorldModel(DeliberativeModel):
     """
     World Model class: A static world model that is always active
     """
-    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', episodes_topic=None, prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
+    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', node_type="WorldModel", service_prefix="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
         """
         Constructor of the World Model class.
 
@@ -31,12 +31,12 @@ class WorldModel(DeliberativeModel):
         :param class_name: The name of the World Model class.
         :type class_name: str
         """
-        super().__init__(name, class_name, node_type="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params)
+        super().__init__(name, class_name, node_type=node_type, service_prefix=service_prefix, prediction_srv_type=prediction_srv_type, **params)
         self.episodic_buffer=None
         self.learner=None
         self.confidence_evaluator=None
         self.activation.activation = 1.0
-        self.activation.metacognitive_params.confidence = 1.0
+        self.metacognitive_params["confidence"] = 1.0
 
     def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
@@ -174,7 +174,7 @@ class EvaluatorWorldModel(Evaluator):
         """        
         super().__init__(node, learner, buffer, **params)
         self.prediction_error = 0.0
-        self.node.activation.metacognitive_params.confidence = 0.0
+        self.node.metacognitive_params["confidence"] = 0.0
         self.prediction_error_publisher = self.node.create_publisher(SuccessRate, f"world_model/{self.node.name}/prediction_error", 0)
 
     def evaluate(self):
@@ -183,6 +183,7 @@ class EvaluatorWorldModel(Evaluator):
         """        
         x_test, y_test = self.buffer.get_test_samples()
         self.prediction_error = self.learner.evaluate(x_test, y_test)
+        self.calculate_metacognitive_parameters()
         self.node.get_logger().info(f"World Model Prediction Error: {self.prediction_error}")
 
     def publish_prediction_error(self):
@@ -194,15 +195,13 @@ class EvaluatorWorldModel(Evaluator):
         prediction_error_msg.node_type = self.node.node_type
         prediction_error_msg.success_rate = self.prediction_error
         self.prediction_error_publisher.publish(prediction_error_msg)
-        self.calculate_confidence() #TODO: this is ungly hack to update the confidence of the node after evaluating the prediction error. It should be done in a more elegant way.
 
-    def calculate_confidence(self, perception=None, activation_list=None):
+    def calculate_metacognitive_parameters(self):
         """
         Calculate the confidence of the world model based on its prediction error.
         """
         self.node.get_logger().info(f"Calculating confidence for World Model {self.node.name} with prediction error {self.prediction_error}")
-        self.node.activation.metacognitive_params.confidence = self.prediction_error
-        return self.node.activation.metacognitive_params.confidence
+        self.metacognitive_params["confidence"] = self.prediction_error
 
 
 

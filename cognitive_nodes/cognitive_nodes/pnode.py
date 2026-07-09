@@ -16,7 +16,7 @@ class PNode(CognitiveNode):
     """
     P-Node class
     """
-    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', space_class = None, space = None, history_size=100, space_parameters=None, **params):
+    def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', node_type="PNode", space_class = None, space = None, history_size=100, space_parameters=None, **params):
         """
         Constructor for the P-Node class.
         
@@ -27,6 +27,8 @@ class PNode(CognitiveNode):
         :type name: str
         :param class_name: The name of the P-Node class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "PNode".
+        :type node_type: str
         :param space_class: The class of the space used to define the P-Node.
         :type space_class: str
         :param space: The space used to define the P-Node.
@@ -34,7 +36,7 @@ class PNode(CognitiveNode):
         :param history_size: The size of the history of the P-Node.
         :type history_size: int
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
         # Forward the node's random_seed to the space so a configured seed makes
         # the space reproducible too (an explicit random_seed in space_parameters
         # takes precedence).
@@ -176,12 +178,14 @@ class PNode(CognitiveNode):
             activations = self.space.get_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
             return activations.tolist()
 
-    def calculate_confidence(self, perception=None, activation_list=None):
+    def calculate_metacognitive_params(self):
         """
-        This method use the already calculated success rate as confidence value, 
-        stored in 
+        Calculate the metacognitive parameters of the P-Node.
+
+        :return: The metacognitive parameters of the P-Node.
+        :rtype: cognitive_node_interfaces.msg.MetacognitiveParams
         """
-        return self.success_rate
+        self.metacognitive_params["confidence"] = self.success_rate
     
     def create_activation_input(self, node: dict): #Adds or deletes a node from the activation inputs list. By default reads activations.
         """
@@ -323,6 +327,7 @@ class PNode(CognitiveNode):
         else:
             self.history.appendleft(False)
         self.success_rate = sum(self.history)/self.history.maxlen
+        self.calculate_metacognitive_params()
         self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
 
 

@@ -21,7 +21,7 @@ class Policy(CognitiveNode):
     """
     Policy class.
     """
-    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher_msg = None, publisher_topic = None, **params):
+    def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', node_type="Policy", **params):
         """
         Constructor for the Policy class.
 
@@ -38,7 +38,7 @@ class Policy(CognitiveNode):
         :type publisher: str
         """
         
-        super().__init__(name, 'cognitive_nodes.policy.Policy', **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.set_activation_service = self.create_service(
             SetActivation,
@@ -97,13 +97,6 @@ class Policy(CognitiveNode):
                 self.activation.timestamp=self.get_clock().now().to_msg()
             return self.activation
     
-    def calculate_confidence(self, perception=None, activation_list=None):
-        """TODO: this is a dummy method, WIP,
-        This method can be extended to include other factors, such as the distance to the points in the space,
-        the number of points in the space, etc.
-        """
-        return 1.0
-    
     def execute_callback(self, request, response):
         """
         Placeholder for the execution of the policy.
@@ -153,7 +146,7 @@ class PolicyAsync(Policy):
         :param publisher_topic: The publisher topic to publicate the execution of the policy.
         :type publisher: str
         """        
-        super().__init__(name, class_name, publisher_msg, publisher_topic, **params)
+        super().__init__(name, class_name, **params)
         self.publisher_msg = publisher_msg
         self.publisher = self.create_publisher(class_from_classname(publisher_msg), publisher_topic, 0)    
     
@@ -194,7 +187,7 @@ class PolicyBlocking(Policy):
         :param service_name: Name of the service that executes the policy.
         :type service_name: str
         """        
-        super().__init__(name, class_name, service_msg, service_name, **params)
+        super().__init__(name, class_name, **params)
         self.service_msg=service_msg
         self.service_name=service_name
         self.policy_service=ServiceClientAsync(self, class_from_classname(service_msg), service_name, self.cbgroup_client)
@@ -504,26 +497,32 @@ class PolicyLearned(Policy, EpisodeSubscription):
             )
 
         base = await super().calculate_activation(perception, activation_list)
+        self.calculate_metacognitive_parameters()  # update confidence based on recent success rate
+        
 
         # Scale activation by rolling own success rate so UtilityModel naturally
         # dominates when PolicyLearned is underperforming and vice-versa.
+        success_rate = self.metacognitive_params.get("confidence", 0.0)
+        # Below 0.5 success: scale 0.1→1.0  → deferring, UtilityModel dominates
+        # Above 0.5 success: scale 1.0→2.0 → progressively dominant over UtilityModel
+        # Floor of 0.1 keeps the policy occasionally selected so it can gather own experience.
+        scale = max(0.1, success_rate * 2.0)
+        base.activation = base.activation * scale
+        return base
+    
+    def calculate_metacognitive_parameters(self):
+        """Update the confidence of the policy based on its recent success rate."""
         n = len(self._recent_outcomes)
         if n == 0:
             success_rate = 0.5  # neutral until first own episode
         else:
             window = self._recent_outcomes[-self._outcome_window:]
             success_rate = sum(window) / len(window)
-        # Below 0.5 success: scale 0.1→1.0  → deferring, UtilityModel dominates
-        # Above 0.5 success: scale 1.0→2.0 → progressively dominant over UtilityModel
-        # Floor of 0.1 keeps the policy occasionally selected so it can gather own experience.
-        scale = max(0.1, success_rate * 2.0)
-        base.activation = base.activation * scale
+        self.metacognitive_params["confidence"] = success_rate
         self.get_logger().debug(
-            f'PolicyLearned {self.name} activation={base.activation:.3f} '
-            f'(scale={scale:.2f}, own_outcomes={n})'
+            f'PolicyLearned {self.name} confidence={success_rate:.3f} '
+            f'(own_outcomes={n})'
         )
-        self.activation.metacognitive_params.confidence = success_rate
-        return base
 
     # ── Execution loop ────────────────────────────────────────────────────────
 
@@ -655,10 +654,6 @@ class PolicyLearned(Policy, EpisodeSubscription):
             self._recent_outcomes.clear()
             self._sac.logger.dump(step=self.episodic_buffer.n_traces)
             self.get_logger().info(f'PolicyLearned {self.name}: training done')
-
-    def calculate_confidence(self, perception=None, activation_list=None):
-        """TODO:Confidence is not used for PolicyLearned, so return a dummy value."""
-        return 1.0
 
 
 def main(args=None):
