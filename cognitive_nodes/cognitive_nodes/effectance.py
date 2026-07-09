@@ -12,7 +12,7 @@ from cognitive_nodes.episode import container_msg_to_episode, episode_obj_to_msg
 from core.utils import compare_perceptions
 
 from cognitive_node_interfaces.msg import SuccessRate
-from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace, AddPoints
+from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace, AddPoints, LogExecution
 from cognitive_nodes.utils import PNodeSuccess, EpisodeSubscription
 
 
@@ -482,6 +482,21 @@ class PolicyEffectanceExternal(Policy):
         response.policy=self.name
         return response
     
+    async def log_cnode_execution(self, cnode_name, success):
+        """
+        This method logs the execution of a C-Node.
+
+        :param cnode_name: Name of the C-Node that was executed.
+        :type cnode_name: str
+        :param success: Boolean indicating whether the execution was successful.
+        :type success: bool
+        """
+        logging_service = f"cnode/{cnode_name}/log_execution"
+        if logging_service not in self.node_clients:
+            self.node_clients[logging_service] = ServiceClientAsync(self, LogExecution, logging_service, self.cbgroup_client)
+        response = await self.node_clients[logging_service].send_request_async(success=success)
+        return response.added
+    
     async def create_goal(self, sensor, attribute, point):
         """
         Method that creates a goal related to an effect and registers it in the LTM.
@@ -570,6 +585,7 @@ class PolicyEffectanceExternal(Policy):
         updated_policy = await self.update_neighbor_client(policy, cnode_name, operation=True)
         if not updated_policy.success:
             raise RuntimeError(f"Failed to add C-Node {cnode_name} as neighbor of policy {policy}")
+        await self.log_cnode_execution(cnode_name, success=True)
 
 class GoalActivatePNode(GoalLearnedSpace):
     """

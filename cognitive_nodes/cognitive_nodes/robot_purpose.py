@@ -54,9 +54,10 @@ class RobotPurpose(CognitiveNode):
 
         self.activation.activation = weight
 
-        self.drive_id = drive_id
-        self.drive_evaluation = Evaluation()
-        self.drive_subscriber = self.create_subscription(Evaluation, f'drive/{self.drive_id}/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_satisfaction)
+        if drive_id:
+            self.drive_id = drive_id
+            self.drive_evaluation = Evaluation()
+            self.drive_subscriber = self.create_subscription(Evaluation, f'drive/{self.drive_id}/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_satisfaction)
         self.purpose_type = purpose_type # Purpose types: [Need, Mission]
         self.terminal = terminal
 

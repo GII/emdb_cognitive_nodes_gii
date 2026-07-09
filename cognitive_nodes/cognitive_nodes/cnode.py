@@ -14,7 +14,7 @@ class CNode(CognitiveNode):
     It is assumed that there is only one element of each type connected to the C-Node.
     """
 
-    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", node_type="CNode", history_size=40, **params):
+    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", node_type="CNode", history_size=40, track_competence=True, default_competence=1.0, **params):
         """
         Constructor of the C-Node class.
         Initializes a C-Node with the given name and registers it in the LTM.
@@ -30,7 +30,9 @@ class CNode(CognitiveNode):
         """
         super().__init__(name, class_name, node_type=node_type, **params)
         self.configure_activation_inputs(self.neighbors)
-        self.history = deque(maxlen=history_size)
+        self.history = deque(np.zeros(history_size), maxlen=history_size)
+        self.track_competence = track_competence
+        self.default_competence = default_competence
         self.calculate_metacognitive_parameters()
         self.metacognitive_params["confidence"] = 1.0
 
@@ -62,17 +64,18 @@ class CNode(CognitiveNode):
         Calculate the metacognitive parameters of the C-Node.
         It calculates the competence and delta competence of the C-Node based on its history.
         """
-        self.get_logger().info(
-            f"Calculating metacognitive parameters for {self.node_type} {self.name}..."
-        )
-
-        history = np.asarray(self.history, dtype=float)
-        sample_count = history.size
-
-        if sample_count == 0:
-            overall_competence = 0.0
-            delta_competence = 0.0
+        if not self.track_competence:
+            self.metacognitive_params["competence"] = self.default_competence
+            self.metacognitive_params["delta_competence"] = 0.0
         else:
+            self.get_logger().info(
+                f"Calculating metacognitive parameters for {self.node_type} {self.name}..."
+            )
+
+            history = np.asarray(self.history, dtype=float)
+            sample_count = history.size
+
+
             midpoint = sample_count // 2
             old_history = history[:midpoint]
             new_history = history[midpoint:]
@@ -80,18 +83,14 @@ class CNode(CognitiveNode):
             old_competence = np.mean(old_history) if old_history.size > 0 else 0.0
             new_competence = np.mean(new_history) if new_history.size > 0 else 0.0
             overall_competence = np.mean(history)
+            delta_competence = (new_competence - old_competence)
+            self.metacognitive_params["competence"] = overall_competence
+            self.metacognitive_params["delta_competence"] = delta_competence
 
-            warmup_ratio = min(sample_count / self.history.maxlen, 1.0)
-            overall_competence *= warmup_ratio
-            delta_competence = (new_competence - old_competence) * warmup_ratio
-
-        self.metacognitive_params["competence"] = overall_competence
-        self.metacognitive_params["delta_competence"] = delta_competence
-
-        self.get_logger().info(
-            f"Competence: {overall_competence}, Delta Competence: {delta_competence} "
-            f"for {self.node_type} {self.name}."
-        )
+            self.get_logger().info(
+                f"Competence: {overall_competence}, Delta Competence: {delta_competence} "
+                f"for {self.node_type} {self.name}."
+            )
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """
