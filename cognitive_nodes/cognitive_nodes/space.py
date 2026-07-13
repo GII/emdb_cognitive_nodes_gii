@@ -15,8 +15,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from core.utils import separate_perceptions
+from core.utils import separate_perceptions, resolve_seed
 from core.container import Container
+from cognitive_nodes.random_utils import set_global_seeds
 
 from core_interfaces.msg import Container as ContainerMsg
 
@@ -31,9 +32,11 @@ class Space(object):
         """
         self.ident = ident
         self.parent_space = None
+        # random_seed 0/None -> fresh time-based seed (genuinely random run).
+        self.random_seed = resolve_seed(random_seed)
         self.logger = get_logger("space_" + str(ident))
         self.logger.info(f"CREATING SPACE: {ident}")
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(self.random_seed)
 
 
 class PointBasedSpace(Space):
@@ -554,7 +557,7 @@ class NormalCentroidPointBasedSpace(PointBasedSpace):
                 update_mask = neg_mask & (
                     (dist_newpoint_centroid < dist_antipoint_centroid)
                     | (
-                        np.random.uniform(size=n_rows)
+                        self.rng.uniform(size=n_rows)
                         < (dist_antipoint_centroid * separation / dist_newpoint_centroid)
                     )
                 )
@@ -614,7 +617,9 @@ class SVMSpace(PointBasedSpace):
         """
         Init attributes when a new object is created.
         """
-        self.model = svm.SVC(kernel=kernel, degree=degree, max_iter=max_iter)
+        # random_seed is read from kwargs because super().__init__ (which stores
+        # self.random_seed) has not run yet at this point.
+        self.model = svm.SVC(kernel=kernel, degree=degree, max_iter=max_iter, random_state=resolve_seed(kwargs.get('random_seed')))
         super().__init__(**kwargs)
 
     def fit_and_score(self):
@@ -775,6 +780,9 @@ class ANNSpace(PointBasedSpace):
         :param output_length: Number of output features/predictions from the neural network.
         :type output_length: int
         """
+        # Seed torch (and python/numpy globals) so weight initialisation and
+        # DataLoader shuffling are reproducible when a seed is configured.
+        set_global_seeds(self.random_seed)
         self.model = ANNModel_classification(
             input_size=input_length,
             hidden_layers=self.hidden_layers,

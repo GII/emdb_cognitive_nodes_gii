@@ -37,8 +37,13 @@ class PNode(CognitiveNode):
         :type history_size: int
         """
         super().__init__(name, class_name, node_type=node_type, **params)
+        # Forward the node's random_seed to the space so a configured seed makes
+        # the space reproducible too (an explicit random_seed in space_parameters
+        # takes precedence).
+        space_kwargs = dict(space_parameters) if space_parameters else {}
+        space_kwargs.setdefault('random_seed', getattr(self, 'random_seed', 0))
         self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space", **(space_parameters if space_parameters else {}))]
+            space_class)(ident=name + " space", **space_kwargs)]
         self.space=self.spaces[0]
         self.added_point = False
         self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(

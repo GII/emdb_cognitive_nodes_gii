@@ -13,7 +13,7 @@ from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy, PolicyBlocking
 from cognitive_nodes.episode import reward_msg_to_dict
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
+from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum, resolve_seed
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
@@ -91,7 +91,7 @@ class PolicyLLMExploration(Policy):
         self.episodes = []
         self.policies = self.configure_policies()
         random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(resolve_seed(random_seed))
 
     def request_ltm(self):
         """

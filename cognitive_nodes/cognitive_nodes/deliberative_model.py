@@ -14,6 +14,7 @@ from core.utils import class_from_classname
 from cognitive_node_interfaces.srv import SetActivation, GetSuccessRate, IsCompatible, SaveModel
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
+from cognitive_nodes.random_utils import set_global_seeds
 
 class DeliberativeModel(CognitiveNode):
     """
@@ -328,6 +329,9 @@ class ANNLearner(Learner):
         :param output_length: Number of output features/predictions from the neural network.
         :type output_length: int
         """
+        # Seed torch (and python/numpy globals) so weight initialisation and
+        # DataLoader shuffling are reproducible when a seed is configured.
+        set_global_seeds(getattr(self.node, 'random_seed', None))
         self.model = ANNModel(
             input_size=input_length,
             output_size=output_length,
