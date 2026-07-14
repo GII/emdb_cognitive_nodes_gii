@@ -3,17 +3,15 @@ import numpy as np
 from numpy import bool_, float_
 
 from collections import deque
-from copy import deepcopy
 
 from cognitive_nodes.drive import Drive
-from cognitive_nodes.goal import Goal
-from cognitive_nodes.policy import Policy, PolicyBlocking
+from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg
+from core.utils import resolve_seed
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
-from cognitive_node_interfaces.srv import Execute, Predict
+from cognitive_node_interfaces.srv import Execute
 
 
 class DriveNovelty(Drive):
@@ -75,7 +73,7 @@ class PolicyNovelty(Policy):
         """        
         ltm = self.request_ltm()
         random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(resolve_seed(random_seed))
         self.configure_policies(ltm)
         self.get_logger().info("Configured Novelty Policy.")
 
@@ -302,102 +300,3 @@ class PolicyQueue:
         :rtype: int
         """
         return len(self.queue)
-    
-
-class PolicyRandomAction(PolicyBlocking):
-    """
-    WORK IN PROGRESS
-
-    PolicyRandomAction Class, represents a policy that executes a random low level action.
-    """    
-    def __init__(self, name='policy_random_action', actuation_config=None, **params):
-        """
-        Constructor of the PolicyRandomAction class.
-
-        :param name: Name of the policy node.
-        :type name: str
-        :param actuation_config: Dictionary with the existing actuators and its data type.
-        :type actuation_config: dict
-        """        
-        super().__init__(name, **params)
-        self.actuation_config=actuation_config
-        self.actuation={} #All fields are normalized 0 to 1
-        self.setup()
-
-    def setup(self):
-        """
-        Setup method that configures the PolicyRandomAction node.
-        :raises TypeError: Unknown type assigned to an actuator.
-        """        
-        self.world_model_client=ServiceClientAsync(self, Predict, "/world_model/GRIPPER_AND_LOW_FRICTION/predict", self.cbgroup_client) #TODO: Change world model service to a parameter
-        random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
-        for actuator in self.actuation_config:
-            self.actuation[actuator]=[{}]
-            for param in self.actuation_config[actuator]:
-                if self.actuation_config[actuator][param]["type"] == "float":
-                    self.actuation[actuator][0][param]=0.0
-                elif self.actuation_config[actuator][param]["type"] == "bool":
-                    self.actuation[actuator][0][param]=False
-                else:
-                    raise TypeError("Type assigned to actuator not recognized")
-    
-    def randomize_actuation(self):
-        """
-        Randomizes the actuation values.
-
-        :raises TypeError: Unknown type assigned to an actuator.
-        """        
-        for actuator in self.actuation:
-            for param in self.actuation[actuator][0]:
-                if self.actuation_config[actuator][param]["type"]=="float":
-                    self.actuation[actuator][0][param]=self.rng.uniform()
-                elif self.actuation_config[actuator][param]["type"]=="bool":
-                    self.actuation[actuator][0][param]=self.rng.choice([True,True,True,True,True,False])
-                else:
-                    self.get_logger().info(f"DEBUG: {actuator}, {param} {self.actuation[actuator][0][param]} type: {type(self.actuation[actuator][0][param])}")
-                    raise TypeError("Actuation parameter is of unknown type")
-                self.get_logger().info(f"DEBUG: {actuator}, {param} : {self.actuation[actuator][0][param]}")
-
-    
-    def denormalize_actuation(self, actuation, actuation_config):
-        """
-        Denormalizes the actuation values.
-
-        :param actuation: Actuation values to denormalize.
-        :type actuation: dict
-        :param actuation_config: Actuation configuration.
-        :type actuation_config: dict
-        :return: Denormalized actuation.
-        :rtype: dict
-        """        
-        act=deepcopy(actuation)
-        for actuator in act:
-            for param in act[actuator][0]:
-                if actuation_config[actuator][param]["type"]=="float":
-                    bounds=actuation_config[actuator][param]["bounds"]
-                    value=act[actuator][0][param]
-                    act[actuator][0][param]=bounds[0]+(value*(bounds[1]-bounds[0]))
-        return act
-
-
-    async def execute_callback(self, request, response):
-        """
-        Makes a service call to the server that handles the execution of the policy.
-
-        :param request: The request to execute the policy.
-        :type request: cognitive_node_interfaces.srv.Execute.Request
-        :param response: The response indicating the executed policy.
-        :type response: cognitive_node_interfaces.srv.Execute.Response
-        :return: The response with the executed policy name.
-        :rtype: cognitive_node_interfaces.srv.Execute.Response
-        """
-        self.get_logger().info('Executing policy: ' + self.name + '...')
-        self.randomize_actuation()
-        actuation_msg=actuation_dict_to_msg(self.actuation)
-        await self.world_model_client.send_request_async(perception=request.perception, actuation=actuation_msg)
-        actuation_msg=actuation_dict_to_msg(self.denormalize_actuation(self.actuation, self.actuation_config))
-        await self.policy_service.send_request_async(action=actuation_msg)
-        response.policy=self.name
-        response.action=actuation_dict_to_msg(self.actuation)
-        return response

@@ -1,4 +1,5 @@
 import yaml
+import inspect
 
 from std_msgs.msg import String
 from cognitive_node_interfaces.msg import SuccessRate
@@ -9,16 +10,16 @@ class LTMSubscription:
     """
     LTMSubscription is a mixin class that provides a method to configure a subscription to the LTM.
     """    
-    def configure_ltm_subscription(self, ltm):
+    def configure_ltm_subscription(self, ltm, callback_group):
         """
         Configure the subscription to the LTM.
 
         :param ltm: LTM ID.
         :type ltm: str
         """        
-        self.ltm_suscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=self.cbgroup_client)
-        
-    def ltm_change_callback(self, msg):
+        self.ltm_subscription = self.create_subscription(String, "state", self.ltm_change_callback, 0, callback_group=callback_group)
+
+    async def ltm_change_callback(self, msg):
         """
         Callback that processes the LTM message.
 
@@ -27,9 +28,13 @@ class LTMSubscription:
         """        
         self.get_logger().info("Processing change from LTM...")
         ltm_dump = yaml.safe_load(msg.data)
-        self.read_ltm(ltm_dump=ltm_dump)
 
-    def read_ltm(self, ltm_dump):
+        if inspect.iscoroutinefunction(self.read_ltm):
+            await self.read_ltm(ltm_dump=ltm_dump)
+        else:
+            self.read_ltm(ltm_dump=ltm_dump)
+
+    async def read_ltm(self, ltm_dump):
         """
         Placeholder for LTM processing.
 
@@ -43,14 +48,14 @@ class PNodeSuccess(LTMSubscription):
     """
     PNodeSuccess is a mixin class that provides a method to configure a subscription to the success rate of the P-Nodes.
     """    
-    def configure_pnode_success(self, ltm):
+    def configure_pnode_success(self, ltm, callback_group):
         """
         Configure the subscription to the success rate of the P-Nodes.
 
         :param ltm: LTM id.
         :type ltm: str
         """        
-        self.configure_ltm_subscription(ltm)
+        self.configure_ltm_subscription(ltm, callback_group)
         self.pnode_subscriptions = {}
         self.pnode_evaluation={}
 
@@ -82,7 +87,7 @@ class EpisodeSubscription:
     """
     EpisodeSubscription is a mixin class that provides a method to configure a subscription to the episodes.
     """    
-    def configure_episode_subscription(self, episode_topic, episode_msg):
+    def configure_episode_subscription(self, episode_topic, episode_msg, callback_group):
         """
         Configure the subscription to the episodes.
 
@@ -92,8 +97,8 @@ class EpisodeSubscription:
         :type episode_msg: str
         """        
         msg_obj=class_from_classname(episode_msg)
-        self.ltm_suscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=self.cbgroup_activation)
-    
+        self.episode_subscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=callback_group)
+
     def episode_callback(self, msg):
         """
         Callback that processes the episodes.

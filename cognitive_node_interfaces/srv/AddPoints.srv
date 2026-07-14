@@ -1,0 +1,4 @@
+core_interfaces/Container points
+float32[] confidences
+---
+bool added

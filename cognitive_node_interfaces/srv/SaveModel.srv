@@ -1,0 +1,5 @@
+string prefix
+string suffix
+---
+string saved_model_path
+bool success

@@ -11,13 +11,14 @@ from copy import deepcopy
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy, PolicyBlocking
+from cognitive_nodes.episode import reward_msg_to_dict
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
+from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum, resolve_seed
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM
 from cognitive_node_interfaces.srv import Execute, Predict
-from cognitive_processes_interfaces.msg import Episode as EpisodeMsg
+from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators.pump_panel_sim_discrete import PumpObjects
 
@@ -90,7 +91,7 @@ class PolicyLLMExploration(Policy):
         self.episodes = []
         self.policies = self.configure_policies()
         random_seed = getattr(self, 'random_seed', None)
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng(resolve_seed(random_seed))
 
     def request_ltm(self):
         """
@@ -154,14 +155,14 @@ class PolicyLLMExploration(Policy):
         """
         Callback that processes the episode message.
         :param msg: Message containing the episode information.
-        :type msg: cognitive_processes_interfaces.msg.EpisodeMsg
+        :type msg: cognitive_node_interfaces.msg.Episode
         """
         old_perception_msg = msg.old_perception
         old_perception = perception_msg_to_dict(old_perception_msg)
-        policy = msg.policy
+        policy = msg.parent_policy
         perception_msg = msg.perception
         perception = perception_msg_to_dict(perception_msg)
-        reward_list = yaml.safe_load(msg.reward_list)
+        reward_list = reward_msg_to_dict(msg.reward_list)
         reward = self.read_reward(reward_list)
         episode = [old_perception, policy, perception, reward]
         self.episodes.append(episode)
@@ -301,3 +302,62 @@ class PolicyLLMExplorationFruitShop(PolicyLLMExploration):
 
         return yaml.dump(formatted_episode, default_flow_style=False, sort_keys=False)
     
+
+class PolicyLLMExplorationFruitServe(PolicyLLMExploration):
+    """
+    PolicyLLMExplorationFruitServe Class, represents a policy to explore the Fruit Serve experiment environment with LLMs.
+    """
+    
+        
+    def format_episode(self, episode):
+        """
+        Formats the episode into a YAML string that can be sent to the LLM.
+        Specific for the Fruit Serve experiment.
+
+        :param episode: List containing the old perception, action, new perception, and reward.
+        :type episode: list
+        :raises NotImplementedError: This method should be implemented in child classes.
+        """
+        
+        old_perception, action, new_perception, reward = episode
+        
+        if old_perception and action:
+            formatted_episode = {
+                "old_state": {
+                    "fruit_in_left_hand": old_perception["fruit_in_left_hand"][0]["data"],
+                    "fruit_in_right_hand": old_perception["fruit_in_right_hand"][0]["data"],
+                    "fruits": old_perception["fruits"][0],
+                    "scales": old_perception["scales"][0],
+                    "holding_weighed_fruit": old_perception["holding_weighed_fruit"][0]["data"],
+                    "facing_table": old_perception["facing_table"][0]["data"],
+                    "facing_shelf": old_perception["facing_shelf"][0]["data"]
+                },
+                "action": action,
+                "current_state": {
+                    "fruit_in_left_hand": new_perception["fruit_in_left_hand"][0]["data"],
+                    "fruit_in_right_hand": new_perception["fruit_in_right_hand"][0]["data"],
+                    "fruits": new_perception["fruits"][0],
+                    "scales": new_perception["scales"][0],
+                    "holding_weighed_fruit": new_perception["holding_weighed_fruit"][0]["data"],
+                    "facing_table": new_perception["facing_table"][0]["data"],
+                    "facing_shelf": new_perception["facing_shelf"][0]["data"]
+                },
+                "goal_reached": reward
+            }
+        else:
+            formatted_episode = {
+                "old_state": None,
+                "action": None,
+                "current_state": {
+                    "fruit_in_left_hand": new_perception["fruit_in_left_hand"][0]["data"],
+                    "fruit_in_right_hand": new_perception["fruit_in_right_hand"][0]["data"],
+                    "fruits": new_perception["fruits"][0],
+                    "scales": new_perception["scales"][0],
+                    "holding_weighed_fruit": new_perception["holding_weighed_fruit"][0]["data"],
+                    "facing_table": new_perception["facing_table"][0]["data"],
+                    "facing_shelf": new_perception["facing_shelf"][0]["data"]
+                },
+                "goal_reached": reward
+            }
+
+        return yaml.dump(formatted_episode, default_flow_style=False, sort_keys=False)

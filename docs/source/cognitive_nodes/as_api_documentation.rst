@@ -20,19 +20,6 @@ Different types of spaces have been implemented, depending on the system used to
     :members:
     :show-inheritance:
 
-+++++++++++++
-Generic model
-+++++++++++++
-
-Python script which implements a foundation for predictive models within the cognitive architecture. It provides a standardized 
-interface for creating models that can predict outcomes based on perceptions and actions.
-
-These models are used in the Utility Model and World Models cognitive nodes.
-
-.. automodule:: cognitive_nodes.generic_model
-    :members:
-    :show-inheritance:
-
 
 ++++++++++
 Utils

@@ -50,9 +50,9 @@ used to operationally group perceptions that lead to the same outcome under iden
     :show-inheritance:
 
 
-++++++++++
+++++++++++++
 RobotPurpose
-++++++++++
+++++++++++++
 
 Python module that implements the Needs and Missions of the cognitive architecture, which represent the desired motivational state of the system.
 Needs represent intrinsic motivations, while Missions represent extrinsic motivations.
@@ -120,29 +120,60 @@ of the drives that are part of the robot's motivational system. That is, it is i
     :members:
     :show-inheritance:
 
+++++++++
+Episodes
+++++++++
+
+Provides a data structure to represent episodes. It also provides methods for its manipulation and conversion between different formats.
+
+.. automodule:: cognitive_nodes.episode
+    :members:
+    :show-inheritance:
+
+
++++++++++++++++
+Episodic Buffer
++++++++++++++++
+
+Python module that implements episodic buffers of different types. These can be instantiated and used by other cognitive nodes to store their short-term memories.
+It provides methods for the manipulation of the buffer and its contents.
+
+.. automodule:: cognitive_nodes.episodic_buffer
+    :members:
+    :show-inheritance:
+
+++++++++++++++++++
+Deliberative model
+++++++++++++++++++
+
+Python module that implements the Deliberative Model cognitive node, which is a higher-level cognitive node that integrates the functionalities of World Model, Utility Model. 
+
+**Specific services**
+
+/deliberative_model/id/set_activation => C-nodes can modify a deliberative model's activation.
+
+/deliberative_model/id/predict => Get predicted values for the input episode.
+
+/deliberative_model/id/get_success_rate => Get a prediction success rate based on a historic of previous predictions.
+
+/deliberative_model/id/is_compatible => Check if the Model is compatible with the current available episode.
+
+/deliberative_model/id/save_model => Save the model to a file if compatible.
+
+
+.. automodule:: cognitive_nodes.deliberative_model
+    :members:
+    :show-inheritance:
+
+
 ++++++++++++
 World model
 ++++++++++++
 
-(**WORK IN PROGRESS**)
 
 Python module that implements the World Model cognitive node, which is represent the behavior of the domain in which the robot is operating.
 They are usually instantiated as a predictor of the perceptual situation Pt+1 that will result from the application of an action when in 
-a perceptual state Pt.
-
-**Specific services**
-
-/world_model/id/set_activation => Some processes (ie: the main cognitive loop) can
-modify a world model's activation.
-
-/world_model/id/predict => Get predicted perception values for the last perceptions not newer than a given
-timestamp and for a given policy.
-
-/world_model/id/get_success_rate => Get a prediction success rate based on a historic of previous predictions.
-
-/world_model/id/is_compatible => Check if the Model is compatible with the current available perceptions.
-
-
+a perceptual state Pt. It inherits all the functionalities of the Deliberative Model, including its services
 
 .. automodule:: cognitive_nodes.world_model
     :members:
@@ -152,21 +183,12 @@ timestamp and for a given policy.
 Utiliy model
 ++++++++++++
 
-(**WORK IN PROGRESS**)
-
 Python module that implements the Utility Model cognitive node, which estimates the expected utility of perceptual states with respect to a goal, 
-based on the probability of achieving it and the potential reward.
+based on the probability of achieving it and the potential reward.  It inherits all the functionalities of the Deliberative Model, including its services
 
 **Specific services**
 
-/utility_model/id/set_activation => C-Nodes can modify a utility model's activation.
-
-/utility_model/id/predict => Get predicted perception values for the last perceptions not newer than a given
-timestamp and for a given policy.
-
-/utility_model/id/get_success_rate => Get a prediction success rate based on a historic of previous predictions.
-
-/utility_model/id/is_compatible => Check if the Model is compatible with the current available perceptions.
+/utility_model/id/execute => Executes the deliberation process with this utility model and its associated world model.
 
 .. automodule:: cognitive_nodes.utility_model
     :members:

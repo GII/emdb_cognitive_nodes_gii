@@ -13,7 +13,7 @@ class RobotPurpose(CognitiveNode):
     """"
     Robot Purpose Class.
     """
-    def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
+    def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
         """
         Constructor of the Robot Purpose class
 
@@ -23,6 +23,8 @@ class RobotPurpose(CognitiveNode):
         :type name: str
         :param class_name: The name of the RobotPurpose class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "RobotPurpose".
+        :type node_type: str
         :param weight: The weight of the RobotPurpose.
         :type weight: float
         :param drive_id: The ID of the Drive node associated with the RobotPurpose.
@@ -30,7 +32,7 @@ class RobotPurpose(CognitiveNode):
         :param purpose_type: The type of the RobotPurpose (Need or Mission).
         :type purpose_type: str
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.cbgroup_satisfaction = MutuallyExclusiveCallbackGroup()
         
@@ -52,9 +54,10 @@ class RobotPurpose(CognitiveNode):
 
         self.activation.activation = weight
 
-        self.drive_id = drive_id
-        self.drive_evaluation = Evaluation()
-        self.drive_subscriber = self.create_subscription(Evaluation, f'drive/{self.drive_id}/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_satisfaction)
+        if drive_id:
+            self.drive_id = drive_id
+            self.drive_evaluation = Evaluation()
+            self.drive_subscriber = self.create_subscription(Evaluation, f'drive/{self.drive_id}/evaluation', self.read_evaluation_callback, 1, callback_group=self.cbgroup_satisfaction)
         self.purpose_type = purpose_type # Purpose types: [Need, Mission]
         self.terminal = terminal
 
@@ -103,7 +106,7 @@ class RobotPurpose(CognitiveNode):
         :return: Response that indicates if the robot purpose is satisfied or not.
         :rtype: cognitive_node_interfaces.srv.IsSatisfied.Response
         """
-        self.get_logger().info('Calculating satisfaction..')
+        self.get_logger().debug('Calculating satisfaction..')
         response.satisfied = self.calculate_satisfaction()
         response.purpose_type = self.purpose_type
         response.terminal = self.terminal
@@ -138,6 +141,22 @@ class RobotPurpose(CognitiveNode):
         """
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
+    
+    
+class AlignmentMission(RobotPurpose):
+    """"
+    Need Class for Alignment purposes.
+    """
+    def calculate_satisfaction(self):
+        """
+        Calculate whether the need is satisfied.
+
+        :return: True if the need is satisfied, False otherwise.
+        :rtype: bool
+        """
+        satisfied = self.drive_evaluation.evaluation<0.01 # the need is satisfied when the drive evaluation is less than 0.1
+
+        return satisfied
     
 
 def main(args=None):

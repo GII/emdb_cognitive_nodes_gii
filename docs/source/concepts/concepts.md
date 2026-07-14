@@ -127,3 +127,30 @@ Through prospection, the robot builds a layered understanding of its goals, allo
 
 *Prospection*
 </div>
+
+## Purpose alignment
+
+<!-- In the context of Lifelong Open-ended Learning Autonomy (LOLA), robots acquire novel competencies across diverse operational domains. A domain refers to the environment in which the robot operates as well as the robot itself, along with the set of tasks, objects, and interaction rules that govern its operation. However, if this knowledge is not aligned with the human intentions there are significant risks, since the actions performed by the robot may be irrelevant or even harmful to humans.
+
+Although such flexibility is imperative for autonomy, it gives rise to a fundamental question: How can we ensure that the skills acquired by a robot remain beneficial and aligned with human purposes?
+
+To answer this question, we proposed a purpose-based framework in which human users specify the objectives for the robot, either directly or indirectly, without constraining the means by which the robot accomplishes these goals. This framework highlights the translation of human purpose—user intentions in natural or symbolic language—into robot purpose, the internal needs, drives, and goals of the cognitive architecture. 
+
+The following figure illustrates how the alignment process is done in the e-MDB cognitive architecture. The human introduces a purpose expressed in natural language, then interacts with the system to clarify the purpose. Once the human confirms that the purpose was interpreted correctly, the missions and drives are created in the cognitive architecture. -->
+
+
+
+In the context of Lifelong Open-Ended Learning Autonomy (LOLA), robots continually acquire new competencies across diverse operational domains. A domain is not only the environment in which the robot operates, but also the robot itself, as well as the tasks, objects, and interaction rules that shape its behavior. This flexibility is essential for autonomous systems, it also introduces a significant challenge: if the robot’s learned knowledge and skills are not aligned with human intentions, its actions may become irrelevant, unsafe, or even harmful.
+
+This raises a fundamental question: How can we ensure that the skills autonomously acquired by a robot remain beneficial and aligned with human purposes?
+
+To address this, we propose a purpose-based alignment framework in which human users specify the robot’s objectives—either directly or indirectly—without restricting the methods by which these objectives are achieved. The framework emphasizes translating human purpose—intentions expressed in natural language—into robot purpose: drives, and mission structures within the cognitive architecture. The figure below illustrates the Alignment Engine designed and how it is incoorporated into the e-MDB cognitive architecture.
+
+<div style="width:90%; margin:auto; text-align:center;">
+
+![Alignment](images/Alignment.svg)
+
+*Alignment*
+</div>
+
+In this process, the user provides a purpose in natural language and then engages in an interactive clarification process. Once the user confirms that the system has correctly interpreted the intended purpose, the architecture generates the corresponding missions and drives. These elements guide the robot’s subsequent behavior in a manner that remains robustly aligned with the user’s intentions.

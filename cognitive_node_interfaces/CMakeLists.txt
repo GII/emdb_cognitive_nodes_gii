@@ -13,8 +13,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(core_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Action.msg"  
   "msg/Activation.msg"
   "msg/Actuation.msg"
   "msg/Evaluation.msg"
@@ -24,14 +26,19 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PerceptionStamped.msg"
   "msg/SuccessRate.msg"
   "msg/Value.msg"
+  "msg/MetacognitiveParameters.msg"
   "srv/Action.srv"
-  "srv/AddPoint.srv"
+  "srv/AddPoints.srv"
+  "srv/AddTrace.srv"
   "srv/AddNeighbor.srv"
   "srv/ContainsSpace.srv"
   "srv/DeleteNeighbor.srv"
+  "srv/DuplicateGoal.srv"
   "srv/Evaluate.srv"
   "srv/Execute.srv"
   "srv/GetActivation.srv"
+  "srv/GetConfidence.srv"
+  "srv/GetDreamingSelection.srv"
   "srv/GetEffects.srv"
   "srv/GetInformation.srv"
   "srv/GetIteration.srv"
@@ -42,14 +49,17 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/IsCompatible.srv"
   "srv/IsReached.srv"
   "srv/IsSatisfied.srv"
+  "srv/LogExecution.srv"
   "srv/Policy.srv"
   "srv/Predict.srv"
+  "srv/PredictUtility.srv"
+  "srv/SaveModel.srv"
   "srv/SendSpace.srv"
   "srv/SetActivation.srv"
   "srv/SetActivationTopic.srv"
   "srv/SetInputs.srv"
   "srv/SetWeight.srv"
-  DEPENDENCIES builtin_interfaces
+  DEPENDENCIES builtin_interfaces core_interfaces
 )
 
 

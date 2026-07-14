@@ -14,6 +14,7 @@ We can find four sections in this documentation:
 - [Concepts:](concepts/concepts.md) Theoretical concepts about the cognitive nodes into the cognitive architecture and explanation of the intrinsic motivations implemented in the cognitive architecture.
 - [Cognitive Nodes API documentation:](cognitive_nodes/cn_api_documentation.rst) API of the cognitive nodes implemented by the GII.
 - [Intrinsic Motivations API documentation:](cognitive_nodes/im_api_documentation.rst) API of the intrinsic motivations implemented by the GII.
+- [Alignment API documentation:](cognitive_nodes/alignment_api_documentation.rst) API of the alignment process implemented by the GII.
 - [Auxiliary Scripts API documentation:](cognitive_nodes/as_api_documentation.rst) API of the auxiliary scripts used in the cognitive nodes.
 
 ```{toctree}
@@ -33,5 +34,6 @@ concepts/*
 cognitive_nodes/cn_api_documentation.rst
 cognitive_nodes/im_api_documentation.rst
 cognitive_nodes/as_api_documentation.rst
+cognitive_nodes/alignment_api_documentation.rst
 
 ```

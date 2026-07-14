@@ -1,7 +1,7 @@
 
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from cognitive_nodes.utils import LTMSubscription
 
 from cognitive_node_interfaces.msg import SuccessRate
@@ -38,18 +38,18 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.goals_info=None
         self.min_pnode_rate=min_pnode_rate
         self.min_goal_rate=min_goal_rate
-        self.configure_prospection_suscriptor(self.LTM_id)
+        self.configure_prospection_suscriptor(self.LTM_id, self.cbgroup_client)
         self.get_knowledge_service = self.create_service(GetKnowledge, 'drive/' + str(
             name) + '/get_knowledge', self.get_knowledge_callback, callback_group=self.cbgroup_server)
     
-    def configure_prospection_suscriptor(self, ltm):
+    def configure_prospection_suscriptor(self, ltm, callback_group):
         """
         Setup of the ProspectionDrive class. Subscribes to the LTM nodes and initializes the dictionaries for the P-Nodes, Goals, and knowledge found.
 
         :param ltm: ID of the LTM to subscribe to.
         :type ltm: str
-        """        
-        self.configure_ltm_subscription(ltm)
+        """
+        self.configure_ltm_subscription(ltm, callback_group)
         self.pnode_subscriptions = {}
         self.goal_subscriptions = {}
         self.learned_pnodes=[]
@@ -171,16 +171,12 @@ class ProspectionDrive(Drive, LTMSubscription):
                     service_name = f"goal/{goal}/contains_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    pnode_in_goal = (await self.node_clients[service_name].send_request_async(
-                        labels=pnode_space.labels, data=pnode_space.data, confidences=pnode_space.confidences
-                        )).contained
+                    pnode_in_goal = (await self.node_clients[service_name].send_request_async(space=pnode_space.space)).contained
                     #PNode contains Goal
                     service_name = f"pnode/{pnode}/contains_space"
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    goal_in_pnode = (await self.node_clients[service_name].send_request_async(
-                        labels=goal_space.labels, data=goal_space.data, confidences=goal_space.confidences
-                        )).contained
+                    goal_in_pnode = (await self.node_clients[service_name].send_request_async(space=goal_space.space)).contained
                     #TODO THIS IS TESTING BOTH THAT THE GOAL IS INSIDE THE PNODE OR THE PNODE INSIDE THE GOAL. WE HAVE TO DECIDE THE 
                     #MOST APPROPRIATE METHOD TO DECIDE WHEN TO CHAIN OR NOT TO CHAIN GOALS.
                     #IF THE GOAL IS CONTAINED IN THE PNODE WE ARE SURE THAT THE GOALS MUST BE CHAINED.

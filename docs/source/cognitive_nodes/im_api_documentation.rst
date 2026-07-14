@@ -54,4 +54,16 @@ one goal can lead to another.
 
 .. automodule:: cognitive_nodes.prospection
     :members:
-    :show-inheritance:    
+    :show-inheritance:
+
+
++++++++++++++++
+Model creation
++++++++++++++++
+
+Python module that implements components for autonomous model creation, allowing the cognitive architecture to
+dynamically generate and integrate new world and utility models based on its interactions with the environment.
+
+.. automodule:: cognitive_nodes.model_creation
+    :members:
+    :show-inheritance:

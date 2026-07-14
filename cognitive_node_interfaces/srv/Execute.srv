@@ -1,4 +1,4 @@
-Perception perception
+core_interfaces/Container perception
 ---
 string policy
-Actuation action
+core_interfaces/Container episode
