@@ -1,4 +1,5 @@
 import numpy as np
+from math import isclose
 
 from cognitive_nodes.robot_purpose import RobotPurpose
 from cognitive_nodes.utils import LTMSubscription
@@ -86,8 +87,12 @@ class Competence(RobotPurpose, LTMSubscription):
         :rtype: float
         """
         competence_score = 1.0 - _clamp(competence, 0.0, 1.0)
-        delta = _clamp(abs(delta_competence)+ 0.05, 0.0, 1.0) # Provide a bit of score to goals with no delta competence, to avoid them being ignored.
+        delta = _clamp(abs(delta_competence), 0.0, 1.0)
         delta_score = 2*(delta / (1.0 + delta))
+
+         # Provide a bit of score to C-nodes with no delta competence, to avoid them being ignored.
+        if isclose(delta_score, 0.0) and not isclose(competence, 0.0):
+            delta_score = 0.05
 
         return competence_score * delta_score
 
