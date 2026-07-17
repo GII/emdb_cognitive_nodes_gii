@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from core.utils import separate_perceptions, resolve_seed
+from core.utils import resolve_seed
 from core.container import Container
 from cognitive_nodes.random_utils import set_global_seeds
 

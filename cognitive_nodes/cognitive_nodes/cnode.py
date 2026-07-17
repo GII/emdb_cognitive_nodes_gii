@@ -127,12 +127,7 @@ class CNode(CognitiveNode):
                 activation = await self.node_clients[service_name].send_request_async(
                     perception=perception_msg
                 )
-                self.get_logger().info(
-                    f"CNODE_ACTIVATION - {self.name}: Neighbor {name} returned activation={activation.activation:.4f}"
-                )
-                self.get_logger().debug(
-                    f"DEBUG CNODE: Activation for {name}: {activation.activation}"
-                )
+                self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}")
                 node_activations.append(activation.activation)
             self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}")
             activation_list = np.prod(node_activations)

@@ -74,7 +74,6 @@ class Policy(CognitiveNode):
         """
         if activation_list==None:
             cnodes = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] == "CNode"]
-            self.get_logger().info(f"POLICY_ACTIVATION - {self.name}: Calculating from {len(cnodes)} CNodes: {cnodes}")
             if cnodes:
                 cnode_activations = []
                 for cnode in cnodes:
@@ -83,13 +82,10 @@ class Policy(CognitiveNode):
                     if not service_name in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, GetActivation, service_name, self.cbgroup_client)
                     activation = await self.node_clients[service_name].send_request_async(perception = perception_msg)
-                    self.get_logger().info(f"POLICY_ACTIVATION - {self.name}: CNode {cnode} returned activation={activation.activation:.4f}")
                     cnode_activations.append(activation.activation)
                     self.activation.activation = float(numpy.max(cnode_activations))
-                self.get_logger().info(f"POLICY_ACTIVATION - {self.name}: Final activation (max of CNodes)={self.activation.activation:.4f}")
             else:
                 self.activation.activation = 0.0
-                self.get_logger().info(f"POLICY_ACTIVATION - {self.name}: No CNodes, activation=0.0")
             self.activation.timestamp =self.get_clock().now().to_msg()
             self.get_logger().debug(self.node_type + " activation for " + self.name + " = " + str(self.activation))
         
