@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from core.utils import separate_perceptions, resolve_seed
+from core.utils import resolve_seed
 from core.container import Container
 from cognitive_nodes.random_utils import set_global_seeds
 
@@ -29,6 +29,10 @@ class Space(object):
 
         :param ident: The name of the space.
         :type ident: str
+        :param random_seed: Seed for the space's random number generator. Set it
+            to make stochastic space operations reproducible. ``None`` (default)
+            keeps the previous non-deterministic behaviour.
+        :type random_seed: int or None
         """
         self.ident = ident
         self.parent_space = None

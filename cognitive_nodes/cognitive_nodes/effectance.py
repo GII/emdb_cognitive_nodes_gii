@@ -112,7 +112,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         else:    
             self.episode_topic = episodes_topic
             self.episode_msg = episodes_msg
-        self.effects={} 
+        self.effects=set()
         self.new_effects={}
         self.new_effects_data={}
         self.get_effects_service = self.create_service(GetEffects, 'drive/' + str(
@@ -171,10 +171,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
                 sensor, attribute = label.split(":", 1)
             except ValueError:
                 continue
-
-            existing_effect = self.effects.get(sensor, None)
-            if existing_effect != attribute:
-                self.effects[sensor] = attribute
+            if label not in self.effects:
+                self.effects.add(label)
                 self.new_effects[sensor] = attribute
                 self.new_effects_data[sensor] = episode_obj_to_msg(episode)
                 self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
@@ -662,6 +660,43 @@ class GoalActivatePNode(GoalLearnedSpace):
         response = await self.pnode_contains_client.send_request_async(space=request.space)
         return response
 
+    async def get_reward_callback(self, request, response):
+        """
+        Callback method to calculate the reward obtained. 
+
+        :param request: Request that includes the new perception to check the reward.
+        :type request: cognitive_node_interfaces.srv.GetReward.Request
+        :param response: Response that contais the reward.
+        :type response: cognitive_node_interfaces.srv.GetReward.Response
+        :return: Response that contais the reward.
+        :rtype: cognitive_node_interfaces.srv.GetReward.Response
+        """
+        self.point_msg=request.perception
+        response.reward = await self._get_reward(old_perception_msg=request.old_perception, perception_msg=request.perception)
+        response.updated = True
+        self.get_logger().info("Obtaining reward from " + self.name + " => " + str(response.reward))
+        return response
+
+
+    async def _get_reward(self, old_perception_msg=None, perception_msg=None):
+        """
+        Method that obtains the reward for the goal. It recieves two consecutive perceptions, calculates the related P-Node activation for each and detects if the P-Node was activated.
+
+        :param old_perception: First state perception dictionary.
+        :type old_perception: core_interfaces.msg.Container
+        :param perception: Second state perception dictionary.
+        :type perception: core_interfaces.msg.Container
+        :return: Reward and current timestamp.
+        :rtype: Tuple (float, builtin_interfaces.msg.Time)
+        """        
+        old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
+        activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
+        if activation-old_activation>self.threshold_delta:
+            reward = 1.0
+        else:
+            reward = 0.0
+        return reward
+
     async def get_reward(self, old_perception=None, perception=None):
         """
         Method that obtains the reward for the goal. It recieves two consecutive perceptions, calculates the related P-Node activation for each and detects if the P-Node was activated.
@@ -675,12 +710,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         """        
         old_perception_msg = old_perception.to_msg() if old_perception else None
         perception_msg = perception.to_msg() if perception else None
-        old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
-        activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
-        if activation-old_activation>self.threshold_delta:
-            self.reward = 1.0
-        else:
-            self.reward = 0.0
+        self.reward = await self._get_reward(old_perception_msg, perception_msg)
         self.publish_success_rate()
         return self.reward, self.get_clock().now().to_msg() 
     

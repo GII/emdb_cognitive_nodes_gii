@@ -9,8 +9,8 @@ from cognitive_node_interfaces.srv import GetActivation, LogExecution
 
 class CNode(CognitiveNode):
     """
-    C-Node class
-    It represents a context, that is, a link between nodes that were activated together in the past.
+    C-Node class.
+    It represents a context, i.e. a link between nodes that were activated together in the past.
     It is assumed that there is only one element of each type connected to the C-Node.
     """
 
@@ -94,23 +94,27 @@ class CNode(CognitiveNode):
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """
-        Calculate the new activation value by multiplying the activation values of its neighbors.
-        When an activation list is passed, this method will multiply the last perceptions of the neighbors.
-        Otherwise, with percerception = None, it will multiply the last activations of its neighbors, but
-        it's possible to use an arbitrary perception, that will propagate to the neighbors, calculating the
-        final activation of the C-Node for that perception.
+        Calculate the new activation value.
 
-        :param perception: Arbitrary perception.
+        If activation_list is None:
+          - Request the activation of all neighbors (except Policies) for the given perception.
+          - Compute the product of their activations.
+        If activation_list is provided:
+          - Delegate to calculate_activation_prod to use the cached activations.
+
+        :param perception: Arbitrary perception to propagate to neighbors.
         :type perception: core.container.Container
-        :param activation_list: Dictionary with the activation of multiple nodes. 
+        :param activation_list: Dictionary with the activation of multiple nodes.
         :type activation_list: dict
         :return: The activation of the C-Node and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
-        if activation_list==None:
+        if activation_list is None:
             node_activations = []
             neighbors_name = [
-                neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] != "Policy"
+                neighbor["name"]
+                for neighbor in self.neighbors
+                if neighbor["node_type"] != "Policy"
             ]
             perception_msg = perception.to_msg()
             for name in neighbors_name:
@@ -119,6 +123,7 @@ class CNode(CognitiveNode):
                     self.node_clients[service_name] = ServiceClientAsync(
                         self, GetActivation, service_name, self.cbgroup_client
                     )
+
                 activation = await self.node_clients[service_name].send_request_async(
                     perception=perception_msg
                 )
@@ -138,9 +143,10 @@ class CNode(CognitiveNode):
             self.activation = np.max(activation_list)
 
             self.get_logger().debug(
-                    self.node_type + " activation for " + self.name + " = " + str(self.activation)
-                )
+                f"{self.node_type} activation for {self.name} = {self.activation}"
+            )
         else:
+            # Use existing logic based on a provided activation list
             self.calculate_activation_prod(activation_list)
 
         return self.activation

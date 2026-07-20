@@ -267,6 +267,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         :return: True if a loop would be created, False otherwise.
         :rtype: bool
         """
+        if upstream_goal == downstream_goal:
+            return True  # Direct loop
         visited = set()
         return self.traverse_neighbors(upstream_goal, downstream_goal, visited)
     
