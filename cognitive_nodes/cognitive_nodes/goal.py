@@ -1130,12 +1130,18 @@ class GoalLearnedSpace(GoalMotiven):
         confidences[positive_reward] = 1.0
         confidences[negative_reward & negative_expected] = -1.0
 
-        # All points are added to the space. Changed from last version because now, only points related to the goal will be added. So no need to filter antipoints. 
-        self._add_points(perceptions, confidences)
+        nonzero_mask = ~np.isclose(confidences, 0.0)
+        if np.any(nonzero_mask):
+            filtered_perceptions = Container.from_dataarray(
+                perceptions.read(ordered=True).isel(sample=nonzero_mask),
+                container_type=perceptions.container_type,
+                name=perceptions.name,
+            )
+            self._add_points(filtered_perceptions, confidences[nonzero_mask])
 
         for idx in np.flatnonzero(positive_reward):
             self.history.appendleft(bool(expected_rewards[idx] > self.reward_threshold))
-        for idx in np.flatnonzero(negative_reward & negative_expected & (expected_rewards > self.low_reward_threshold)):
+        for idx in np.flatnonzero((confidences < 0.0) & (expected_rewards > self.low_reward_threshold)):
             self.history.appendleft(False)
 
         self.confidence = sum(self.history) / self.history.maxlen
