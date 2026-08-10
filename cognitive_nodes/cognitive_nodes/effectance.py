@@ -252,6 +252,7 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         self.index=0
         self.configure_pnode_success(self.LTM_id, self.cbgroup_client)
         self.pnode_goals_dict={}
+        self.pnode_domain_dict={}
 
     #UGLY HACK: This was done to limit effectance chains to a depth of 1. 
     # This must be done properly by analyzing neighbor chains and be general for any desired depth
@@ -300,8 +301,7 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         :type ltm_dump: dict
         :return: P-Node-Goal dictionary.
         :rtype: dict
-        """        
-        pnodes = ltm_dump["PNode"]
+        """
         cnode_list = ltm_dump["CNode"]
         cnodes = {}
         goals = {}
@@ -316,8 +316,34 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         for pnode, cnode in cnodes.items(): 
             cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
             goals[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"]
-        self.get_logger().info(f"DEBUG: {goals}")
+        self.get_logger().debug(f"DEBUG: {goals}")
         return goals
+
+    def find_domains(self, ltm_dump):
+        """
+        Creates a dictionary with the P-Nodes as keys and the corresponding domain as value.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        :return: P-Node-Domain dictionary.
+        :rtype: dict
+        """
+        cnode_list = ltm_dump["CNode"]
+        cnodes = {}
+        domains = {}
+
+        #Get the C-Node that corresponds to each P-Node
+        for cnode in cnode_list:
+            cnode_neighbors = cnode_list[cnode]['neighbors']
+            pnode= next((node["name"] for node in cnode_neighbors if node["node_type"] == "PNode"), None)
+            if pnode is not None:
+                cnodes[pnode] = cnode
+
+        for pnode, cnode in cnodes.items(): 
+            cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
+            domains[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "WorldModel"]
+        self.get_logger().debug(f"DEBUG: {domains}")
+        return domains
         
     def changes_in_pnodes(self, ltm_dump):
         """
@@ -343,11 +369,16 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         goal_name = f"reach_pnode_{self.index}"
         self.index+=1
         goals = self.pnode_goals_dict[pnode_name]
+        domains = self.pnode_domain_dict[pnode_name]
         self.get_logger().info(f"DEBUG: Goals Dict: {goals}")
+        self.get_logger().info(f"DEBUG: Domains Dict: {domains}")
 
         neighbor_dict = {pnode_name: "PNode"} 
         for goal in goals:
             neighbor_dict[goal]="Goal"
+        for domain in domains:
+            neighbor_dict[domain]="WorldModel"
+
 
         neighbors = {
             "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
@@ -371,6 +402,7 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         changes = self.changes_in_pnodes(ltm_dump)
         if changes:
             self.pnode_goals_dict = self.find_goals(ltm_dump)
+            self.pnode_domain_dict = self.find_domains(ltm_dump)
     
     async def execute_callback(self, request, response):
         """
@@ -757,8 +789,6 @@ class GoalRecreateEffect(GoalLearnedSpace):
             effect, old_sensing, _= self.process_effect(old_perception, perception)
             if old_sensing<1.0:
                 reward=float(effect)
-                self.update_space(reward, expected_reward, perception)
-                self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {reward} PRED_REWARD: {expected_reward} CONF: {self.confidence}")
                 timestamp=self.get_clock().now().to_msg()
             else:
                 self.get_logger().info(f"DEBUG - {self.name} - Effect already active")

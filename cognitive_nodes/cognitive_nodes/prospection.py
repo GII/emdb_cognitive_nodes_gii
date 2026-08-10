@@ -142,6 +142,7 @@ class ProspectionDrive(Drive, LTMSubscription):
             raise RuntimeError("Expected node type 'P-Node' or 'Goal'")
         if success_rate>threshold and node_name not in learned_list:
             learned_list.append(node_name)
+            self.get_logger().info(f"DEBUG - {node_type} {node_name} learned with success rate {success_rate}")
             await self.do_prospection()
 
     async def do_prospection(self):

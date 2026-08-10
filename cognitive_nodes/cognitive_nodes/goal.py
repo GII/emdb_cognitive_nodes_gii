@@ -127,7 +127,7 @@ class Goal(CognitiveNode):
                 self.get_logger().error(f"Number of points and confidences do not match. Points: {len(points)}, Confidences: {len(confidences)}")
                 response.added = False
                 return response
-            self.add_points(points, confidences)
+            self.update_space(points, confidences)
             response.added = True
             self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
         else:
@@ -232,15 +232,16 @@ class Goal(CognitiveNode):
         :raises NotImplementedError: If the method is not overridden in a subclass.
         """
         raise NotImplementedError
+
     
-    def add_points(self, point, confidence):
+    def update_space(self, points, confidences):
         """
         Placeholder method in base goals. To be implemented in derived classes.
         
-        :param point: The point that is added to the Goal.
-        :type point: core.container.Container
-        :param confidence: Indicates if the perception added is a point or an antipoint.
-        :type confidence: float
+        :param points: The points that are added to the Goal.
+        :type points: core.container.Container
+        :param confidences: Indicates if the perception added is a point or an antipoint.
+        :type confidences: float
         """
         return False
     
@@ -841,6 +842,7 @@ class GoalMotiven(Goal):
         """        
         goal_activations = {}
         goal_timestamps = {}
+        domain_activations = {}
         for node in activation_list.keys():
             if activation_list[node]['data'].node_type == "Drive":
                 goal_activations[node] = activation_list[node]['data'].activation
@@ -848,10 +850,12 @@ class GoalMotiven(Goal):
             if activation_list[node]['data'].node_type == "Goal":
                 goal_activations[node] = activation_list[node]['data'].activation * 0.7 #Testing attenuation term, so that subgoals have progressively less activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
+            if activation_list[node]['data'].node_type == "WorldModel":
+                domain_activations[node] = activation_list[node]['data'].activation
         if goal_activations:
             activation=max(zip(goal_activations.values(), goal_activations.keys()))
             timestamp=goal_timestamps[activation[1]]
-            self.activation.activation = activation[0]
+            self.activation.activation = activation[0]*max(domain_activations.values()) if domain_activations else activation[0]
             self.activation.timestamp=timestamp
         else:
             self.activation.activation = 0.0
@@ -892,7 +896,7 @@ class GoalLearnedSpace(GoalMotiven):
     """
     Class that extends the functionality of the GoalMotiven class by adding a space to store goal state space.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, reward_threshold=0.8, reward_delta_threshold=0.5, low_reward_threshold=0.1, **params):
         """
         Constructor of the GoalLearnedSpace class.
 
@@ -955,7 +959,12 @@ class GoalLearnedSpace(GoalMotiven):
         self.confidence=0.0
         self.learned_space=False
         if perception:
-            self.add_point(perception, 1.0)
+            self._add_points(perception, 1.0)
+
+        # Constants for reward thresholds
+        self.reward_threshold = reward_threshold
+        self.reward_delta_threshold = reward_delta_threshold
+        self.low_reward_threshold = low_reward_threshold
 
     def send_goal_space_callback(self, request, response):
         """
@@ -991,7 +1000,7 @@ class GoalLearnedSpace(GoalMotiven):
             response.contained=False
         return response
 
-    def add_points(self, point, confidences):
+    def _add_points(self, point, confidences):
         """
         Add a new point (or anti-point) to the Goal.
         
@@ -1018,76 +1027,126 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """        
         if not compare_perceptions(old_perception, perception):
-            if perception:
-                expected_reward=self.get_expected_reward(perception)
-            if self.linked_drive():
+            reward = 0.0
+            if self.linked_drive(): # If drive is linked, reward is obtained from the drive evaluation
                 reward = self.reward
                 drive_reward = self.reward
                 self.reward = 0.0
-                self.update_space(reward, expected_reward, perception)
                 timestamp=self.reward_timestamp
-            else:
-                # TODO Should reward be obtained with a delta of space activation? As in EffectanceGoal
-                drive_reward=0.0
-                prob_reward=expected_reward
-                # Threshold reward according to probability obtained from space
-                reward= 1.0 if prob_reward>0.75 else 0.0
-            timestamp=self.get_clock().now().to_msg()
-            self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {drive_reward} PRED_REWARD: {expected_reward} CONF: {self.confidence}")
+                return reward, timestamp
+
+            drive_activation, drive_timestamp = self.get_drive_activation()
+            if isclose(reward, 0.0) and isclose(drive_activation, 0.0) and self.learned_space: # If there is no reward and the drive is not activated, we can check the expected reward from the space
+                if perception:
+                    expected_reward=self.get_expected_reward(perception)
+                    expected_reward_old = self.get_expected_reward(old_perception)
+                else:
+                    reward=0.0
+                    timestamp=self.get_clock().now().to_msg()
+                    return reward, timestamp
+                high_exp_reward = expected_reward>self.reward_threshold
+                high_reward_delta = expected_reward-expected_reward_old>self.reward_delta_threshold
+                reward = 1.0 if high_exp_reward and high_reward_delta else 0.0
+                timestamp = drive_timestamp #TODO Check if we should use the drive timestamp or the current time
+                return reward, timestamp
         else:
             reward=0.0
             timestamp=self.get_clock().now().to_msg()
-
-        return reward, timestamp
+            return reward, timestamp
 
     def get_expected_reward(self, perception:Container):
         """
         Calculate the expected reward of the goal based on the perception and the goal state.
 
-        :param perception: Perception to evaluate. 
+        :param perception: One or more perceptions to evaluate.
         :type perception: core.container.Container
-        :return: Expected reward.
-        :rtype: float
+        :return: Expected reward for a single perception or an array of expected rewards for a batch.
+        :rtype: float | numpy.ndarray
         """
         if self.space and self.added_point:
-            reward_value = self.space.get_probability(perception)
-            reward_value = max(0.0, reward_value.reshape(-1)[0])
-        else:
-            reward_value = 0.0
-        expected_reward = float(reward_value)
+            reward_value = self.space.get_probability(perception).reshape(-1)
+            reward_value = np.maximum(0.0, reward_value)
+            if len(perception) > 1:
+                return reward_value
+            return float(reward_value[0]) if reward_value.size else 0.0
+        expected_reward = 0.0 if len(perception) == 1 else np.zeros(len(perception), dtype=float)
         return expected_reward
 
-    def update_space(self, reward, expected_reward, perception):
+    def get_drive_activation(self):
         """
-        Update the space of the goal based on the reward obtained and the expected reward. Adds point or antipoint to the space, updates the confidence score of the goal.
+        Get the activation of a specific drive.
 
-        :param reward: Real reward (from a Drive) obtained.
-        :type reward: float
-        :param expected_reward: Reward expected from the state space of the goal.
-        :type expected_reward: float
-        :param perception: Perception that corresponds to the reward obtained.
-        :type perception: core.container.Container
-        """        
-        if reward>0.01:
-            # All rewarded points are saved and accounted to the confidence according to the prediction
-            self.add_points(perception, np.array([1.0]))
-            if expected_reward>0.5:
-                self.history.appendleft(True)
-            else:
-                self.history.appendleft(False)
+        :param drive_name: Name of the drive.
+        :type drive_name: str
+        :return: Activation value and timestamp of the drive.
+        :rtype: tuple (float, float)
+        """
+        drive_name = self.get_drive()
+        if drive_name in self.activation_inputs:
+            return self.activation_inputs[drive_name]['data'].activation, Time.from_msg(self.activation_inputs[drive_name]['data'].timestamp).nanoseconds
         else:
-            # Only wrongly predicted non-rewarded points are accounted in confidence and saved in space
-            if expected_reward>0.01:
-                self.add_points(perception, np.array([-1.0]))
-                if expected_reward>0.1:
-                    self.history.appendleft(False)
-        self.confidence=sum(self.history)/self.history.maxlen
+            self.get_logger().warn(f"Drive {drive_name} not found in activation inputs.")
+            return 0.0, self.get_clock().now().to_msg()
+
+    def update_space(self, perceptions, rewards):
+        """
+        Update the space of the goal based on the reward obtained and the expected reward.
+        Accepts either a single perception and reward or a batch of perceptions and rewards.
+
+        :param perceptions: Perception(s) that correspond to the reward(s) obtained.
+        :type perceptions: core.container.Container
+        :param rewards: Real reward(s) (from a Drive) obtained.
+        :type rewards: float | list[float] | numpy.ndarray
+        """
+        if not self.space:
+            self.get_logger().error("No space defined for the Goal. Cannot add points.")
+            return
+
+        if not isinstance(perceptions, Container):
+            self.get_logger().error("Perceptions must be a Container instance.")
+            return
+
+        rewards = np.asarray(rewards, dtype=float).reshape(-1)
+        if rewards.ndim != 1:
+            rewards = rewards.reshape(-1)
+
+        if perceptions.size != rewards.size:
+            raise ValueError(
+                f"Number of perceptions ({perceptions.size}) and rewards ({rewards.size}) do not match."
+            )
+
+        expected_rewards = self.get_expected_reward(perceptions)
+        if np.isscalar(expected_rewards):
+            expected_rewards = np.asarray([expected_rewards], dtype=float)
+        else:
+            expected_rewards = np.asarray(expected_rewards, dtype=float).reshape(-1)
+
+        confidences = np.zeros(perceptions.size, dtype=float)
+        positive_reward = rewards > 0.01
+        negative_reward = ~positive_reward
+        positive_expected = expected_rewards > self.reward_threshold
+        negative_expected = expected_rewards > 0.01
+
+        confidences[positive_reward] = 1.0
+        confidences[negative_reward & negative_expected] = -1.0
+
+        # All points are added to the space. Changed from last version because now, only points related to the goal will be added. So no need to filter antipoints. 
+        self._add_points(perceptions, confidences)
+
+        for idx in np.flatnonzero(positive_reward):
+            self.history.appendleft(bool(expected_rewards[idx] > self.reward_threshold))
+        for idx in np.flatnonzero(negative_reward & negative_expected & (expected_rewards > self.low_reward_threshold)):
+            self.history.appendleft(False)
+
+        self.confidence = sum(self.history) / self.history.maxlen
         # Set goal as learned if min_confidence is exceeded
-        if not self.learned_space and self.confidence>self.min_confidence:
-            self.learned_space=True
-        # Flag goal if confidence goes below 75% of learned confidence
-        if self.learned_space and self.confidence<self.min_confidence*0.75:
-            self.learned_space=False
+        if not self.learned_space and self.confidence > self.min_confidence:
+            self.learned_space = True
+        # Flag goal if confidence goes below 75% of learned confidence 
+        # (TODO: THIS MIGHT NOT BE THE BEST IDEA IF THERE ARE NODES ALREADY CREATED THAT DEPEND ON THE REWARDS OBTAINED FROM THE SPACE OF THIS GOAL, THEN, THE CODE IS COMMENTED OUT FOR NOW)
+        # if self.learned_space and self.confidence < self.min_confidence * 0.75:
+        #     self.learned_space = False
+        self.get_logger().info(f"DEBUG - GOAL: {self.name} REWARD: {rewards} PRED_REWARD: {expected_rewards} CONF: {self.confidence}")
         self.publish_success_rate()
 
     def publish_success_rate(self):
