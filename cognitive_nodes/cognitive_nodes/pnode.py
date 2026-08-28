@@ -91,7 +91,7 @@ class PNode(CognitiveNode):
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """
         space_data = Container.from_msg(request.space)
-        if self.space:
+        if self.space and space_data is not None:
             response.contained=self.space.contains(space_data)
         else:
             response.contained=False

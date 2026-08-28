@@ -549,14 +549,7 @@ class PolicyEffectanceExternal(Policy):
         goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
         if not goal_response.created:
             raise RuntimeError(f"Failed creation of Goal {goal_name}")
-        service_name = f"goal/{goal_name}/add_points"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClientAsync(self, AddPoints, service_name, self.cbgroup_client)
 
-        perception_msg = point.to_msg()
-        response = await self.node_clients[service_name].send_request_async(points=perception_msg, confidences=[1.0])
-        if not response.added:
-            raise RuntimeError(f"Failed to add point to Goal {goal_name}")
         return goal_name
     
     async def create_pnode(self, ident, point):
@@ -641,7 +634,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         :param threshold_delta: Minimum change in activation that triggers a reward, defaults to 0.2.
         :type threshold_delta: float
         """        
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, threshold_delta=threshold_delta, **params)
         self.threshold_delta=threshold_delta
         self.setup_pnode()
     
@@ -650,6 +643,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         Creates the required service clients and subscriptions.
         """        
         pnode = next((node["name"] for node in self.neighbors if node["node_type"] == "PNode"))
+        self.pnode = pnode
         self.pnode_activation_client = ServiceClientAsync(self, GetActivation, f"cognitive_node/{pnode}/get_activation", self.cbgroup_client)
         self.pnode_space_client = ServiceClientAsync(self, SendSpace, f"pnode/{pnode}/send_space", self.cbgroup_client) 
         self.pnode_contains_client = ServiceClientAsync(self, ContainsSpace, f"pnode/{pnode}/contains_space", self.cbgroup_client) 
@@ -761,6 +755,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         """        
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
+        self.get_logger().info(f"DEBUG: {self.pnode} Old Activation: {old_activation:<.4g}, New Activation: {activation:<.4g}, Delta: {activation-old_activation:<.4g} (Min: {self.threshold_delta})")
         if activation-old_activation>self.threshold_delta:
             reward = 1.0
         else:
@@ -814,8 +809,22 @@ class GoalRecreateEffect(GoalLearnedSpace):
         space = SpaceEffectActive(sensor, attribute, ident=name + " space", random_seed=params.get("random_seed", None), **space_kwargs)
         super().__init__(name, class_name, space=space, **params)
         self.learned_space = True # The space is defined by the effect itself, so it is considered learned from the beginning.
+        self.confidence = 1.0 # The confidence is set to 1.0 since the effect is already known and does not require learning.
+        self.added_point = True # Placeholder to indicate that a point has been added to the goal. This is used to avoid adding points to the goal, since the space is defined by the effect itself.
         self.base_params.pop("space", None) # Remove the space from the base parameters to avoid conflicts with the space defined by the effect.
         self.base_params.update(dict(sensor=sensor, attribute=attribute)) # Add the sensor and attribute to the base parameters to be used by the goal.
+
+    def _add_points(self, point, confidences):
+            """
+            Add a new point (or anti-point) to the Goal. Overrides the default behavior to ignore the points added, since the space is defined by the effect itself.
+            
+            :param point: The point that is added to the Goal.
+            :type point: core.container.Container
+            :param confidence: Indicates if the perception added is a point or an antipoint.
+            :type confidence: float
+            """
+            self.get_logger().info("Added point to effect goal, ignoring." )  # This goal does not take into account the points added to it, since the space is defined by the effect itself. The method is overridden to avoid adding points to the goal.
+
 
 
 class SpaceEffectActive(PointBasedSpace):

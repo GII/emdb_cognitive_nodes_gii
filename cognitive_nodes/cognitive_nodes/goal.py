@@ -996,7 +996,7 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
         space_data = Container.from_msg(request.space)
-        if self.space:
+        if self.space and space_data is not None:
             response.contained=self.space.contains(space_data)
         else:
             response.contained=False
@@ -1027,32 +1027,37 @@ class GoalLearnedSpace(GoalMotiven):
         :type perception: core.container.Container
         :return: The reward obtained and its timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
-        """        
+        """
+        reward=0.0
+        timestamp=self.get_clock().now().to_msg()
         if not compare_perceptions(old_perception, perception):
-            reward = 0.0
+            drive_activation, drive_timestamp = self.get_drive_activation()
             if self.linked_drive(): # If drive is linked, reward is obtained from the drive evaluation
                 reward = self.reward
                 self.reward = 0.0
                 timestamp=self.reward_timestamp
-                return reward, timestamp
+                if not isclose(reward, 0.0) or not isclose(drive_activation, 0.0): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
+                    self.update_space(perception, reward)
+                # return reward, timestamp
 
-            drive_activation, drive_timestamp = self.get_drive_activation()
-            if isclose(reward, 0.0) and isclose(drive_activation, 0.0) and self.learned_space: # If there is no reward and the drive is not activated, we can check the expected reward from the space
+            # This blocks applies in two cases:
+            # 1. If the drive is not linked, we can check the expected reward from the space
+            # 2. If the drive is linked but inactive, we can check the expected reward from the space.
+            # In all cases, space must be learned, otherwise we cannot check the expected reward.
+
+            if self.learned_space and isclose(drive_activation, 0.0) and isclose(reward, 0.0): # If there is no reward and the drive is not activated, we can check the expected reward from the space
                 if perception:
                     expected_reward=self.get_expected_reward(perception)
                     expected_reward_old = self.get_expected_reward(old_perception)
                 else:
-                    reward=0.0
-                    timestamp=self.get_clock().now().to_msg()
                     return reward, timestamp
                 high_exp_reward = expected_reward>self.reward_threshold
                 high_reward_delta = expected_reward-expected_reward_old>self.reward_delta_threshold
                 reward = 1.0 if high_exp_reward and high_reward_delta else 0.0
                 timestamp = drive_timestamp #TODO Check if we should use the drive timestamp or the current time
-                return reward, timestamp
+                self.publish_success_rate()
+            return reward, timestamp
         else:
-            reward=0.0
-            timestamp=self.get_clock().now().to_msg()
             return reward, timestamp
 
     def get_expected_reward(self, perception:Container):
@@ -1080,13 +1085,16 @@ class GoalLearnedSpace(GoalMotiven):
         :param drive_name: Name of the drive.
         :type drive_name: str
         :return: Activation value and timestamp of the drive.
-        :rtype: tuple (float, float)
+        :rtype: tuple (float, builtin_interfaces.msg.Time)
         """
         drive_name = self.get_drive()
+        if not drive_name:
+            self.get_logger().debug("No linked drive found for this goal.")
+            return 0.0, self.get_clock().now().to_msg()
         if drive_name in self.activation_inputs:
-            return self.activation_inputs[drive_name]['data'].activation, Time.from_msg(self.activation_inputs[drive_name]['data'].timestamp).nanoseconds
+            return self.activation_inputs[drive_name]['data'].activation, self.activation_inputs[drive_name]['data'].timestamp
         else:
-            self.get_logger().debug(f"Drive {drive_name} not found in activation inputs.")
+            self.get_logger().error(f"Drive {drive_name} not found in activation inputs.")
             return 0.0, self.get_clock().now().to_msg()
 
     def update_space(self, perceptions, rewards):
