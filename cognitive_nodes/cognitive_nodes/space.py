@@ -24,7 +24,7 @@ from core_interfaces.msg import Container as ContainerMsg
 class Space(object):
     """A n-dimensional state space."""
 
-    def __init__(self, ident=None, random_seed=0, **kwargs):
+    def __init__(self, ident=None, random_seed=0, logger=None, **kwargs):
         """Init attributes when a new object is created.
 
         :param ident: The name of the space.
@@ -38,7 +38,10 @@ class Space(object):
         self.parent_space = None
         # random_seed 0/None -> fresh time-based seed (genuinely random run).
         self.random_seed = resolve_seed(random_seed)
-        self.logger = get_logger("space_" + str(ident))
+        if logger is not None:
+            self.logger = logger
+        else:
+            self.logger = get_logger("space_" + str(ident))
         self.logger.info(f"CREATING SPACE: {ident}")
         self.rng = np.random.default_rng(self.random_seed)
 

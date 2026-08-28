@@ -7,7 +7,9 @@ from copy import copy
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import GoalLearnedSpace
 from cognitive_nodes.policy import Policy
+from cognitive_nodes.space import PointBasedSpace
 from core.service_client import ServiceClientAsync
+from core.container import Container
 from cognitive_nodes.episode import container_msg_to_episode, episode_obj_to_msg
 from core.utils import compare_perceptions
 
@@ -114,7 +116,6 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
             self.episode_msg = episodes_msg
         self.effects=set()
         self.new_effects={}
-        self.new_effects_data={}
         self.get_effects_service = self.create_service(GetEffects, 'drive/' + str(
             name) + '/get_effects', self.get_effects_callback, callback_group=self.cbgroup_server)
         self.configure_episode_subscription(episodes_topic, episodes_msg, self.cbgroup_activation)
@@ -143,7 +144,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         labels_old_perception = set(old_perception.feature_labels)
         labels_perception = set(perception.feature_labels)
         labels = list(labels_perception.intersection(labels_old_perception))
-
+        domain = episode.domain_name
         data_old_perception = old_perception.read().sel(features=labels).values
         data_perception = perception.read().sel(features=labels).values
 
@@ -171,11 +172,12 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
                 sensor, attribute = label.split(":", 1)
             except ValueError:
                 continue
-            if label not in self.effects:
-                self.effects.add(label)
-                self.new_effects[sensor] = attribute
-                self.new_effects_data[sensor] = episode_obj_to_msg(episode)
-                self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}")
+            effect_key = ((sensor, attribute, domain))
+            if effect_key not in self.effects:
+                self.effects.add(effect_key)
+                effect_data = episode_obj_to_msg(episode)
+                self.new_effects[effect_key] = effect_data
+                self.get_logger().info(f"Found new effect! Sensor: {sensor}, Attribute: {attribute}, Domain: {domain}")
 
     def get_effects_callback(self, request, response:GetEffects.Response):
         """
@@ -188,17 +190,18 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :return: Sensors and attributes for which effects have been found.
         :rtype: cognitive_node_interfaces.srv.GetEffects.Response
         """        
-        sensors=[]
-        attributes=[]
-        data=[]
+        sensors = []
+        attributes = []
+        data = []
         if self.new_effects:
             effects=copy(self.new_effects)
-            for sensor in effects:
+            for effect_key in effects:
+                sensor, attribute, _ = effect_key
                 sensors.append(sensor)
-                attributes.append(self.new_effects.pop(sensor))
-                data.append(self.new_effects_data.pop(sensor))
-        response.sensors=sensors
-        response.attributes=attributes
+                attributes.append(attribute)
+                data.append(self.new_effects.pop(effect_key))
+        response.sensors = sensors
+        response.attributes = attributes
         response.effects_episodes = data
         return response
 
@@ -527,7 +530,7 @@ class PolicyEffectanceExternal(Policy):
         response = await self.node_clients[logging_service].send_request_async(success=success)
         return response.added
     
-    async def create_goal(self, sensor, attribute, point):
+    async def create_goal(self, sensor, attribute, domain, point):
         """
         Method that creates a goal related to an effect and registers it in the LTM.
 
@@ -537,8 +540,12 @@ class PolicyEffectanceExternal(Policy):
         :type attribute: str
         """        
         self.get_logger().info(f"Creating goal linked to effect in sensor {sensor}, attribute {attribute}")
-        goal_name=f"effect_{sensor}_{attribute}"
-        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class, space_parameters=self.space_params, **self.goal_params)
+        goal_name=f"effect_{sensor}_{attribute}_{domain}"
+        neighbor_dict = {domain: "WorldModel"}
+        neighbors = {
+            "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
+        }
+        params=dict(sensor=sensor, attribute=attribute, space_class=self.space_class, space_parameters=self.space_params, **self.goal_params, **neighbors)
         goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
         if not goal_response.created:
             raise RuntimeError(f"Failed creation of Goal {goal_name}")
@@ -595,7 +602,7 @@ class PolicyEffectanceExternal(Policy):
         policy = episode.parent_policy
 
         # Create the goal and P-Node, and set up their relationships.
-        goal = await self.create_goal(sensor, attribute, episode.perception)
+        goal = await self.create_goal(sensor, attribute, world_model, episode.perception)
         ident = f"{world_model}__{goal}__{policy}"
         pnode_name = await self.create_pnode(ident, episode.old_perception)
         neighbor_dict = {world_model: "WorldModel", pnode_name: "PNode", goal: "Goal"}
@@ -664,6 +671,18 @@ class GoalActivatePNode(GoalLearnedSpace):
         self.confidence = msg.success_rate
         self.confidence=msg.success_rate
 
+    def _add_points(self, point, confidences):
+        """
+        This type of goal is surrogate and does not have its own space. It ignores the points added to it. 
+        
+        :param point: The point that is added to the Goal.
+        :type point: core.container.Container
+        :param confidence: Indicates if the perception added is a point or an antipoint.
+        :type confidence: float
+        """
+        self.get_logger().debug("The space of this Goal is related to a P-Node. Ignoring the points added to it.")
+
+
     async def send_goal_space_callback(self, request, response):
         """
         This method overrides the default behavior of the send space service. Obtains the space from the P-Node and sends it as response.
@@ -690,6 +709,25 @@ class GoalActivatePNode(GoalLearnedSpace):
         :rtype: cognitive_node_interfaces.srv.ContainsSpace.Response
         """        
         response = await self.pnode_contains_client.send_request_async(space=request.space)
+        return response
+
+    def add_points_callback(self, request, response):
+        """
+        Callback method for adding a point (or anti-point) to a specific Goal.
+        This type of goal is surrogate and does not have its own space. It ignores the points added to it.
+
+        :param request: The request that contains the point that is added and its confidence.
+        :type request: cognitive_node_interfaces.srv.AddPoints.Request
+        :param response: The response indicating if the point was added to the Goal.
+        :type response: cognitive_node_interfaces.srv.AddPoints.Response
+        :return: The response indicating if the point was added to the Goal.
+        :rtype: cognitive_node_interfaces.srv.AddPoints.Response
+        """
+        if request.points:
+            self.get_logger().debug("The space of this Goal is related to a P-Node. Ignoring the points added to it.")
+            response.added = True
+        else:
+            response.added = False
         return response
 
     async def get_reward_callback(self, request, response):
@@ -752,7 +790,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
 
     This class inherits from the GoalLearnedSpace class.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', sensor=None, attribute=None, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', sensor=None, attribute=None, space_parameters=None, **params):
         """
         Constructor of the GoalRecreateEffect class.
 
@@ -765,76 +803,61 @@ class GoalRecreateEffect(GoalLearnedSpace):
         :param attribute: Name of the related attribute of the sensor.
         :type attribute: str
         :raises Exception: Raises exeption if the sensor or the attribute are missing.
-        """        
-        super().__init__(name, class_name, sensor=sensor, attribute=attribute, **params)
+        """
         if not sensor or not attribute:
             raise Exception("Effect not configured")
         else:
             self.sensor=sensor
             self.attribute=attribute
 
-    def get_reward(self, old_perception, perception):
+        space_kwargs = space_parameters if space_parameters else {}
+        space = SpaceEffectActive(sensor, attribute, ident=name + " space", random_seed=params.get("random_seed", None), **space_kwargs)
+        super().__init__(name, class_name, space=space, **params)
+        self.learned_space = True # The space is defined by the effect itself, so it is considered learned from the beginning.
+        self.base_params.pop("space", None) # Remove the space from the base parameters to avoid conflicts with the space defined by the effect.
+        self.base_params.update(dict(sensor=sensor, attribute=attribute)) # Add the sensor and attribute to the base parameters to be used by the goal.
+
+
+class SpaceEffectActive(PointBasedSpace):
+    """
+    Space that represents the effect being active.
+
+    This class inherits from the PointBasedSpace class.
+    """    
+    def __init__(self, sensor, attribute, **kwargs):
         """
-        Method that obtains reward for the goal. It recieves two consecutive perceptions, checks if the effect was recreated (the related attribute went from 0 to 1).
+        Constructor of the SpaceEffectActive class.
 
-        :param old_perception: First state perception dictionary.
-        :type old_perception: core.container.Container
-        :param perception: Second state perception dictionary
-        :type perception: core.container.Container
-        :return: Reward and current timestamp.
-        :rtype: Tuple (float, builtin_interfaces.msg.Time)
-        """        
-        if not compare_perceptions(old_perception, perception):
-            expected_reward=self.get_expected_reward(perception)
-            effect, old_sensing, _= self.process_effect(old_perception, perception)
-            if old_sensing<1.0:
-                reward=float(effect)
-                timestamp=self.get_clock().now().to_msg()
-            else:
-                self.get_logger().info(f"DEBUG - {self.name} - Effect already active")
-                reward=0.0
-                timestamp=self.get_clock().now().to_msg()
-        else:
-            reward=0.0
-            timestamp=self.get_clock().now().to_msg()
-        return reward, timestamp
-       
-    def process_effect(self, old_perception, perception):
+        :param sensor: The sensor associated with the effect.
+        :type sensor: str
+        :param attribute: The attribute associated with the effect.
+        :type attribute: str
         """
-        Method that extracts the appropriate reading from the perceptions and returns if effect is found.
-        
+        self.effect_label = f"{sensor}:{attribute}"
+        super().__init__(**kwargs)
 
-        :param old_perception: First state perception dictionary.
-        :type old_perception: core.container.Container
-        :param perception: Second state perception dictionary.
-        :type perception: core.container.Container
-        :return: Tuple with a boolean True if effect is found and the raw readings of the sensor's attribute for both perceptions.
-        :rtype: tuple (bool, float, float)
-        """        
-        effect=False
-        label = f"{self.sensor}:{self.attribute}"
+    def get_probability(self, perceptions):
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        points = self.data_from_perception(perceptions)
+        # Calculate the activation value
+        activation = np.isclose(np.asarray(points).reshape(-1), 1.0).astype(float)
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation
 
-        if not label in perception.feature_labels or not label in old_perception.feature_labels:
-            return False, 0.0, 0.0
+    def data_from_perception(self, perception: Container):
+        """
+        Create a structured array for the given perception.
 
-        old_sensing=old_perception.read().sel(features=label).values[-1]
-        sensing=perception.read().sel(features=label).values[-1]
-        effect=isclose(sensing-old_sensing, 1.0)
-        
-        return effect, old_sensing, sensing
-    
-    # def calculate_activation(self, perception, activation_list):
-    #     """
-    #     This method extends the default calculate activation method for goals and provides activation based on the goal's confidence.
+        :param perception: The given perception to create the structured array.
+        :type perception: Container
+        :return: The structured array created from the given perception.
+        :rtype: numpy.ndarray
+        """
+        data = perception.read(ordered=True)
+        filtered_features = data.sel(features=self.effect_label)
+        return filtered_features.values
 
-    #     :param perception: The perception for which the activation will be calculated. None can be passed.
-    #     :type perception: dict
-    #     :param activation_list: List of activations considered in the node.
-    #     :type activation_list: dict
-    #     """        
-    #     #Calculates activation as any goal
-    #     super().calculate_activation(perception, activation_list)
-    #     #Provides activation if not learned depending on confidence
-    #     if not self.learned_space:
-    #         self.activation.activation=max((1 - self.confidence) * 0.5 + 0.5, self.activation.activation)
+
 

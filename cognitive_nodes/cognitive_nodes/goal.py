@@ -134,8 +134,6 @@ class Goal(CognitiveNode):
             response.added = False
         return response
 
-        return response
-
     def send_goal_space_callback(self, request, response):
         """
         Callback that sends the goal space data.
@@ -854,12 +852,16 @@ class GoalMotiven(Goal):
                 domain_activations[node] = activation_list[node]['data'].activation
         if goal_activations:
             activation=max(zip(goal_activations.values(), goal_activations.keys()))
-            timestamp=goal_timestamps[activation[1]]
-            self.activation.activation = activation[0]*max(domain_activations.values()) if domain_activations else activation[0]
-            self.activation.timestamp=timestamp
+            self.activation.activation=activation[0]
+            self.activation.timestamp=goal_timestamps[activation[1]]
         else:
             self.activation.activation = 0.0
             self.activation.timestamp=self.get_clock().now().to_msg()
+
+        # Check domain activation
+        domain_activation_max = max(domain_activations.values()) if domain_activations else 1.0
+        if isclose(domain_activation_max, 0.0):
+            self.activation.activation = -1.0 # If the domain activation is zero, it means that the goal does not correspond to the current domain
             
     def calculate_reward(self, drive_name):
         """
@@ -1030,7 +1032,6 @@ class GoalLearnedSpace(GoalMotiven):
             reward = 0.0
             if self.linked_drive(): # If drive is linked, reward is obtained from the drive evaluation
                 reward = self.reward
-                drive_reward = self.reward
                 self.reward = 0.0
                 timestamp=self.reward_timestamp
                 return reward, timestamp
@@ -1085,7 +1086,7 @@ class GoalLearnedSpace(GoalMotiven):
         if drive_name in self.activation_inputs:
             return self.activation_inputs[drive_name]['data'].activation, Time.from_msg(self.activation_inputs[drive_name]['data'].timestamp).nanoseconds
         else:
-            self.get_logger().warn(f"Drive {drive_name} not found in activation inputs.")
+            self.get_logger().debug(f"Drive {drive_name} not found in activation inputs.")
             return 0.0, self.get_clock().now().to_msg()
 
     def update_space(self, perceptions, rewards):
@@ -1115,6 +1116,10 @@ class GoalLearnedSpace(GoalMotiven):
                 f"Number of perceptions ({perceptions.size}) and rewards ({rewards.size}) do not match."
             )
 
+        # The updates are performed according to the expected reward and the actual reward obtained. 
+        # All positively rewarded perceptions are added to the space
+        # Negatively rewarded perceptions are added to the space if their expected reward is above a low threshold, indicating that they were expected to be positive but were not.
+
         expected_rewards = self.get_expected_reward(perceptions)
         if np.isscalar(expected_rewards):
             expected_rewards = np.asarray([expected_rewards], dtype=float)
@@ -1125,11 +1130,12 @@ class GoalLearnedSpace(GoalMotiven):
         positive_reward = rewards > 0.01
         negative_reward = ~positive_reward
         positive_expected = expected_rewards > self.reward_threshold
-        negative_expected = expected_rewards > 0.01
+        negative_not_expected = expected_rewards > self.low_reward_threshold
 
         confidences[positive_reward] = 1.0
-        confidences[negative_reward & negative_expected] = -1.0
+        confidences[negative_reward & negative_not_expected] = -1.0
 
+        # Perceptions with zero confidence correspond to the negatively rewarded perceptions that were expected to be negative, and are not added to the space.
         nonzero_mask = ~np.isclose(confidences, 0.0)
         if np.any(nonzero_mask):
             filtered_perceptions = Container.from_dataarray(
@@ -1140,8 +1146,8 @@ class GoalLearnedSpace(GoalMotiven):
             self._add_points(filtered_perceptions, confidences[nonzero_mask])
 
         for idx in np.flatnonzero(positive_reward):
-            self.history.appendleft(bool(expected_rewards[idx] > self.reward_threshold))
-        for idx in np.flatnonzero((confidences < 0.0) & (expected_rewards > self.low_reward_threshold)):
+            self.history.appendleft(bool(positive_expected[idx])) # In positively rewarded cases, we consider the confidence to be True if the expected reward was also positive.
+        for idx in np.flatnonzero(confidences < 0.0):
             self.history.appendleft(False)
 
         self.confidence = sum(self.history) / self.history.maxlen

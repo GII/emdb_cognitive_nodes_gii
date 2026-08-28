@@ -55,6 +55,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.learned_pnodes=[]
         self.learned_goals=[]
         self.pnode_goals_dict={} #Dictionary of the goals linked to each pnode {'pnode0': ['goal0' ... ], ..., 'pnodeN': ['goal', ... ]}
+        self.pnode_domain_dict={} #Dictionary of the domain linked to each pnode {'pnode0': 'domain0', ..., 'pnodeN': 'domainN'}
+        self.goal_domain_dict={} #Dictionary of the domain linked to each goal {'goal0': 'domain0', ..., 'goalN': 'domainN'}
         self.found_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
         self.discarded_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
         self.new_knowledge=False
@@ -80,6 +82,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         changes = self.changes_in_pnodes(ltm_dump)
         if changes:
             self.pnode_goals_dict = self.find_goals(ltm_dump)
+            self.pnode_domain_dict = self.find_pnode_domains(ltm_dump)
+            self.goal_domain_dict = self.find_goal_domains(ltm_dump)
 
 
     def find_goals(self, ltm_dump): #TODO refactor with find_goals in effectance.py
@@ -107,6 +111,51 @@ class ProspectionDrive(Drive, LTMSubscription):
             cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
             goals[pnode] = [node["name"] for node in cnode_neighbors if node["node_type"] == "Goal"]
         self.get_logger().info(f"DEBUG: {goals}")
+        return goals
+
+    def find_pnode_domains(self, ltm_dump):
+        """
+        Creates a dictionary with the P-Nodes as keys and the corresponding domain as value.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        :return: P-Node-Domain dictionary.
+        :rtype: dict
+        """
+        cnode_list = ltm_dump["CNode"]
+        cnodes = {}
+        domains = {}
+
+        #Get the C-Node that corresponds to each P-Node
+        for cnode in cnode_list:
+            cnode_neighbors = cnode_list[cnode]['neighbors']
+            pnode= next((node["name"] for node in cnode_neighbors if node["node_type"] == "PNode"), None)
+            if pnode is not None:
+                cnodes[pnode] = cnode
+
+        for pnode, cnode in cnodes.items(): 
+            cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
+            domains[pnode] = next((node["name"] for node in cnode_neighbors if node["node_type"] == "WorldModel"), None)
+        self.get_logger().debug(f"DEBUG: {domains}")
+        return domains
+
+    def find_goal_domains(self, ltm_dump):
+        """
+        Creates a dictionary with the Goals as keys and the corresponding domain as value.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        :return: Goal-Domain dictionary.
+        :rtype: dict
+        """
+        goal_list = ltm_dump["Goal"]
+        goals = {}
+        for goal in goal_list:
+            goal_neighbors = goal_list[goal]['neighbors']
+            domain= next((node["name"] for node in goal_neighbors if node["node_type"] == "WorldModel"), None)
+            if domain is not None:
+                goals[goal] = domain
+        self.get_logger().debug(f"DEBUG: {goals}")
         return goals
 
     def changes_in_pnodes(self, ltm_dump): #TODO refactor with changes_in_pnodes in effectance.py
@@ -156,7 +205,11 @@ class ProspectionDrive(Drive, LTMSubscription):
                 #If a relationship has not been found before
                 discovered = any(element in self.pnode_goals_dict[pnode] for element in self.found_knowledge.get(goal, []))
                 discarded = any(element in self.pnode_goals_dict[pnode] for element in self.discarded_knowledge.get(goal, []))
-                if not (discovered or discarded): 
+                # Check if the goal and pnode belong to the same domain
+                goal_domain = self.goal_domain_dict.get(goal, "")
+                pnode_domain = self.pnode_domain_dict.get(pnode, "")
+                self.get_logger().info(f"DEBUG - Goal: {goal}, P-Node: {pnode}, Goal Domain: {goal_domain}, P-Node Domain: {pnode_domain}, Discovered: {discovered}, Discarded: {discarded}")
+                if not (discovered or discarded) and goal_domain == pnode_domain:
                     self.get_logger().info(f"DEBUG - Searching relation between {goal} and {pnode}")
                     #Get goal space:
                     service_name = f"goal/{goal}/send_space"
@@ -213,7 +266,12 @@ class ProspectionDrive(Drive, LTMSubscription):
                         self.discarded_knowledge[goal].extend(self.pnode_goals_dict[pnode])
 
                 else:
-                    self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} found before.")
+                    if discovered:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} found before.")
+                    if discarded:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} discarded before.")
+                    if goal_domain != pnode_domain:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} not found because they belong to different domains.")
 
     def traverse_neighbors(self, goal_name, downstream_goal, visited):
         """
