@@ -188,10 +188,11 @@ class Goal(CognitiveNode):
         self.point_msg=request.perception
         self.old_perception = Container.from_msg(request.old_perception)
         self.perception = Container.from_msg(request.perception)
+        update_space = request.update_space
         if inspect.iscoroutinefunction(self.get_reward):
-            reward, timestamp = await self.get_reward(self.old_perception, self.perception)
+            reward, timestamp = await self.get_reward(self.old_perception, self.perception, update_space=update_space)
         else:
-            reward, timestamp = self.get_reward(self.old_perception, self.perception)
+            reward, timestamp = self.get_reward(self.old_perception, self.perception, update_space=update_space)
         response.reward = reward
         if Time.from_msg(timestamp).nanoseconds > Time.from_msg(request.timestamp).nanoseconds:
             response.updated = True
@@ -215,7 +216,7 @@ class Goal(CognitiveNode):
         response.duplicate_goal_name = new_goal
         return response
 
-    async def get_reward(self, old_perception=None, perception=None):
+    async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
         Calculate the reward for the current sensor values.
 
@@ -621,7 +622,7 @@ class GoalObjectInBoxStandalone(Goal):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    async def get_reward(self, old_perception=None, perception=None):
+    async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
         Calculate the reward for the current sensor values.
 
@@ -878,7 +879,7 @@ class GoalMotiven(Goal):
             self.get_logger().info(f"RESETTING REWARD. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 0.0
 
-    def get_reward(self, old_perception=None, perception=None):
+    def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
         Returns the reward of the goal.
 
@@ -1017,7 +1018,7 @@ class GoalLearnedSpace(GoalMotiven):
         self.space.add_point(point, confidences)
         self.added_point = True
 
-    async def get_reward(self, old_perception=None, perception=None):
+    async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
         Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
 
@@ -1036,7 +1037,7 @@ class GoalLearnedSpace(GoalMotiven):
                 reward = self.reward
                 self.reward = 0.0
                 timestamp=self.reward_timestamp
-                if not isclose(reward, 0.0) or not isclose(drive_activation, 0.0): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
+                if update_space and (not isclose(reward, 0.0) or not isclose(drive_activation, 0.0)): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
                     self.update_space(perception, reward)
                 # return reward, timestamp
 
