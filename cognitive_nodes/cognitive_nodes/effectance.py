@@ -649,6 +649,46 @@ class GoalActivatePNode(GoalLearnedSpace):
         self.pnode_contains_client = ServiceClientAsync(self, ContainsSpace, f"pnode/{pnode}/contains_space", self.cbgroup_client) 
         self.pnode_confidence = self.create_subscription(SuccessRate, f'pnode/{str(pnode)}/success_rate', self.read_confidence, 1, callback_group=self.cbgroup_activation) #TODO: REMOVE?
 
+    def calculate_activation(self, perception, activation_list):
+        """
+        Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
+
+        :param perception: Unused perception.
+        :type perception: dict
+        :param activation_list: List of activations of the neighboring nodes.
+        :type activation_list: list
+        """        
+        goal_activations = {}
+        goal_timestamps = {}
+        domain_activations = {}
+        pnode_activations = {}
+        for node in activation_list.keys():
+            if activation_list[node]['data'].node_type == "Goal":
+                goal_activations[node] = activation_list[node]['data'].activation * self.attenuation
+                goal_timestamps[node] = activation_list[node]['data'].timestamp
+            if activation_list[node]['data'].node_type == "WorldModel":
+                domain_activations[node] = activation_list[node]['data'].activation
+            if activation_list[node]['data'].node_type == "PNode":
+                pnode_activations[node] = activation_list[node]['data'].activation
+        if goal_activations:
+            activation=max(zip(goal_activations.values(), goal_activations.keys()))
+            self.activation.activation=activation[0]
+            self.activation.timestamp=goal_timestamps[activation[1]]
+        else:
+            self.activation.activation = 0.0
+            self.activation.timestamp=self.get_clock().now().to_msg()
+
+        # Check domain activation
+        domain_activation_max = max(domain_activations.values()) if domain_activations else 1.0
+        if isclose(domain_activation_max, 0.0):
+            self.activation.activation = -1.0 # If the domain activation is zero, it means that the goal does not correspond to the current domain
+
+        # Check P-Node activation
+        pnode_activation_max = max(pnode_activations.values()) if pnode_activations else 0.0
+        available_delta = 1 - pnode_activation_max
+        if available_delta < self.threshold_delta:
+            self.activation.activation = -1.0 # If the P-Node activation is too high, it means that the goal is already achieved and must be inactive.
+
     def calculate_reward(self, drive_name = None):
         """
         This goal does not take into account a drive to obtain reward. This method overrides the default behavior.

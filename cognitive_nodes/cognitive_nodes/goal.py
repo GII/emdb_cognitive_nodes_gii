@@ -699,16 +699,19 @@ class GoalMotiven(Goal):
     """
     Class that implements a Goal that aims at minimizing a drive.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', attenuation=0.7, **params):
         """
-        Constructor of the GoalActivatePNode class.
+        Constructor of the GoalMotiven class.
 
         :param name: Name of the node.
         :type name: str
         :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
         :type class_name: str
+        :param attenuation: The attenuation factor for subgoals, defaults to 0.7.
+        :type attenuation: float
         """        
         super().__init__(name, class_name, **params)
+        self.attenuation = attenuation
         self.drive_inputs = {}
         self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)
@@ -847,7 +850,7 @@ class GoalMotiven(Goal):
                 goal_activations[node] = activation_list[node]['data'].activation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
             if activation_list[node]['data'].node_type == "Goal":
-                goal_activations[node] = activation_list[node]['data'].activation * 0.7 #Testing attenuation term, so that subgoals have progressively less activation
+                goal_activations[node] = activation_list[node]['data'].activation * self.attenuation
                 goal_timestamps[node] = activation_list[node]['data'].timestamp
             if activation_list[node]['data'].node_type == "WorldModel":
                 domain_activations[node] = activation_list[node]['data'].activation
