@@ -9,13 +9,14 @@ from cognitive_nodes.goal import GoalLearnedSpace
 from cognitive_nodes.policy import Policy
 from cognitive_nodes.space import PointBasedSpace
 from core.service_client import ServiceClientAsync
-from core.container import Container
+from core.container import Container, consolidate_containers
 from cognitive_nodes.episode import container_msg_to_episode, episode_obj_to_msg
 from core.utils import compare_perceptions
 
-from cognitive_node_interfaces.msg import SuccessRate
+from cognitive_node_interfaces.msg import SuccessRate, Activation
 from cognitive_node_interfaces.srv import GetActivation, SendSpace, GetEffects, ContainsSpace, AddPoints, LogExecution
 from cognitive_nodes.utils import PNodeSuccess, EpisodeSubscription
+from core_interfaces.msg import Container as ContainerMsg
 
 
 
@@ -530,7 +531,7 @@ class PolicyEffectanceExternal(Policy):
         response = await self.node_clients[logging_service].send_request_async(success=success)
         return response.added
     
-    async def create_goal(self, sensor, attribute, domain, point):
+    async def create_goal(self, sensor, attribute, domain):
         """
         Method that creates a goal related to an effect and registers it in the LTM.
 
@@ -538,10 +539,12 @@ class PolicyEffectanceExternal(Policy):
         :type sensor: str
         :param attribute: Attribute in the sensor to which the effect is related.
         :type attribute: str
+        :param domain: Domain to which the effect belongs.
+        :type domain: str
         """        
         self.get_logger().info(f"Creating goal linked to effect in sensor {sensor}, attribute {attribute}")
         goal_name=f"effect_{sensor}_{attribute}_{domain}"
-        neighbor_dict = {domain: "WorldModel"}
+        neighbor_dict = {domain: "WorldModel", sensor: "Perception"}
         neighbors = {
             "neighbors": [{"name": node, "node_type": node_type} for node, node_type in neighbor_dict.items()]
         }
@@ -549,7 +552,6 @@ class PolicyEffectanceExternal(Policy):
         goal_response = await self.create_node_client(name=goal_name, class_name=self.goal_class, parameters=params)
         if not goal_response.created:
             raise RuntimeError(f"Failed creation of Goal {goal_name}")
-
         return goal_name
     
     async def create_pnode(self, ident, point):
@@ -595,7 +597,7 @@ class PolicyEffectanceExternal(Policy):
         policy = episode.parent_policy
 
         # Create the goal and P-Node, and set up their relationships.
-        goal = await self.create_goal(sensor, attribute, world_model, episode.perception)
+        goal = await self.create_goal(sensor, attribute, world_model)
         ident = f"{world_model}__{goal}__{policy}"
         pnode_name = await self.create_pnode(ident, episode.old_perception)
         neighbor_dict = {world_model: "WorldModel", pnode_name: "PNode", goal: "Goal"}
@@ -853,6 +855,110 @@ class GoalRecreateEffect(GoalLearnedSpace):
         self.added_point = True # Placeholder to indicate that a point has been added to the goal. This is used to avoid adding points to the goal, since the space is defined by the effect itself.
         self.base_params.pop("space", None) # Remove the space from the base parameters to avoid conflicts with the space defined by the effect.
         self.base_params.update(dict(sensor=sensor, attribute=attribute)) # Add the sensor and attribute to the base parameters to be used by the goal.
+
+    def calculate_activation(self, perception, activation_list):
+        # Add the effect perception to the activation list (Change in effectance policy)
+        # Then, call the space with that perception and disable the goal if the space is active. Should this be done for all goals?
+        super().calculate_activation(perception, activation_list)
+
+
+
+    def create_activation_input(self, node: dict):
+        """
+        Adds a node to the activation inputs list.
+
+        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}.
+        :type node: dict
+        """        
+        name=node['name']
+        node_type=node['node_type']
+        if name not in self.activation_inputs:
+            if node_type != 'Perception':
+                subscriber=self.create_subscription(Activation, 'cognitive_node/' + str(name) + '/activation', self.read_activation_callback, 1, callback_group=self.cbgroup_activation)
+                data=Activation()
+                updated=False
+                new_input=dict(subscriber=subscriber, node_type=node_type, data=data, updated=updated)
+                self.activation_inputs[name]=new_input
+                self.get_logger().debug(f'Created new activation input: {name} of type {node_type}')
+            if node_type == "Perception":
+                subscriber=self.create_subscription(ContainerMsg, "perception/" + str(name) + "/value", self.read_perception_callback, 1, callback_group=self.cbgroup_activation)
+                data=None
+                updated=False
+                new_input=dict(subscriber=subscriber, data=data, updated=updated)
+                self.activation_inputs[name]=new_input
+                self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
+        else:
+            self.get_logger().error(f'Tried to add {name} to activation inputs more than once')
+
+    def read_perception_callback(self, msg: ContainerMsg):
+        """
+        Callback method that reads a perception and stores it in the activation inputs list.
+
+        :param msg: PerceptionStamped message that contains the perception and its timestamp.
+        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        """        
+        if msg.max_size>1:
+            self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')
+        elif msg.max_size==1:
+            node_name=msg.name
+            if node_name in self.activation_inputs:
+                if self.activation_inputs[node_name]['data'] is None:
+                    self.activation_inputs[node_name]['data']=Container.from_msg(msg)
+                else:
+                    self.activation_inputs[node_name]['data'].push_from_msg(msg)
+                self.activation_inputs[node_name]['updated']=True
+            else:
+                self.get_logger().error(
+                    "Received perception not registered in local perception cache!!!"
+                )
+        else:
+            self.get_logger().warn("Empty perception recieved in GoalRecreateEffect. Ignoring.")
+
+    def calculate_activation(self, perception, activation_list):
+        """
+        Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
+
+        :param perception: Unused perception.
+        :type perception: dict
+        :param activation_list: List of activations of the neighboring nodes.
+        :type activation_list: list
+        """        
+        goal_activations = {}
+        goal_timestamps = {}
+        domain_activations = {}
+        perceptions = {}
+        for node in activation_list.keys():
+            if isinstance(activation_list[node]['data'], Container):
+                perceptions[node] = activation_list[node]['data']
+            elif activation_list[node]['data'].node_type == "Goal":
+                goal_activations[node] = activation_list[node]['data'].activation * self.attenuation
+                goal_timestamps[node] = activation_list[node]['data'].timestamp
+            elif activation_list[node]['data'].node_type == "WorldModel":
+                domain_activations[node] = activation_list[node]['data'].activation
+                
+        if goal_activations:
+            activation=max(zip(goal_activations.values(), goal_activations.keys()))
+            self.activation.activation=activation[0]
+            self.activation.timestamp=goal_timestamps[activation[1]]
+        else:
+            self.activation.activation = 0.0
+            self.activation.timestamp=self.get_clock().now().to_msg()
+
+        # Check domain activation
+        domain_activation_max = max(domain_activations.values()) if domain_activations else 1.0
+        if isclose(domain_activation_max, 0.0):
+            self.activation.activation = -1.0 # If the domain activation is zero, it means that the goal does not correspond to the current domain
+
+        # Check space activation
+        perception = consolidate_containers(list(perceptions.values()), name="perception", container_type="perception") if perceptions else None
+        if perception is not None:
+            space_activation = self.space.get_probability(perception)
+            available_delta = 1 - space_activation
+            if available_delta < self.reward_delta_threshold:
+                self.activation.activation = -1.0 # If the space activation is too high, it means that the goal is already achieved and must be inactive
+        else:
+            self.get_logger().warn("No perception available to calculate space activation.")
+
 
     def _add_points(self, point, confidences):
             """

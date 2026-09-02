@@ -879,8 +879,8 @@ class GoalMotiven(Goal):
             self.get_logger().info(f"REWARD DETECTED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
             self.reward = 1.0
         elif self.drive_inputs[drive_name]['data'].evaluation > self.old_drive_inputs[drive_name]['data'].evaluation:
-            self.get_logger().info(f"RESETTING REWARD. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
-            self.reward = 0.0
+            self.get_logger().info(f"DRIVE VALUE INCREASED. Drive: {drive_name}, eval: {self.drive_inputs[drive_name]['data'].evaluation}, old_eval: {self.old_drive_inputs[drive_name]['data'].evaluation}")
+            self.reward = -1.0
 
     def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
@@ -1040,7 +1040,7 @@ class GoalLearnedSpace(GoalMotiven):
                 reward = self.reward
                 self.reward = 0.0
                 timestamp=self.reward_timestamp
-                if update_space and (not isclose(reward, 0.0) or not isclose(drive_activation, 0.0)): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
+                if update_space and not isclose(reward, 0.0): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
                     self.update_space(perception, reward)
                 # return reward, timestamp
 
@@ -1139,13 +1139,13 @@ class GoalLearnedSpace(GoalMotiven):
             expected_rewards = np.asarray(expected_rewards, dtype=float).reshape(-1)
 
         confidences = np.zeros(perceptions.size, dtype=float)
-        positive_reward = rewards > 0.01
-        negative_reward = ~positive_reward
+        positive_reward = rewards > 0.0
+        negative_reward = rewards < -0.0
         positive_expected = expected_rewards > self.reward_threshold
         negative_not_expected = expected_rewards > self.low_reward_threshold
 
         confidences[positive_reward] = 1.0
-        confidences[negative_reward & negative_not_expected] = -1.0
+        confidences[negative_reward] = -1.0
 
         # Perceptions with zero confidence correspond to the negatively rewarded perceptions that were expected to be negative, and are not added to the space.
         nonzero_mask = ~np.isclose(confidences, 0.0)
@@ -1159,7 +1159,7 @@ class GoalLearnedSpace(GoalMotiven):
 
         for idx in np.flatnonzero(positive_reward):
             self.history.appendleft(bool(positive_expected[idx])) # In positively rewarded cases, we consider the confidence to be True if the expected reward was also positive.
-        for idx in np.flatnonzero(confidences < 0.0):
+        for idx in np.flatnonzero(negative_not_expected):
             self.history.appendleft(False)
 
         self.confidence = sum(self.history) / self.history.maxlen
