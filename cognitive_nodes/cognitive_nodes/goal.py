@@ -1060,7 +1060,7 @@ class GoalLearnedSpace(GoalMotiven):
                 reward = 1.0 if high_exp_reward and high_reward_delta else 0.0
                 timestamp = drive_timestamp #TODO Check if we should use the drive timestamp or the current time
                 self.publish_success_rate()
-            return reward, timestamp
+            return max(0.0, reward), timestamp
         else:
             return reward, timestamp
 
