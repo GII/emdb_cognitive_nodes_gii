@@ -1033,12 +1033,13 @@ class GoalLearnedSpace(GoalMotiven):
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """
         reward=0.0
+        drive_reward = self.reward
+        self.reward = 0.0
         timestamp=self.get_clock().now().to_msg()
         if not compare_perceptions(old_perception, perception):
             drive_activation, drive_timestamp = self.get_drive_activation()
             if self.linked_drive(): # If drive is linked, reward is obtained from the drive evaluation
-                reward = self.reward
-                self.reward = 0.0
+                reward = drive_reward
                 timestamp=self.reward_timestamp
                 if update_space and not isclose(reward, 0.0): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
                     self.update_space(perception, reward)
@@ -1140,7 +1141,7 @@ class GoalLearnedSpace(GoalMotiven):
 
         confidences = np.zeros(perceptions.size, dtype=float)
         positive_reward = rewards > 0.0
-        negative_reward = rewards < -0.0
+        negative_reward = rewards < 0.0
         positive_expected = expected_rewards > self.reward_threshold
         negative_not_expected = expected_rewards > self.low_reward_threshold
 
@@ -1159,10 +1160,12 @@ class GoalLearnedSpace(GoalMotiven):
 
         for idx in np.flatnonzero(positive_reward):
             self.history.appendleft(bool(positive_expected[idx])) # In positively rewarded cases, we consider the confidence to be True if the expected reward was also positive.
-        for idx in np.flatnonzero(negative_not_expected):
-            self.history.appendleft(False)
+        for idx in np.flatnonzero(negative_reward):
+            if negative_not_expected[idx]:
+                self.history.appendleft(False)
 
-        self.confidence = sum(self.history) / self.history.maxlen
+        space_learnable_penalty = 1.0 if self.space.learnable() else 0.5
+        self.confidence = (sum(self.history) / self.history.maxlen) * space_learnable_penalty
         # Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence > self.min_confidence:
             self.learned_space = True
