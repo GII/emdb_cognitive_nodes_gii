@@ -4,6 +4,7 @@ from math import isclose
 import os
 import numpy as np
 import threading
+import copy
 from numpy.lib.recfunctions import structured_to_unstructured, require_fields
 import pandas as pd
 from sklearn import svm
@@ -745,8 +746,32 @@ class ANNSpace(PointBasedSpace):
     Use and train a Neural Network to calculate the activations.
     """
 
-    def __init__(self, max_data=2000, sampled_points=200, train_every=1, batch_size=25, epochs=1, output_activation="sigmoid", hidden_activation="relu", hidden_layers=[64, 32], learning_rate=0.05, validation_split=0.0, loss_function=nn.BCEWithLogitsLoss, val_function=nn.BCEWithLogitsLoss, model_file=None, device="cuda", **kwargs):
-        
+    def __init__(
+        self,
+        max_data=2000,
+        sampled_points=256,
+        train_every=32,
+        updates_per_train=4,
+        batch_size=25,
+        epochs=1,
+        bootstrap_updates=20,
+        min_warmup_samples=32,
+        warmup_activation = 0.1,
+        min_samples_per_class=8,
+        recent_fraction=0.5,
+        output_activation="sigmoid",
+        hidden_activation="relu",
+        hidden_layers=[32, 32],
+        learning_rate=0.001,
+        weight_decay=0.0001,
+        dropout=0.0,
+        validation_split=0.0,
+        loss_function=nn.BCEWithLogitsLoss,
+        val_function=nn.BCEWithLogitsLoss,
+        model_file=None,
+        device="cuda",
+        **kwargs,
+    ):
         # Device configuration
         if device not in ["cpu", "cuda"]:
             raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
@@ -766,6 +791,15 @@ class ANNSpace(PointBasedSpace):
         self.train_every = train_every
         self.new_points = 0
 
+        self.updates_per_train = updates_per_train
+        self.bootstrap_updates = bootstrap_updates
+        self.min_warmup_samples = min_warmup_samples
+        self.warmup_activation = warmup_activation
+        self.min_samples_per_class = min_samples_per_class
+        self.recent_fraction = recent_fraction
+        self.weight_decay = weight_decay
+        self.dropout = dropout
+
         # Model and optimizer will be initialized later
         self.configured = False
         self.model_file = model_file
@@ -774,10 +808,10 @@ class ANNSpace(PointBasedSpace):
         self.criterion = loss_function(reduction="none")
         self.val_criterion = val_function()
 
+        super().__init__(**kwargs)
+
         if self.model_file is not None:
             self.load_model()
-
-        super().__init__(**kwargs)
 
     def configure_model(self, input_length):
         """Configure the ANN model architecture and initialize the optimizer.
@@ -793,10 +827,15 @@ class ANNSpace(PointBasedSpace):
         self.model = ANNModel_classification(
             input_size=input_length,
             hidden_layers=self.hidden_layers,
-            hidden_activation=self.hidden_activation
+            hidden_activation=self.hidden_activation,
+            dropout=self.dropout,
         ).to(self.device)
         
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.optimizer = optim.AdamW(
+            self.model.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
         self.input_length = input_length
         self.configured = True
         
@@ -811,7 +850,10 @@ class ANNSpace(PointBasedSpace):
             self.input_length = checkpoint['input_length']
             self.hidden_layers = checkpoint['hidden_layers']
             self.hidden_activation = checkpoint['hidden_activation']
+            self.output_activation = checkpoint['output_activation']
+            self.dropout = checkpoint['dropout']
             self.learning_rate = checkpoint['learning_rate']
+            self.weight_decay = checkpoint['weight_decay']
             
             # Configure model architecture
             self.configure_model(self.input_length)
@@ -836,19 +878,22 @@ class ANNSpace(PointBasedSpace):
             self.logger.warning("Model not configured. Cannot save.")
             return False, ""
             
-        filepath = filepath if filepath.endswith('.pth') else filepath + '.pth'
         if filepath is None:
             self.logger.warning("No save path provided")
             return False, ""
+
+        filepath = filepath if filepath.endswith(".pth") else filepath + ".pth"
             
         checkpoint = {
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'input_length': self.input_length,
-            'hidden_layers': self.hidden_layers,
-            'hidden_activation': self.hidden_activation,
-            'output_activation': self.output_activation,
-            'learning_rate': self.learning_rate
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "input_length": self.input_length,
+            "hidden_layers": self.hidden_layers,
+            "hidden_activation": self.hidden_activation,
+            "output_activation": self.output_activation,
+            "learning_rate": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "dropout": self.dropout,
         }
         
         torch.save(checkpoint, filepath)
@@ -862,7 +907,11 @@ class ANNSpace(PointBasedSpace):
             weights = self.model.state_dict().copy()
             
             # Reinitialize optimizer
-            self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+            self.optimizer = optim.AdamW(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
             
             # Restore weights
             self.model.load_state_dict(weights)
@@ -905,7 +954,7 @@ class ANNSpace(PointBasedSpace):
         if len(y_train.shape) == 1:
             y_train = y_train.unsqueeze(1)
             
-        epochs = epochs or self.epochs
+        epochs = epochs if epochs is not None else self.epochs
         batch_size = batch_size or self.batch_size
         if reset_optimizer:
             self.reset_model_state()
@@ -970,10 +1019,12 @@ class ANNSpace(PointBasedSpace):
                 # Forward pass
                 outputs = self.model(batch_x)
                 per_sample_loss = self.criterion(outputs, batch_y)
-                loss = (per_sample_loss * batch_weights.unsqueeze(-1)).mean()
+                weighted_loss = per_sample_loss * batch_weights.unsqueeze(-1)
+                loss = weighted_loss.sum() / batch_weights.sum().clamp_min(1e-8)
                 
-                # Backward pass and optimization
+                # Backward pass and optimization with gradient clipping
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 
                 train_loss += loss.item()
@@ -1008,7 +1059,7 @@ class ANNSpace(PointBasedSpace):
                     best_val_loss = val_loss
                     patience_counter = 0
                     # Save best weights
-                    self.best_weights = self.model.state_dict().copy()
+                    self.best_weights = copy.deepcopy(self.model.state_dict().copy())
                     best_epoch = epoch
                 else:
                     patience_counter += 1
@@ -1048,7 +1099,16 @@ class ANNSpace(PointBasedSpace):
         
         self.model.eval()
         with torch.no_grad():
-            predictions = torch.sigmoid(self.model(x)) # TODO: Make activation function configurable
+            outputs = self.model(x)
+
+            if self.output_activation == "sigmoid":
+                predictions = torch.sigmoid(outputs)
+            elif self.output_activation == "linear":
+                predictions = outputs
+            else:
+                raise ValueError(
+                    f"Unsupported output activation: {self.output_activation}"
+                )
         
         predictions=predictions.squeeze().cpu().numpy()
         return predictions
@@ -1080,6 +1140,77 @@ class ANNSpace(PointBasedSpace):
             self.logger.error(f"Failed to set weights: {e}")
             return False
         
+    def _class_counts(self):
+        """Return the number of positive and non-positive stored samples."""
+        if self.size == 0:
+            return 0, 0
+
+        memberships = self.memberships.reshape(-1)
+        positive_count = int(np.count_nonzero(memberships > 0.0))
+        negative_count = int(np.count_nonzero(memberships <= 0.0))
+        return positive_count, negative_count
+
+    def _has_training_data(self):
+        """Return whether the space contains enough data to train a classifier."""
+        positive_count, negative_count = self._class_counts()
+
+        return (
+            self.size >= self.min_warmup_samples
+            and positive_count >= self.min_samples_per_class
+            and negative_count >= self.min_samples_per_class
+        )
+
+    def _excess_antipoints(self):
+        """ 
+        Return if there are too many antipoints in the space, which can mean that the space is not learnable.
+        """
+        positive_count, negative_count = self._class_counts()
+        return negative_count > positive_count * 10
+
+    def _sample_training_data(self):
+        """Sample a balanced batch from recent and replay data."""
+        ## WARNING: This method assumes that recent data will have both classes represented. 
+        # Altough the more realistic case is that recent data will be largely unbalanced, 
+        # this is a tradeoff to avoid the model being trained on only one class. 
+        first_data = max(0, self.size - self.max_data)
+        members = self.members[first_data:self.size]
+        memberships = self.memberships[first_data:self.size].reshape(-1)
+
+        labels = np.clip(memberships, 0.0, 1.0)
+
+        positive_indexes = np.flatnonzero(labels > 0.0)
+        negative_indexes = np.flatnonzero(labels <= 0.0)
+
+        if (
+            positive_indexes.size < self.min_samples_per_class
+            or negative_indexes.size < self.min_samples_per_class
+        ):
+            return None, None
+
+        sample_size = min(self.sampled_points, len(labels))
+        class_sample_size = max(1, sample_size // 2)
+
+        positive_sample_size = min(class_sample_size, positive_indexes.size)
+        negative_sample_size = min(class_sample_size, negative_indexes.size)
+
+        selected_positive = self.rng.choice(
+            positive_indexes,
+            size=positive_sample_size,
+            replace=False,
+        )
+        selected_negative = self.rng.choice(
+            negative_indexes,
+            size=negative_sample_size,
+            replace=False,
+        )
+
+        selected_indexes = np.concatenate(
+            [selected_positive, selected_negative]
+        )
+        self.rng.shuffle(selected_indexes)
+
+        return members[selected_indexes], labels[selected_indexes]
+    
     def add_point(self, perceptions, confidences):
         """
         Add a new point to the P-Node.
@@ -1093,51 +1224,81 @@ class ANNSpace(PointBasedSpace):
         """
         #self.semaphore.acquire()
         pos = super().add_point(perceptions, confidences)
-        self.new_points += len(pos) if isinstance(pos, list) else 1
 
-        if self.learnable():
-            # If the model is not built yet, build it
-            if self.configured == False:
-                input_shape = self.members.shape[1]  # Get the number of features from the point
-                self.configure_model(input_shape)
+        if isinstance(pos, np.ndarray):
+            self.new_points += len(pos)
+        elif isinstance(pos, (list, tuple)):
+            self.new_points += len(pos)
+        elif pos >= 0:
+            self.new_points += 1
 
-            if self.new_points>=self.train_every:
-                self.train_step()
-                self.new_points = 0 
+        points, antipoints = self._class_counts()
+        self.logger.info(f"Adding point(s): {self.new_points} new points, total points: {points}, total antipoints: {antipoints}")
+
+        if self._excess_antipoints():
+            self.logger.warning("Excess antipoints detected. Consider adjusting the training data.")
+            self.warmup_activation = 0.0  # Set to zero to disable activation while there are too many antipoints.
+
+        if not self._has_training_data():
+            return pos
+        
+
+        if not self.configured:
+            input_shape = self.members.shape[1]
+            self.configure_model(input_shape)
+
+            self.train_step(updates=self.bootstrap_updates)
+            self.new_points = 0
+        elif self.new_points >= self.train_every:
+            self.train_step()
+            self.new_points = 0
         return pos
 
-    def train_step(self):
-        self.logger.info(f"Training on {self.new_points}")
-        if self.size > self.max_data:
-            self.logger.info(f"Using last {self.max_data} points for training.")
-            first_data = self.size - self.max_data
-        else:
-            first_data = 0
+    def train_step(self, updates=None):
+        """Perform a controlled number of online training updates."""
+        if not self._has_training_data():
+            self.logger.info("Skipping training during warm-up.")
+            return
 
-        members = self.members[first_data : self.size]
-        memberships = self.memberships[first_data : self.size].copy()
-        memberships[memberships <= 0] = 0.0 # Clamp negative memberships to 0
-        members_size = len(members)
-        n_samples = min(self.sampled_points, members_size)
-        idx = self.rng.choice(members_size, size=n_samples, replace=False)
+        members, memberships = self._sample_training_data()
+        if members is None:
+            self.logger.info("Skipping training because both classes are not available.")
+            return
 
-        X = members[idx]
-        Y = memberships[idx]
-        n_0 = int(len(Y[Y == 0.0]))
-        n_1 = int(len(Y[Y == 1.0]))
+        memberships = memberships.reshape(-1)
+
+        n_0 = int(np.count_nonzero(memberships <= 0.0))
+        n_1 = int(np.count_nonzero(memberships > 0.0))
+
         weight_for_0 = (
-            (1 / n_0) * (X.shape[0] / 2.0) if n_0 != 0 else 1.0
+            len(memberships) / (2.0 * n_0)
+            if n_0 > 0
+            else 1.0
         )
         weight_for_1 = (
-            (1 / n_1) * (X.shape[0] / 2.0) if n_1 != 0 else 1.0
+            len(memberships) / (2.0 * n_1)
+            if n_1 > 0
+            else 1.0
         )
-        # This supports the case of points that have lower confidence (between 0 and 1) which are weighted with 1. While points and antipoints are balanced.
-        weights = np.ones_like(Y)
-        weights[Y == 0.0] = weight_for_0
-        weights[Y == 1.0] = weight_for_1
 
-        self.logger.info(f"Training data distribution: Total: {len(Y)}, 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}")
-        self._train(X, Y, validation_split=self.validation_split, sample_weights=weights, reset_optimizer=False)
+        weights = np.ones_like(memberships, dtype=np.float32)
+        weights[memberships <= 0.0] = weight_for_0
+        weights[memberships > 0.0] = weight_for_1
+
+        if updates is None:
+            updates = self.updates_per_train
+
+        self.logger.info(
+            f"Training data distribution: Total: {len(memberships)}, 0s={n_0}, 1s={n_1}, weights: 0={weight_for_0}, 1={weight_for_1}"
+            )
+
+        self._train(
+            members,
+            memberships,
+            epochs=updates,
+            sample_weights=weights,
+            reset_optimizer=False,
+        )
 
     def get_probability(self, perceptions):
         """
@@ -1157,7 +1318,7 @@ class ANNSpace(PointBasedSpace):
         if self.configured:
             activation = self._call(points)
         else:
-            activation = np.ones_like(points[:, 0], dtype=float)  # Default to 1.0 if model is not configured
+            activation = np.full(points.shape[0], self.warmup_activation, dtype=float)
         if self.parent_space:
             parent_act = self.parent_space.get_probability(perceptions)
             activation = np.minimum(activation, parent_act)
@@ -1169,8 +1330,13 @@ class ANNSpace(PointBasedSpace):
 class ANNModel_classification(nn.Module):
     """PyTorch neural network model."""
     
-    def __init__(self, input_size, hidden_layers=[128], 
-                 hidden_activation='relu'):
+    def __init__(
+            self, 
+            input_size, 
+            hidden_layers=[128], 
+            hidden_activation='relu',
+            dropout=0.0,
+        ):
         """Initialize the PyTorch neural network model with configurable architecture.
 
         :param input_size: Number of input features to the network.
@@ -1192,7 +1358,8 @@ class ANNModel_classification(nn.Module):
             self.layers.append(nn.Linear(prev_size, hidden_size))
             self.layers.append(nn.LayerNorm(hidden_size))
             self.layers.append(self._get_activation(hidden_activation))
-            self.layers.append(nn.Dropout(0.1))
+            if dropout > 0.0:
+                self.layers.append(nn.Dropout(0.1))
             prev_size = hidden_size
             
         # Output layer
