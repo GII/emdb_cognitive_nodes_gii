@@ -322,13 +322,13 @@ class PNode(CognitiveNode):
         :param confidence: Confidence value of the new point or anti-point.
         :type confidence: int
         """        
-        if confidence>0 and self.space.learnable():
+        if confidence>0 and self.space.configured:
             self.history.appendleft(True)
         else:
             self.history.appendleft(False)
         self.success_rate = sum(self.history)/self.history.maxlen
         self.calculate_metacognitive_params()
-        self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Learnable: {self.space.learnable()}")
+        self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Configured: {self.space.configured}")
 
 
 def main(args = None):

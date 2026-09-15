@@ -46,6 +46,14 @@ class Space(object):
         self.logger.info(f"CREATING SPACE: {ident}")
         self.rng = np.random.default_rng(self.random_seed)
 
+    @property
+    def configured(self):
+        """Flag to indicate if the space has been configured and is ready for use.
+
+        :raises NotImplementedError: The method has to be implemented in a child class. This is a placeholder to ensure that subclasses provide their own implementation of the 'configured' property.
+        """
+        raise NotImplementedError("Subclasses must implement the 'configured' property.")
+
 
 class PointBasedSpace(Space):
     """A state space based on points."""
@@ -399,8 +407,72 @@ class ClosestPointBasedSpace(PointBasedSpace):
             activation = np.minimum(activation, parent_act)
         return activation.reshape(-1)
 
+class RulesBasedSpace(PointBasedSpace):
+    """
+    Parent class for rule-based spaces. This class is intended to be subclassed by specific rule-based space implementations.
+    """
+    @property
+    def configured(self):
+        """
+        Check if the space has been configured and is ready for use.
 
-class CentroidPointBasedSpace(PointBasedSpace):
+        :return: True if the space is configured, False otherwise.
+        :rtype: bool
+        """
+        return self._data is not None and self._data.size > 0
+
+class ExactClosestPointBasedSpace(RulesBasedSpace):
+    """
+    Calculate the new activation value.
+
+    This activation value is for a given perception and it is calculated as follows:
+    - Calculate the closest point to the new point.
+    - If the closest point has a positive membership, and the distance between points is small, the membership of the new point is 1. Otherwise, the activation is -1.
+    """
+    
+    def get_probability(self, perceptions):
+        """
+        Calculate the new activation value for multiple perception rows.
+
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
+        """
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
+        # Obtain the members and memberships of the space
+        members = self.members
+        memberships = self.memberships
+        # Calculate the activation value
+        n_rows = points.shape[0]
+        # No stored points yet -> no activation
+        if members.size == 0 or memberships.size == 0:
+            activation = np.zeros(n_rows, dtype=float)
+        else:
+            # Compute pairwise distances: shape (n_rows, n_members)
+            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
+
+            pos_closest = np.argmin(distances, axis=1)  # one closest member per row
+            closest_dist = distances[np.arange(n_rows), pos_closest]
+            closest_membership = memberships[pos_closest]
+            matches = np.isclose(closest_dist, 0.0, atol=1e-6)  # Check if the distance is close to zero
+
+            activation = np.where(
+                (closest_membership > 0.0) & (matches),
+                1.0,
+                -1.0,
+            )
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation.reshape(-1)
+
+
+class CentroidPointBasedSpace(RulesBasedSpace):
     """
     Calculate the new activation value.
 
@@ -486,7 +558,7 @@ class CentroidPointBasedSpace(PointBasedSpace):
         return activation.reshape(-1)
 
 
-class NormalCentroidPointBasedSpace(PointBasedSpace):
+class NormalCentroidPointBasedSpace(RulesBasedSpace):
     """
     Calculate the new activation value.
 
@@ -591,6 +663,17 @@ class ActivatedDummySpace(PointBasedSpace):
     """
     A dummy space that always returns an activation of 1.0 for any perception.
     """
+    @property
+    def configured(self):
+        """
+        Check if the space has been configured and is ready for use.
+        Dummy space is always considered configured.
+
+        :return: True if the space is configured, False otherwise.
+        :rtype: bool
+        """
+        return True
+
     def add_point(self, perceptions, confidences):
         """
         Dummy method to add a point to the space.
@@ -628,7 +711,18 @@ class SVMSpace(PointBasedSpace):
         # random_seed is read from kwargs because super().__init__ (which stores
         # self.random_seed) has not run yet at this point.
         self.model = svm.SVC(kernel=kernel, degree=degree, max_iter=max_iter, random_state=resolve_seed(kwargs.get('random_seed')))
+        self._configured = False
         super().__init__(**kwargs)
+
+    @property
+    def configured(self):
+        """
+        Check if the space has been configured and is ready for use.
+
+        :return: True if the space is configured, False otherwise.
+        :rtype: bool
+        """
+        return self._configured
 
     def fit_and_score(self):
         """
@@ -706,6 +800,8 @@ class SVMSpace(PointBasedSpace):
         """
         pos = super().add_point(perceptions, confidences)
         if self.learnable():
+            if not self._configured:
+                self._configured = True
             self.fit_and_score()
         prediction = self.get_probability(perceptions)
         if ((confidences > 0.0) and (prediction <= 0.0)) or (
@@ -730,7 +826,7 @@ class SVMSpace(PointBasedSpace):
         else:
             return np.zeros(perceptions.size, dtype=float)
         # Calculate the activation value
-        if self.learnable():
+        if self._configured:
             output = self.model.decision_function(points)
             activation = np.minimum(np.full_like(output, 2.0), output) / 2.0
         else:
@@ -801,7 +897,7 @@ class ANNSpace(PointBasedSpace):
         self.dropout = dropout
 
         # Model and optimizer will be initialized later
-        self.configured = False
+        self._configured = False
         self.model_file = model_file
         self.model = None
         self.optimizer = None
@@ -812,6 +908,16 @@ class ANNSpace(PointBasedSpace):
 
         if self.model_file is not None:
             self.load_model()
+
+    @property
+    def configured(self):
+        """
+        Check if the space has been configured and is ready for use.
+
+        :return: True if the space is configured, False otherwise.
+        :rtype: bool
+        """
+        return self._configured
 
     def configure_model(self, input_length):
         """Configure the ANN model architecture and initialize the optimizer.
@@ -837,7 +943,7 @@ class ANNSpace(PointBasedSpace):
             weight_decay=self.weight_decay,
         )
         self.input_length = input_length
-        self.configured = True
+        self._configured = True
         
         self.logger.info(f"Model configured with input: {input_length}")
 
@@ -874,7 +980,7 @@ class ANNSpace(PointBasedSpace):
         :return: Tuple containing success status and the path where the model was saved.
         :rtype: tuple(bool, str)
         """        
-        if not self.configured:
+        if not self._configured:
             self.logger.warning("Model not configured. Cannot save.")
             return False, ""
             
@@ -902,7 +1008,7 @@ class ANNSpace(PointBasedSpace):
 
     def reset_model_state(self):
         """Reset optimizer state while keeping model weights."""
-        if self.configured:
+        if self._configured:
             # Save current weights
             weights = self.model.state_dict().copy()
             
@@ -1085,7 +1191,7 @@ class ANNSpace(PointBasedSpace):
         :return: Model predictions as a numpy array, or None if model is not configured.
         :rtype: np.ndarray or None
         """        
-        if not self.configured:
+        if not self._configured:
             return None
             
         # Convert to tensor if needed
@@ -1115,7 +1221,7 @@ class ANNSpace(PointBasedSpace):
     
     def get_weights(self):
         """Get the current model , uses the state dictionary."""
-        if not self.configured:
+        if not self._configured:
             self.logger.warning("Model not configured. Cannot get weights.")
             return None
         return self.model.state_dict()
@@ -1128,7 +1234,7 @@ class ANNSpace(PointBasedSpace):
         :return: True if weights were successfully loaded, False otherwise.
         :rtype: bool
         """        
-        if not self.configured:
+        if not self._configured:
             self.logger.warning("Model not configured. Cannot set weights.")
             return False
             
@@ -1243,7 +1349,7 @@ class ANNSpace(PointBasedSpace):
             return pos
         
 
-        if not self.configured:
+        if not self._configured:
             input_shape = self.members.shape[1]
             self.configure_model(input_shape)
 
@@ -1315,7 +1421,7 @@ class ANNSpace(PointBasedSpace):
         else:
             return np.zeros(perceptions.size, dtype=float)
         # Calculate the activation value
-        if self.configured:
+        if self._configured:
             activation = self._call(points)
         else:
             activation = np.full(points.shape[0], self.warmup_activation, dtype=float)

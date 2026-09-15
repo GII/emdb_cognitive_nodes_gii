@@ -1164,8 +1164,8 @@ class GoalLearnedSpace(GoalMotiven):
             if negative_not_expected[idx]:
                 self.history.appendleft(False)
 
-        space_learnable_penalty = 1.0 if self.space.learnable() else 0.5
-        self.confidence = (sum(self.history) / self.history.maxlen) * space_learnable_penalty
+        space_configured_penalty = 1.0 if self.space.configured else 0.5
+        self.confidence = (sum(self.history) / self.history.maxlen) * space_configured_penalty
         # Set goal as learned if min_confidence is exceeded
         if not self.learned_space and self.confidence > self.min_confidence:
             self.learned_space = True
