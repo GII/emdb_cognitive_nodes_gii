@@ -1,16 +1,25 @@
 """Knowledge-reuse intrinsic motivation and its ROS-free test harness."""
 
 import argparse
+import asyncio
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 try:
     from cognitive_nodes.drive import Drive
     from cognitive_nodes.utils import LTMSubscription
+    from core.container import Container
+    from core.service_client import ServiceClientAsync
+    from cognitive_node_interfaces.srv import (
+        GetActivation,
+        GetReusableKnowledge,
+        SendSpace,
+    )
 except ModuleNotFoundError as error:
-    if error.name != "rclpy":
+    if error.name not in {"rclpy", "cognitive_node_interfaces"}:
         raise
 
     class Drive:
@@ -19,8 +28,14 @@ except ModuleNotFoundError as error:
     class LTMSubscription:
         """Fallback mixin that keeps the schema harness ROS-free."""
 
+    Container = None
+    ServiceClientAsync = None
+    GetReusableKnowledge = None
+    SendSpace = None
+    GetActivation = None
 
-CHAIN_DEPTH_THRESHOLD = 2
+
+CHAIN_DEPTH_THRESHOLD = 3
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +152,51 @@ def build_goal_chains(ltm_dump):
     return dict(chains_by_drive)
 
 
+def _find_candidates(goal_chains, new_goals, depth_threshold):
+    """Find cross-domain goal pairs sharing a policy and a deep source chain."""
+    candidates = []
+    for drive_name, chains in goal_chains.items():
+        entries = list(
+            zip(
+                chains["goals"],
+                chains["domains"],
+                chains["policies"],
+                chains["pnodes"],
+                chains["depth"],
+            )
+        )
+        for goal, domain, policy, pnode, depth in entries:
+            if goal not in new_goals or policy is None:
+                continue
+            for (
+                candidate_goal,
+                candidate_domain,
+                candidate_policy,
+                candidate_pnode,
+                candidate_depth,
+            ) in entries:
+                if (
+                    candidate_goal != goal
+                    and candidate_policy == policy
+                    and candidate_domain != domain
+                    and depth - candidate_depth >= depth_threshold
+                ):
+                    candidates.append(
+                        {
+                            "drive": drive_name,
+                            "goal": goal,
+                            "domain": domain,
+                            "policy": policy,
+                            "pnode": pnode,
+                            "candidate_goal": candidate_goal,
+                            "candidate_domain": candidate_domain,
+                            "candidate_pnode": candidate_pnode,
+                            "candidate_depth": candidate_depth,
+                        }
+                    )
+    return candidates
+
+
 # ---------------------------------------------------------------------------
 # Knowledge-reuse drive
 # ---------------------------------------------------------------------------
@@ -150,6 +210,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         class_name="cognitive_nodes.drive.Drive",
         ltm_id=None,
         depth_threshold=CHAIN_DEPTH_THRESHOLD,
+        min_points=1,
         **params,
     ):
         super().__init__(name, class_name, **params)
@@ -157,69 +218,196 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             raise ValueError("No LTM input was provided.")
         if depth_threshold < 0:
             raise ValueError("depth_threshold must be non-negative.")
+        if min_points < 1:
+            raise ValueError("min_points must be at least one.")
 
         self.LTM_id = ltm_id
         self.depth_threshold = depth_threshold
+        self.min_points = min_points
         self.goal_chains = {}
         self.reuse_candidates = []
+        self.reusable_knowledge = {"instructions": {}, "candidates": []}
+        self._ltm_dump = {}
         self._known_goals = set()
+        self.get_reusable_knowledge_service = self.create_service(
+            GetReusableKnowledge,
+            f"drive/{name}/get_reusable_knowledge",
+            self.get_reusable_knowledge_callback,
+            callback_group=self.cbgroup_server,
+        )
         self.configure_ltm_subscription(ltm_id, self.cbgroup_activation)
 
-    def read_ltm(self, ltm_dump):
+    async def read_ltm(self, ltm_dump):
         """Refresh the schema and identify newly eligible reuse candidates."""
-        previous_goals = self._known_goals
+        self._ltm_dump = ltm_dump
         self.goal_chains = build_goal_chains(ltm_dump)
         current_goals = {
             goal
             for chains in self.goal_chains.values()
             for goal in chains["goals"]
         }
-        new_goals = current_goals - previous_goals
         self._known_goals = current_goals
-        self.reuse_candidates = self._find_candidates(new_goals)
+        # Re-evaluate all contexts so space scores and YAML instructions stay
+        # current even when an existing chain or P-Node changes.
+        self.reuse_candidates = self._find_candidates(current_goals)
+        self.reusable_knowledge = await self._select_reusable_knowledge(
+            self.reuse_candidates
+        )
+
+    async def _request_space(self, pnode_name):
+        service_name = f"pnode/{pnode_name}/send_space"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(
+                self, SendSpace, service_name, self.cbgroup_client
+            )
+        response = await self.node_clients[service_name].send_request_async()
+        return Container.from_msg(response.space)
+
+    async def _request_activations(self, pnode_name, space):
+        """Evaluate candidate points with the mature P-Node model."""
+        service_name = f"cognitive_node/{pnode_name}/get_activation"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(
+                self, GetActivation, service_name, self.cbgroup_client
+            )
+        response = await self.node_clients[service_name].send_request_async(
+            perception=space.to_msg()
+        )
+        return np.asarray(response.activation, dtype=float).reshape(-1)
+
+    @staticmethod
+    def _activation_mse(activations, memberships):
+        """Compare mature-model activations with candidate memberships in [0, 1]."""
+        activations = np.asarray(activations, dtype=float).reshape(-1)
+        expected = np.clip(
+            (np.asarray(memberships, dtype=float).reshape(-1) + 1.0) / 2.0,
+            0.0,
+            1.0,
+        )
+        if activations.size == 0 or activations.size != expected.size:
+            return float("inf")
+        return float(np.mean((activations - expected) ** 2))
+
+    async def _select_reusable_knowledge(self, candidates):
+        """Select the lowest-error source chain for each target goal."""
+        selected = {}
+        space_cache = {}
+        for candidate in candidates:
+            target = candidate["candidate_pnode"]
+            mature = candidate["pnode"]
+            if not target or not mature:
+                continue
+            try:
+                if target not in space_cache:
+                    space_cache[target] = await self._request_space(target)
+                target_space = space_cache[target]
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to read P-Node spaces for knowledge reuse: {error}"
+                )
+                continue
+            if target_space is None or target_space.size < self.min_points:
+                continue
+            try:
+                activations = await self._request_activations(mature, target_space)
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to evaluate candidate points with mature P-Node "
+                    f"{mature}: {error}"
+                )
+                continue
+            scored_candidate = dict(candidate)
+            scored_candidate["error"] = self._activation_mse(
+                activations, target_space.memberships
+            )
+            current = selected.get(scored_candidate["goal"])
+            if current is None or scored_candidate["error"] < current["error"]:
+                selected[scored_candidate["goal"]] = scored_candidate
+        return self._build_instructions(selected.values())
+
+    def _build_instructions(self, selected_candidates):
+        """Serialize selected source chains using experiment YAML conventions."""
+        instructions = {"Goal": [], "CNode": [], "PNode": []}
+        selected_candidates = list(selected_candidates)
+        for candidate in selected_candidates:
+            first_element = True
+            for goal_name in self._downstream_chain(candidate["goal"]):
+                if first_element:
+                    first_element = False
+                    continue
+                goal_data = _nodes(self._ltm_dump, "Goal").get(goal_name, {})
+                self._add_instruction(instructions, "Goal", goal_name, goal_data)
+                for cnode_name, cnode_data in self._context_cnodes(goal_name):
+                    self._add_instruction(
+                        instructions, "CNode", cnode_name, cnode_data
+                    )
+                    for pnode_name in _neighbor_names(cnode_data, "PNode"):
+                        pnode_data = _nodes(self._ltm_dump, "PNode").get(
+                            pnode_name, {}
+                        )
+                        self._add_instruction(
+                            instructions, "PNode", pnode_name, pnode_data
+                        )
+        return {"instructions": instructions, "candidates": selected_candidates}
+
+    def _downstream_chain(self, root_goal):
+        """Return all downstream goals, including the root, without cycles."""
+        upstream_goals = {
+            name: _neighbor_names(data, "Goal")
+            for name, data in _nodes(self._ltm_dump, "Goal").items()
+        }
+        downstream_goals = defaultdict(list)
+        for goal_name, upstream in upstream_goals.items():
+            for upstream_goal in upstream:
+                downstream_goals[upstream_goal].append(goal_name)
+
+        chain = []
+        visited = set()
+
+        def visit(goal_name):
+            if goal_name in visited:
+                return
+            visited.add(goal_name)
+            chain.append(goal_name)
+            for downstream_goal in downstream_goals.get(goal_name, ()):
+                visit(downstream_goal)
+
+        visit(root_goal)
+        return chain
+
+    def _context_cnodes(self, goal_name):
+        return [
+            (cnode_name, cnode_data)
+            for cnode_name, cnode_data in _nodes(self._ltm_dump, "CNode").items()
+            if goal_name in _neighbor_names(cnode_data, "Goal")
+        ]
+
+    @staticmethod
+    def _add_instruction(instructions, node_type, name, data):
+        if any(item["name"] == name for item in instructions[node_type]):
+            return
+        instructions[node_type].append(
+            {
+                "name": name,
+                "class_name": data.get("class_name", ""),
+                "parameters": {"neighbors": data.get("neighbors", [])},
+            }
+        )
+
+    def get_reusable_knowledge_callback(self, request, response):
+        response.instructions = yaml.safe_dump(
+            self.reusable_knowledge,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        return response
 
     def _find_candidates(self, new_goals):
-        """Find goal pairs sharing a policy while belonging to other domains."""
-        candidates = []
-        for drive_name, chains in self.goal_chains.items():
-            entries = zip(
-                chains["goals"],
-                chains["domains"],
-                chains["policies"],
-                chains["pnodes"],
-                chains["depth"],
-            )
-            entries = list(entries)
-            for goal, domain, policy, pnode, depth in entries:
-                if goal not in new_goals or policy is None:
-                    continue
-                for (
-                    candidate_goal,
-                    candidate_domain,
-                    candidate_policy,
-                    candidate_pnode,
-                    candidate_depth,
-                ) in entries:
-                    if (
-                        candidate_goal != goal
-                        and candidate_policy == policy
-                        and candidate_domain != domain
-                        and candidate_depth - depth > self.depth_threshold
-                    ):
-                        candidates.append(
-                            {
-                                "drive": drive_name,
-                                "goal": goal,
-                                "domain": domain,
-                                "policy": policy,
-                                "pnode": pnode,
-                                "candidate_goal": candidate_goal,
-                                "candidate_domain": candidate_domain,
-                                "candidate_pnode": candidate_pnode,
-                                "depth": candidate_depth,
-                            }
-                        )
-        return candidates
+        return _find_candidates(
+            self.goal_chains,
+            new_goals,
+            self.depth_threshold,
+        )
 
     def evaluate(self, perception=None):
         """Activate the drive when at least one reuse candidate is available."""
@@ -246,46 +434,191 @@ class DummyKnowledgeReuseNode:
         self.reuse_candidates = self._find_candidates()
 
     def _find_candidates(self):
-        candidates = []
-        for drive, chains in self.goal_chains.items():
-            entries = list(
-                zip(
-                    chains["goals"],
-                    chains["domains"],
-                    chains["policies"],
-                    chains["pnodes"],
-                    chains["depth"],
-                )
-            )
-            for goal, domain, policy, pnode, depth in entries:
-                for (
-                    candidate_goal,
-                    candidate_domain,
-                    candidate_policy,
-                    candidate_pnode,
-                    candidate_depth,
-                ) in entries:
-                    if (
-                        goal != candidate_goal
-                        and policy is not None
-                        and policy == candidate_policy
-                        and domain != candidate_domain
-                        and depth - candidate_depth > self.depth_threshold
-                    ):
-                        candidates.append(
-                            {
-                                "drive": drive,
-                                "goal": goal,
-                                "domain": domain,
-                                "policy": policy,
-                                "pnode": pnode,
-                                "candidate_goal": candidate_goal,
-                                "candidate_domain": candidate_domain,
-                                "candidate_pnode": candidate_pnode,
-                                "candidate_depth": candidate_depth,
-                            }
-                        )
-        return candidates
+        goals = {
+            goal
+            for chains in self.goal_chains.values()
+            for goal in chains["goals"]
+        }
+        return _find_candidates(
+            self.goal_chains,
+            goals,
+            self.depth_threshold,
+        )
+
+
+class DummyNode:
+    """Logger provider used when loading real spaces without ROS."""
+
+    def get_logger(self):
+        class Logger:
+            def debug(self, msg):
+                pass
+
+            def info(self, msg):
+                print(f"INFO: {msg}")
+
+            def warn(self, msg):
+                print(f"WARNING: {msg}")
+
+            warning = warn
+
+            def error(self, msg):
+                print(f"ERROR: {msg}")
+
+            def fatal(self, msg):
+                print(f"FATAL: {msg}")
+
+        return Logger()
+
+
+class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
+    """Run production knowledge-reuse logic against real P-Node models."""
+    from core.container import Container
+
+    def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=1):
+        self._ltm_dump = ltm_dump
+        self._spaces = pnode_spaces
+        self._mature_pnodes = mature_pnodes
+        self.min_points = min_points
+        self.depth_threshold = CHAIN_DEPTH_THRESHOLD
+        self.goal_chains = build_goal_chains(ltm_dump)
+        self.get_logger = DummyNode().get_logger
+
+    async def _request_space(self, pnode_name):
+        return self._spaces[pnode_name]
+
+    async def _request_activations(self, pnode_name, space):
+        points = space._data
+        return self._mature_pnodes[pnode_name].get_probability(points).reshape(-1)
+
+    async def compare(self, candidate_goals):
+        """Use the same candidate and selection methods as the live drive."""
+        candidates = [
+            candidate
+            for candidate in self._find_candidates(candidate_goals)
+            if candidate["candidate_pnode"] in self._spaces
+            and candidate["pnode"] in self._mature_pnodes
+        ]
+        return await self._select_reusable_knowledge(candidates)
+
+
+def _load_candidate_spaces(path, pnode_names, min_points, logger):
+    """Load only the first candidate rows needed from the TSV export."""
+    import pandas as pd
+    from core.container import Container
+    from cognitive_nodes.space import ANNSpace
+
+    header = pd.read_csv(path, sep="\t", nrows=0).columns.tolist()
+    usecols = [column for column in header if column not in {"Iteration"}]
+    rows_by_pnode = {}
+    for chunk in pd.read_csv(path, sep="\t", usecols=usecols, chunksize=10000):
+        for name in pnode_names - rows_by_pnode.keys():
+            rows = chunk[chunk["Ident"] == name].head(min_points)
+            if not rows.empty:
+                rows_by_pnode[name] = rows
+        if rows_by_pnode.keys() >= pnode_names:
+            break
+
+    spaces = {}
+    for name, rows in rows_by_pnode.items():
+        feature_labels = [
+            label for label in rows.columns if label not in {"Ident", "confidence"}
+        ]
+        values = rows[feature_labels + ["confidence"]].to_numpy(dtype=float)
+        data = Container(
+            name=f"{name}_data",
+            max_size=len(values),
+            container_type="space",
+            labels=feature_labels + ["confidence"],
+        )
+        data.push(values, timestamps=np.full(len(values), 0.0), src_labels=feature_labels + ["confidence"])
+        spaces[name] = ANNSpace.populate_space(data, logger=logger, device="cpu")
+    return spaces
+
+
+def _load_mature_pnodes(fixture_dir, logger):
+    import tempfile
+    import torch
+    import pandas as pd
+    from cognitive_nodes.space import ANNSpace
+
+    columns = pd.read_csv(
+        fixture_dir / "pnodes_content_0.txt",
+        sep="\t",
+        nrows=0,
+    ).columns.tolist()
+    input_labels = [
+        label for label in columns if label not in {"Iteration", "Ident", "confidence"}
+    ]
+    models = {}
+    for model_file in fixture_dir.glob("pnode_*.pth"):
+        name = model_file.stem
+        checkpoint = torch.load(model_file, map_location="cpu")
+        checkpoint["input_labels"] = input_labels
+        temporary_model = tempfile.NamedTemporaryFile(suffix=".pth", delete=False)
+        temporary_model.close()
+        torch.save(checkpoint, temporary_model.name)
+        models[name] = ANNSpace(
+            ident=name,
+            model_file=temporary_model.name,
+            logger=logger,
+            device="cpu",
+        )
+        Path(temporary_model.name).unlink()
+    return models
+
+
+async def comparison_main_async(fixture_dir, max_points=25):
+    """Run the ROS-free P-Node comparison and instruction-generation test."""
+    fixture_dir = Path(fixture_dir)
+    with (fixture_dir / "neighbors_full_test.yaml").open(encoding="utf-8") as fixture:
+        ltm_dump = yaml.safe_load(fixture)
+    logger = DummyNode().get_logger()
+    mature_pnodes = _load_mature_pnodes(fixture_dir, logger)
+    candidate_names = {
+        pnode
+        for chains in build_goal_chains(ltm_dump).values()
+        for pnode in chains["pnodes"]
+        if pnode
+    }
+    spaces = _load_candidate_spaces(
+        fixture_dir / "pnodes_content_0.txt",
+        candidate_names,
+        max_points,
+        logger,
+    )
+    test = KnowledgeReuseComparisonTest(
+        ltm_dump,
+        spaces,
+        mature_pnodes,
+        min_points=max_points,
+    )
+    candidate_goals = {
+        goal
+        for chains in test.goal_chains.values()
+        for goal in chains["goals"]
+    }
+    result = await test.compare(candidate_goals)
+    print(f"Loaded mature P-Nodes: {len(mature_pnodes)}")
+    print(f"Loaded candidate spaces: {len(spaces)}")
+    print(f"Selected candidates: {len(result['candidates'])}")
+    # Save test yaml instructions to a file for inspection if needed.
+    print(f"Saving reusable knowledge instructions to: {'reusable_knowledge_test.yaml'}")
+    with open("reusable_knowledge_test.yaml","w", encoding="utf-8") as output:
+        yaml.safe_dump(result, output, default_flow_style=False, sort_keys=False)
+
+
+def comparison_main():
+    parser = argparse.ArgumentParser(description="Run the ROS-free P-Node comparison test.")
+    parser.add_argument(
+        "fixture_dir",
+        nargs="?",
+        type=Path,
+        default=Path(__file__).parents[1] / "test" / "fixtures",
+    )
+    parser.add_argument("--max-points", type=int, default=25)
+    args = parser.parse_args()
+    asyncio.run(comparison_main_async(args.fixture_dir, args.max_points))
 
 
 def main():

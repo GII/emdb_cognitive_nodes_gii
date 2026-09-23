@@ -43,6 +43,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetInformation.srv"
   "srv/GetIteration.srv"
   "srv/GetKnowledge.srv"
+  "srv/GetReusableKnowledge.srv"
   "srv/GetReward.srv"
   "srv/GetSatisfaction.srv"
   "srv/GetSuccessRate.srv"

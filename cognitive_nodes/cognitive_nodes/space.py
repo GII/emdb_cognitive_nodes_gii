@@ -91,6 +91,19 @@ class PointBasedSpace(Space):
             return self._data.read(ordered=True).drop_sel(features=["confidence"]).values
         else:
             return np.array([])
+
+    @property
+    def feature_labels(self):
+        """
+        Get the feature labels of the space.
+
+        :return: The feature labels of the space.
+        :rtype: list
+        """
+        if self._data is not None:
+            return self._data.feature_labels[:-1]  # Exclude the last label which is "confidence"
+        else:
+            return []
     
     @property
     def memberships(self):
@@ -140,6 +153,7 @@ class PointBasedSpace(Space):
         :type size: int
         """
         labels = point.feature_labels + ["confidence"]
+        self.input_labels = point.feature_labels
         self._data = Container(name=self.ident + "_data", max_size=size, container_type="space", labels=labels)
 
     def learnable(self):
@@ -960,6 +974,7 @@ class ANNSpace(PointBasedSpace):
             self.dropout = checkpoint['dropout']
             self.learning_rate = checkpoint['learning_rate']
             self.weight_decay = checkpoint['weight_decay']
+            self.input_labels = checkpoint.get("input_labels")
             
             # Configure model architecture
             self.configure_model(self.input_length)
@@ -967,6 +982,14 @@ class ANNSpace(PointBasedSpace):
             # Load weights
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if self.input_labels:
+                point = Container(
+                    name=f"{self.ident}_perception",
+                    max_size=1,
+                    container_type="perception",
+                    labels=self.input_labels,
+                )
+                self.initialize_data_structure(point, self.real_size)
             
             self.logger.info(f"Model loaded from {self.model_file}")
         else:
@@ -1000,6 +1023,7 @@ class ANNSpace(PointBasedSpace):
             "learning_rate": self.learning_rate,
             "weight_decay": self.weight_decay,
             "dropout": self.dropout,
+            "input_labels": getattr(self, "input_labels", self.feature_labels),
         }
         
         torch.save(checkpoint, filepath)
