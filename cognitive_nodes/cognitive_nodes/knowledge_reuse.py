@@ -13,6 +13,7 @@ try:
     from cognitive_nodes.utils import LTMSubscription
     from core.container import Container
     from core.service_client import ServiceClientAsync
+    from cognitive_node_interfaces.msg import SuccessRate
     from cognitive_node_interfaces.srv import (
         GetActivation,
         GetReusableKnowledge,
@@ -33,6 +34,7 @@ except ModuleNotFoundError as error:
     GetReusableKnowledge = None
     SendSpace = None
     GetActivation = None
+    SuccessRate = None
 
 
 CHAIN_DEPTH_THRESHOLD = 3
@@ -229,6 +231,12 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.reusable_knowledge = {"instructions": {}, "candidates": []}
         self._ltm_dump = {}
         self._known_goals = set()
+        self._ltm_signature = None
+        self._candidate_cache = []
+        self._space_cache = {}
+        self._score_cache = {}
+        self._pending_pnode_subscriptions = {}
+        self._pending_pnode_candidates = set()
         self.get_reusable_knowledge_service = self.create_service(
             GetReusableKnowledge,
             f"drive/{name}/get_reusable_knowledge",
@@ -239,8 +247,14 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
 
     async def read_ltm(self, ltm_dump):
         """Refresh the schema and identify newly eligible reuse candidates."""
+        goal_chains = build_goal_chains(ltm_dump)
+        signature = self._knowledge_signature(ltm_dump, goal_chains)
+        if signature == self._ltm_signature:
+            self.get_logger().debug("Knowledge reuse: unchanged LTM state; skipping refresh.")
+            return
+        self._ltm_signature = signature
         self._ltm_dump = ltm_dump
-        self.goal_chains = build_goal_chains(ltm_dump)
+        self.goal_chains = goal_chains
         current_goals = {
             goal
             for chains in self.goal_chains.values()
@@ -249,10 +263,87 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self._known_goals = current_goals
         # Re-evaluate all contexts so space scores and YAML instructions stay
         # current even when an existing chain or P-Node changes.
-        self.reuse_candidates = self._find_candidates(current_goals)
-        self.reusable_knowledge = await self._select_reusable_knowledge(
-            self.reuse_candidates
+        candidates = self._find_candidates(current_goals)
+        self._candidate_cache = candidates
+        self.get_logger().info(
+            f"Knowledge reuse: LTM refresh found {len(current_goals)} goals and "
+            f"{len(candidates)} reuse candidates."
         )
+        active_targets = {
+            candidate["candidate_pnode"]
+            for candidate in candidates
+            if candidate["candidate_pnode"]
+        }
+        for pnode_name in list(self._pending_pnode_candidates - active_targets):
+            self._pending_pnode_candidates.discard(pnode_name)
+            self._unsubscribe_pending_pnode(pnode_name)
+        self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
+        self.reuse_candidates = self.reusable_knowledge["candidates"]
+        self.get_logger().info(
+            "Knowledge reuse: selected "
+            f"{len(self.reuse_candidates)} candidates and generated "
+            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            "instructions."
+        )
+
+    @staticmethod
+    def _knowledge_signature(ltm_dump, goal_chains):
+        """Build a stable signature for topology relevant to reuse."""
+        return (
+            yaml.safe_dump(
+                {
+                    "Goal": _nodes(ltm_dump, "Goal"),
+                    "CNode": _nodes(ltm_dump, "CNode"),
+                    "Policy": _nodes(ltm_dump, "Policy"),
+                    "WorldModel": _nodes(ltm_dump, "WorldModel"),
+                    "PNode": _nodes(ltm_dump, "PNode"),
+                    "chains": goal_chains,
+                },
+                sort_keys=True,
+            )
+        )
+
+    def _subscribe_pending_pnode(self, pnode_name):
+        if pnode_name in self._pending_pnode_subscriptions:
+            return
+        self.get_logger().info(
+            f"Knowledge reuse: waiting for more points from candidate P-Node "
+            f"{pnode_name}."
+        )
+        self._pending_pnode_subscriptions[pnode_name] = self.create_subscription(
+            SuccessRate,
+            f"/pnode/{pnode_name}/success_rate",
+            self._pending_pnode_success_callback,
+            1,
+            callback_group=self.cbgroup_activation,
+        )
+
+    def _unsubscribe_pending_pnode(self, pnode_name):
+        subscription = self._pending_pnode_subscriptions.pop(pnode_name, None)
+        if subscription is not None:
+            self.destroy_subscription(subscription)
+            self.get_logger().info(
+                f"Knowledge reuse: candidate P-Node {pnode_name} reached the "
+                "minimum point requirement."
+            )
+
+    async def _pending_pnode_success_callback(self, msg):
+        pnode_name = getattr(msg, "node_name", None)
+        if pnode_name not in self._pending_pnode_candidates:
+            return
+        self.get_logger().debug(
+            f"Knowledge reuse: received success-rate update for pending "
+            f"P-Node {pnode_name}; retrying candidate selection."
+        )
+        self._space_cache.pop(pnode_name, None)
+        self._score_cache = {
+            key: value
+            for key, value in self._score_cache.items()
+            if key[3] != pnode_name
+        }
+        candidates = self._candidate_cache
+        self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
+        self.reuse_candidates = self.reusable_knowledge["candidates"]
 
     async def _request_space(self, pnode_name):
         service_name = f"pnode/{pnode_name}/send_space"
@@ -289,24 +380,65 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         return float(np.mean((activations - expected) ** 2))
 
     async def _select_reusable_knowledge(self, candidates):
-        """Select the lowest-error source chain for each target goal."""
+        """Return finalized instructions and the best source per target goal.
+
+        ``goal`` identifies the deeper source chain to copy, while
+        ``candidate_goal`` identifies the shallow target chain receiving the
+        duplicated knowledge.
+        """
         selected = {}
-        space_cache = {}
         for candidate in candidates:
             target = candidate["candidate_pnode"]
             mature = candidate["pnode"]
             if not target or not mature:
                 continue
             try:
-                if target not in space_cache:
-                    space_cache[target] = await self._request_space(target)
-                target_space = space_cache[target]
+                if target not in self._space_cache:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: requesting space for candidate P-Node {target}."
+                    )
+                    self._space_cache[target] = await self._request_space(target)
+                else:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: using cached space for candidate P-Node {target}."
+                    )
+                target_space = self._space_cache[target]
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(
                     f"Failed to read P-Node spaces for knowledge reuse: {error}"
                 )
                 continue
-            if target_space is None or target_space.size < self.min_points:
+            if target_space is None:
+                continue
+            if target_space.size < self.min_points:
+                self.get_logger().debug(
+                    f"Knowledge reuse: candidate P-Node {target} has "
+                    f"{target_space.size}/{self.min_points} points."
+                )
+                self._pending_pnode_candidates.add(target)
+                self._subscribe_pending_pnode(target)
+                continue
+            self._pending_pnode_candidates.discard(target)
+            self._unsubscribe_pending_pnode(target)
+            space_signature = self._space_signature(target_space)
+            score_key = (
+                candidate["goal"],
+                candidate["candidate_goal"],
+                mature,
+                target,
+                space_signature,
+            )
+            if score_key in self._score_cache:
+                scored_candidate = self._score_cache[score_key]
+                self.get_logger().debug(
+                    f"Knowledge reuse: using cached score for mature P-Node "
+                    f"{mature} and candidate P-Node {target}: "
+                    f"{scored_candidate['error']:.6f}."
+                )
+                target_goal = scored_candidate["candidate_goal"]
+                current = selected.get(target_goal)
+                if current is None or scored_candidate["error"] < current["error"]:
+                    selected[target_goal] = scored_candidate
                 continue
             try:
                 activations = await self._request_activations(mature, target_space)
@@ -320,16 +452,55 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             scored_candidate["error"] = self._activation_mse(
                 activations, target_space.memberships
             )
-            current = selected.get(scored_candidate["goal"])
+            if not np.isfinite(scored_candidate["error"]):
+                self.get_logger().warning(
+                    f"Knowledge reuse: discarded non-finite score for mature "
+                    f"P-Node {mature} and candidate P-Node {target}."
+                )
+                continue
+            self.get_logger().info(
+                f"Knowledge reuse: compared mature P-Node {mature} with "
+                f"candidate P-Node {target}; MSE={scored_candidate['error']:.6f}."
+            )
+            self._score_cache[score_key] = scored_candidate
+            target_goal = scored_candidate["candidate_goal"]
+            current = selected.get(target_goal)
             if current is None or scored_candidate["error"] < current["error"]:
-                selected[scored_candidate["goal"]] = scored_candidate
+                if current is not None:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: replacing source goal "
+                        f"{current['goal']} for target goal {target_goal}; "
+                        f"MSE improved from {current['error']:.6f} to "
+                        f"{scored_candidate['error']:.6f}."
+                    )
+                selected[target_goal] = scored_candidate
+        self.get_logger().info(
+            f"Knowledge reuse: finalized {len(selected)} target goal selections."
+        )
         return self._build_instructions(selected.values())
+
+    @staticmethod
+    def _space_signature(space):
+        """Identify the point data used for a cached mature-model score."""
+        members = np.asarray(space.members, dtype=float)
+        memberships = np.asarray(space.memberships, dtype=float)
+        return (
+            int(space.size),
+            members.tobytes(),
+            memberships.tobytes(),
+        )
 
     def _build_instructions(self, selected_candidates):
         """Serialize selected source chains using experiment YAML conventions."""
-        instructions = {"Goal": [], "CNode": [], "PNode": []}
+        instructions = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+        policies = _nodes(self._ltm_dump, "Policy")
         selected_candidates = list(selected_candidates)
         for candidate in selected_candidates:
+            self.get_logger().debug(
+                f"Knowledge reuse: generating instructions by copying the chain "
+                f"from source goal {candidate['goal']} to target goal "
+                f"{candidate['candidate_goal']}."
+            )
             first_element = True
             for goal_name in self._downstream_chain(candidate["goal"]):
                 if first_element:
@@ -341,6 +512,11 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                     self._add_instruction(
                         instructions, "CNode", cnode_name, cnode_data
                     )
+                    for policy_name, policy_data in policies.items():
+                        if cnode_name in _neighbor_names(policy_data, "CNode"):
+                            self._add_instruction(
+                                instructions, "Policy", policy_name, policy_data
+                            )
                     for pnode_name in _neighbor_names(cnode_data, "PNode"):
                         pnode_data = _nodes(self._ltm_dump, "PNode").get(
                             pnode_name, {}
@@ -483,6 +659,10 @@ class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
         self.depth_threshold = CHAIN_DEPTH_THRESHOLD
         self.goal_chains = build_goal_chains(ltm_dump)
         self.get_logger = DummyNode().get_logger
+        self._space_cache = {}
+        self._score_cache = {}
+        self._pending_pnode_candidates = set()
+        self._pending_pnode_subscriptions = {}
 
     async def _request_space(self, pnode_name):
         return self._spaces[pnode_name]
@@ -490,6 +670,13 @@ class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
     async def _request_activations(self, pnode_name, space):
         points = space._data
         return self._mature_pnodes[pnode_name].get_probability(points).reshape(-1)
+
+    def _subscribe_pending_pnode(self, pnode_name):
+        """Keep the fixture harness independent of ROS subscriptions."""
+        self._pending_pnode_subscriptions[pnode_name] = None
+
+    def _unsubscribe_pending_pnode(self, pnode_name):
+        self._pending_pnode_subscriptions.pop(pnode_name, None)
 
     async def compare(self, candidate_goals):
         """Use the same candidate and selection methods as the live drive."""
