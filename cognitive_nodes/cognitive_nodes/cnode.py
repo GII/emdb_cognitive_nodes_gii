@@ -33,6 +33,11 @@ class CNode(CognitiveNode):
         self.history = deque(np.zeros(history_size), maxlen=history_size)
         self.track_competence = track_competence
         self.default_competence = default_competence
+        self.register_duplicate_parameters(
+            history_size=history_size,
+            track_competence=track_competence,
+            default_competence=default_competence,
+        )
         self.calculate_metacognitive_parameters()
         self.metacognitive_params["confidence"] = 1.0
 

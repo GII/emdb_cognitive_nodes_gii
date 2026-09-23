@@ -991,6 +991,16 @@ class SpaceEffectActive(PointBasedSpace):
         self.effect_label = f"{sensor}:{attribute}"
         super().__init__(**kwargs)
 
+    @property
+    def configured(self):
+        """
+        Indicates that the space is configured if the effect label is not None.
+
+        returns: True if the effect label is not None, False otherwise.
+        rtype: bool
+        """
+        return True if self.effect_label is not None else False
+
     def get_probability(self, perceptions):
         # Obtain the datapoint from the given perception (selects the appropriate features)
         points = self.data_from_perception(perceptions)

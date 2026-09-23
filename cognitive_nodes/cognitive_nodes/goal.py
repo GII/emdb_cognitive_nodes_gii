@@ -15,7 +15,7 @@ from core.utils import class_from_classname, compare_perceptions
 from core.container import Container
 
 from core_interfaces.msg import Container as ContainerMsg
-from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, DuplicateGoal, SendSpace, ContainsSpace
+from cognitive_node_interfaces.srv import AddPoints, SetActivation, IsReached, GetReward, SendSpace, ContainsSpace
 from cognitive_node_interfaces.msg import Evaluation, Perception, SuccessRate
 from cognitive_processes_interfaces.msg import ControlMsg
 from simulators_interfaces.srv import ObjectTooFar, CalculateClosestPosition, ObjectPickableWithTwoHands
@@ -42,9 +42,6 @@ class Goal(CognitiveNode):
         super().__init__(name, class_name, node_type=node_type, duplicate_from=None, **params)
         self.reward = 0.0
         self.duplicate_from = duplicate_from
-        if self.duplicate_from:
-            service_name = f"goal/{self.duplicate_from}/duplicate_goal" 
-            self.node_clients[service_name] = ServiceClientAsync(self, service_name=service_name, service_type=DuplicateGoal, callback_group=self.cbgroup_client)
         self.duplicate_count = 0
         self.base_params = params
 
@@ -88,8 +85,14 @@ class Goal(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
-        self.duplicate_goal_service = self.create_service(DuplicateGoal, 'goal/' + str(
-            name) + '/duplicate_goal', self.duplicate_goal_callback, callback_group=self.cbgroup_server)
+    def get_duplicate_parameters(self, include_neighbors=True):
+        """Include the mutable Goal constructor parameters in a duplicate."""
+        parameters = super().get_duplicate_parameters(include_neighbors)
+        base_params = copy(self.base_params)
+        if not include_neighbors:
+            base_params.pop("neighbors", None)
+        parameters.update(base_params)
+        return parameters
 
     def set_activation_callback(self, request, response):
         """
@@ -201,21 +204,6 @@ class Goal(CognitiveNode):
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(reward))
         return response
     
-    async def duplicate_goal_callback(self, request, response):
-        """
-        Callback method to duplicate the goal.
-
-        :param request: Request that includes the new perception to check the reward.
-        :type request: cognitive_node_interfaces.srv.DuplicateGoal.Request
-        :param response: Response that contais the name of the duplicated goal.
-        :type response: cognitive_node_interfaces.srv.DuplicateGoal.Response
-        :return: Response that contais the name of the duplicated goal.
-        :rtype: cognitive_node_interfaces.srv.DuplicateGoal.Response
-        """
-        new_goal = await self.duplicate_goal()
-        response.duplicate_goal_name = new_goal
-        return response
-
     async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
         Calculate the reward for the current sensor values.
@@ -244,27 +232,6 @@ class Goal(CognitiveNode):
         """
         return False
     
-    async def duplicate_goal(self):
-        """
-        Duplicates the current goal and returns the new goal instance.
-
-        :return: The duplicated goal instance.
-        :rtype: Goal
-        """
-        if self.duplicate_from is None:
-            new_goal = self.name + f"_dup_{self.duplicate_count}"
-            self.duplicate_count += 1
-            params = {"neighbors": self.neighbors, "duplicate_from": self.name, **self.base_params}
-            success = await self.create_node_client(name=new_goal, class_name=self.class_name, parameters=params)
-            if not success:
-                self.get_logger().error(f"Failed to duplicate goal {self.name} as {new_goal}")
-            self.get_logger().info(f"Duplicated goal {self.name} as {new_goal}")
-        else:
-            response = await self.node_clients[f"goal/{self.duplicate_from}/duplicate_goal"].send_request_async()
-            new_goal = response.duplicate_goal_name
-        return new_goal
-
-
 class GoalObjectInBoxStandalone(Goal):
     """
     Goal representing the desire of putting an object in a box.
@@ -712,6 +679,7 @@ class GoalMotiven(Goal):
         """        
         super().__init__(name, class_name, **params)
         self.attenuation = attenuation
+        self.register_duplicate_parameters(attenuation=attenuation)
         self.drive_inputs = {}
         self.old_drive_inputs = {}
         self.configure_activation_inputs(self.neighbors)
@@ -936,6 +904,16 @@ class GoalLearnedSpace(GoalMotiven):
             perception=perception,
             space_parameters=space_parameters,
             **params,
+        )
+        self.register_duplicate_parameters(
+            space_class=space_class,
+            history_size=history_size,
+            min_confidence=min_confidence,
+            ltm_id=ltm_id,
+            space_parameters=space_parameters,
+            reward_threshold=reward_threshold,
+            reward_delta_threshold=reward_delta_threshold,
+            low_reward_threshold=low_reward_threshold,
         )
         if space_class:
             # Forward the node's random_seed to the space (explicit

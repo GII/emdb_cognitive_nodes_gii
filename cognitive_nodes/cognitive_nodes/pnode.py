@@ -63,6 +63,11 @@ class PNode(CognitiveNode):
             SuccessRate, f'pnode/{str(name)}/success_rate', 0)
         self.configure_activation_inputs(self.neighbors)
         self.data_labels = []
+        self.register_duplicate_parameters(
+            space_class=space_class,
+            history_size=history_size,
+            space_parameters=space_parameters,
+        )
 
     def send_pnode_space_callback(self, request, response):
         """

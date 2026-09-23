@@ -10,12 +10,15 @@ import yaml
 
 try:
     from cognitive_nodes.drive import Drive
+    from cognitive_nodes.policy import Policy
     from cognitive_nodes.utils import LTMSubscription
     from core.container import Container
+    from core_interfaces.srv import UpdateNeighbor
     from core.service_client import ServiceClientAsync
     from cognitive_node_interfaces.msg import SuccessRate
     from cognitive_node_interfaces.srv import (
         GetActivation,
+        DuplicateNode,
         GetReusableKnowledge,
         SendSpace,
     )
@@ -26,6 +29,9 @@ except ModuleNotFoundError as error:
     class Drive:
         """Fallback base that keeps the schema harness ROS-free."""
 
+    class Policy:
+        """Fallback base that keeps the schema harness ROS-free."""
+
     class LTMSubscription:
         """Fallback mixin that keeps the schema harness ROS-free."""
 
@@ -34,6 +40,8 @@ except ModuleNotFoundError as error:
     GetReusableKnowledge = None
     SendSpace = None
     GetActivation = None
+    DuplicateNode = None
+    UpdateNeighbor = None
     SuccessRate = None
 
 
@@ -595,6 +603,141 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
 # Keep the shorter name available for configurations that name drives by their
 # intrinsic motivation instead of by their implementation detail.
 KnowledgeReuseDrive = DriveKnowledgeReuse
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-reuse policy
+# ---------------------------------------------------------------------------
+
+class PolicyKnowledgeReuse(Policy):
+    """Duplicate and reconnect the node chain returned by the reuse drive."""
+
+    _DUPLICABLE_TYPES = frozenset({"Goal", "PNode", "CNode"})
+
+    def __init__(
+        self,
+        name="policy_knowledge_reuse",
+        class_name="cognitive_nodes.policy.Policy",
+        ltm_id=None,
+        drive_name=None,
+        **params,
+    ):
+        if ltm_id is None:
+            raise ValueError("No LTM input was provided.")
+        if drive_name is None:
+            raise ValueError("No knowledge-reuse drive was provided.")
+        super().__init__(name, class_name, ltm_id=ltm_id, **params)
+        self.LTM_id = ltm_id
+        self.drive_name = drive_name
+        self.knowledge_client = ServiceClientAsync(
+            self,
+            GetReusableKnowledge,
+            f"drive/{drive_name}/get_reusable_knowledge",
+            callback_group=self.cbgroup_client,
+        )
+        self._neighbor_client = ServiceClientAsync(
+            self,
+            UpdateNeighbor,
+            f"{ltm_id}/update_neighbor",
+            self.cbgroup_client,
+        )
+        self.aliases = {}
+
+    async def execute_callback(self, request, response):
+        """Duplicate the reusable chain and restore its aliased neighbors."""
+        self.get_logger().info(f"Executing policy: {self.name}...")
+        knowledge_response = await self.knowledge_client.send_request_async()
+        try:
+            knowledge = yaml.safe_load(knowledge_response.instructions) or {}
+        except yaml.YAMLError as error:
+            self.get_logger().error(
+                f"Knowledge reuse instructions are not valid YAML: {error}"
+            )
+            response.policy = self.name
+            return response
+
+        if not isinstance(knowledge, dict):
+            self.get_logger().error(
+                "Knowledge reuse instructions must contain a mapping."
+            )
+            response.policy = self.name
+            return response
+        instructions = knowledge.get("instructions", {})
+        self.aliases = await self._duplicate_nodes(instructions)
+        await self._restore_neighbors(instructions, self.aliases)
+        response.policy = self.name
+        return response
+
+    async def _duplicate_nodes(self, instructions):
+        aliases = {}
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                if not source_name:
+                    self.get_logger().error(
+                        f"Knowledge reuse instruction for {node_type} has no name."
+                    )
+                    continue
+                duplicate_service = (
+                    f"cognitive_node/{source_name}/duplicate_node"
+                )
+                try:
+                    client = ServiceClientAsync(
+                        self,
+                        DuplicateNode,
+                        duplicate_service,
+                        self.cbgroup_client,
+                    )
+                    result = await client.send_request_async(
+                        name="",
+                        include_neighbors=False,
+                    )
+                except (RuntimeError, ValueError) as error:
+                    self.get_logger().error(
+                        f"Failed to duplicate {node_type} {source_name}: {error}"
+                    )
+                    continue
+                if not result.duplicated:
+                    self.get_logger().error(
+                        f"Node duplication failed for {node_type} {source_name}."
+                    )
+                    continue
+                aliases[source_name] = result.duplicate_node_name
+        return aliases
+
+    async def _restore_neighbors(self, instructions, aliases):
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                duplicate_name = aliases.get(source_name)
+                if not duplicate_name:
+                    continue
+                parameters = instruction.get("parameters", {})
+                neighbors = parameters.get("neighbors", [])
+                for neighbor in neighbors:
+                    if not isinstance(neighbor, dict):
+                        self.get_logger().error(
+                            f"Invalid neighbor in instruction for {source_name}."
+                        )
+                        continue
+                    neighbor_name = neighbor.get("name")
+                    neighbor_type = neighbor.get("node_type")
+                    if not neighbor_name or not neighbor_type:
+                        self.get_logger().error(
+                            f"Incomplete neighbor in instruction for {source_name}."
+                        )
+                        continue
+                    aliased_neighbor = aliases.get(neighbor_name, neighbor_name)
+                    result = await self._neighbor_client.send_request_async(
+                        node_name=duplicate_name,
+                        neighbor_name=aliased_neighbor,
+                        operation=True,
+                    )
+                    if not result.success:
+                        self.get_logger().error(
+                            f"Failed to link {duplicate_name} to "
+                            f"{aliased_neighbor}."
+                        )
 
 
 # ---------------------------------------------------------------------------
