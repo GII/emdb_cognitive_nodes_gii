@@ -1,14 +1,17 @@
 import rclpy
 import numpy as np
+import tempfile
+from pathlib import Path
 from collections import deque
 from rclpy.time import Time
 
+from core.service_client import ServiceClientAsync
 from core.cognitive_node import CognitiveNode
 from cognitive_nodes.space import PointBasedSpace
 from core.container import Container, consolidate_containers
 from core.utils import class_from_classname
 
-from cognitive_node_interfaces.srv import AddPoints, SendSpace, ContainsSpace, SaveModel
+from cognitive_node_interfaces.srv import AddPoints, SendSpace, ContainsSpace, SaveModel, LoadSpace
 from cognitive_node_interfaces.msg import SuccessRate
 from core_interfaces.msg import Container as ContainerMsg
 
@@ -40,14 +43,16 @@ class PNode(CognitiveNode):
         # Forward the node's random_seed to the space so a configured seed makes
         # the space reproducible too (an explicit random_seed in space_parameters
         # takes precedence).
-        space_kwargs = dict(space_parameters) if space_parameters else {}
-        space_kwargs.setdefault('random_seed', getattr(self, 'random_seed', 0))
+        space_parameters = dict(space_parameters) if space_parameters else {}
+        space_parameters.setdefault('random_seed', getattr(self, 'random_seed', 0))
         self.spaces = [space if space else class_from_classname(
-            space_class)(ident=name + " space", **space_kwargs)]
+            space_class)(ident=name + " space", **space_parameters)]
         self.space=self.spaces[0]
         self.added_point = False
         self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(
             name) + '/add_points', self.add_points_callback, callback_group=self.cbgroup_server)
+        self.load_points_service = self.create_service(LoadSpace, 'pnode/' + str(
+            name) + '/load_space', self.load_space_callback, callback_group=self.cbgroup_server)
         self.send_pnode_space_service = self.create_service(SendSpace, 'pnode/' + str(
             name) + '/send_space', self.send_pnode_space_callback, callback_group=self.cbgroup_server)
         self.contains_space_service = self.create_service(ContainsSpace, 'pnode/' + str(
@@ -125,6 +130,42 @@ class PNode(CognitiveNode):
             self.get_logger().info(f'Added: {len(points)} points with mean confidence: {np.mean(confidences)}')
         else:
             response.added = False
+        return response
+
+    def load_space_callback(self, request, response):
+        """
+        Callback method for loading a complete space into a specific P-Node.
+
+        :param request: The request that contains the space to be loaded.
+        :type request: cognitive_node_interfaces.srv.LoadSpace.Request
+        :param response: The response indicating if the space was loaded into the P-Node.
+        :type respone: core_interfaces.srv.LoadSpace.Response
+        :return: The response indicating if the space was loaded into the P-Node.
+        :rtype: cognitive_node_interfaces.srv.LoadSpace.Response
+        """
+        space_data = Container.from_msg(request.space)
+        if space_data is None:
+            self.get_logger().error(f"Failed to load space into P-Node {self.name}. Space data provided is empty or invalid.")
+            response.loaded=False
+            return response
+        if self.space and self.space._data is None:
+            space_data.name = self.space.ident + "_data"
+            self.space._data = space_data
+            self.get_logger().info(f"Loaded space into P-Node {self.name}.")
+            response.loaded=True
+        elif self.space and self.space._data is not None:
+            space_data.name = self.space.ident + "_data"
+            if self.space._data.feature_labels != space_data.feature_labels:
+                self.get_logger().error(f"Feature labels of the loaded space do not match the P-Node's space. P-Node feature labels: {self.space._data.feature_labels}, Loaded space feature labels: {space_data.feature_labels}")
+                response.loaded=False
+                return response
+            self.space._data.clear()
+            self.space._data.push(space_data)
+            self.get_logger().info(f"Loaded space into P-Node {self.name}.")
+            response.loaded=True
+        else:
+            self.get_logger().error(f"Failed to load space into P-Node {self.name}.")
+            response.loaded=False
         return response
     
     def add_points(self, points, confidences):
@@ -335,6 +376,57 @@ class PNode(CognitiveNode):
         self.calculate_metacognitive_params()
         self.get_logger().debug(f"DEBUG: Added point with confidence: {confidence}. New success rate: {self.success_rate}. Configured: {self.space.configured}")
 
+    async def duplicate_node(
+        self, name=None, parameters=None, include_neighbors=True
+    ):
+        """
+        Create a duplicate of this node through the commander. P-Nodes include the space model in the duplication process.
+
+        :param name: Optional name for the duplicate. If omitted, a unique
+            ``<name>_dup_<count>`` name is generated.
+        :param parameters: Optional constructor parameters that override the
+            node's duplicate defaults.
+        :return: The duplicate name, or ``None`` when creation fails.
+        """
+        parameters = dict(parameters or {})
+
+        duplicate_parameters = self.get_duplicate_parameters(include_neighbors)
+        space_parameters = duplicate_parameters.get("space_parameters", {})
+        caller_space_parameters = parameters.get("space_parameters", {})
+        space_parameters = {
+            **space_parameters,
+            **caller_space_parameters,
+        }
+        parameters["space_parameters"] = space_parameters
+
+
+        if self.space and hasattr(self.space, "save_model"):
+            try: 
+                temporary_model = tempfile.NamedTemporaryFile(suffix=".pth", delete=False)
+                temporary_model.close()
+                success, model_path = self.space.save_model(temporary_model.name)
+                if success:
+                    space_parameters["model_file"] = model_path
+                else:
+                    self.get_logger().error("Failed to save model for duplication.")
+
+            except Exception as e:
+                self.get_logger().error(f"Exception occurred while saving model: {e}")
+                Path(temporary_model.name).unlink()
+
+        parameters["space_parameters"] = space_parameters
+
+        name = await super().duplicate_node(name=name, parameters=parameters, include_neighbors=include_neighbors)
+
+        # Load points into the space of the P-Node
+        if name and self.space and self.space.size > 0:
+            service_name = f"pnode/{name}/load_space"
+            if service_name not in self.node_clients.keys():
+                self.node_clients[service_name] = ServiceClientAsync(self, LoadSpace, service_name, callback_group=self.cbgroup_client)
+            await self.node_clients[service_name].send_request_async(space=self.space.to_msg())
+        Path(temporary_model.name).unlink()
+        
+        return name
 
 def main(args = None):
     rclpy.init(args=args)
