@@ -728,14 +728,35 @@ class PolicyKnowledgeReuse(Policy):
                         )
                         continue
                     aliased_neighbor = aliases.get(neighbor_name, neighbor_name)
-                    result = await self._neighbor_client.send_request_async(
-                        node_name=duplicate_name,
-                        neighbor_name=aliased_neighbor,
-                        operation=True,
-                    )
+                    result = await self.add_neighbor_client(duplicate_name, aliased_neighbor)
                     if not result.success:
                         self.get_logger().error(
                             f"Failed to link {duplicate_name} to "
+                            f"{aliased_neighbor}."
+                        )
+        for instruction in instructions.get("Policy", []):
+            source_name = instruction.get("name")
+            parameters = instruction.get("parameters", {})
+            neighbors = parameters.get("neighbors", [])
+            for neighbor in neighbors:
+                if not isinstance(neighbor, dict):
+                    self.get_logger().error(
+                        f"Invalid neighbor in instruction for {source_name}."
+                    )
+                    continue
+                neighbor_name = neighbor.get("name")
+                neighbor_type = neighbor.get("node_type")
+                if not neighbor_name or not neighbor_type:
+                    self.get_logger().error(
+                        f"Incomplete neighbor in instruction for {source_name}."
+                    )
+                    continue
+                aliased_neighbor = aliases.get(neighbor_name, None)
+                if aliased_neighbor:
+                    result = await self.add_neighbor_client(source_name, aliased_neighbor)
+                    if not result.success:
+                        self.get_logger().error(
+                            f"Failed to link {source_name} to "
                             f"{aliased_neighbor}."
                         )
 

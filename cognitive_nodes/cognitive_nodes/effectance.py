@@ -638,18 +638,28 @@ class GoalActivatePNode(GoalLearnedSpace):
         """        
         super().__init__(name, class_name, threshold_delta=threshold_delta, **params)
         self.threshold_delta=threshold_delta
+        self.pnode_configured = False
         self.setup_pnode()
-    
+
     def setup_pnode(self):
         """
         Creates the required service clients and subscriptions.
-        """        
-        pnode = next((node["name"] for node in self.neighbors if node["node_type"] == "PNode"))
+        """
+        pnode_neighbors = [node["name"] for node in self.neighbors if node["node_type"] == "PNode"]
+        if len(pnode_neighbors) == 0:
+            self.get_logger().warn("GoalActivatePNode: No P-Node neighbor found. This goal requires a P-Node neighbor to function properly.")
+            return 
+        elif len(pnode_neighbors) > 1:
+            self.get_logger().warn("GoalActivatePNode: More than one P-Node neighbor found. This goal will use the first one found.")
+        
+        pnode = pnode_neighbors[0]
         self.pnode = pnode
         self.pnode_activation_client = ServiceClientAsync(self, GetActivation, f"cognitive_node/{pnode}/get_activation", self.cbgroup_client)
         self.pnode_space_client = ServiceClientAsync(self, SendSpace, f"pnode/{pnode}/send_space", self.cbgroup_client) 
         self.pnode_contains_client = ServiceClientAsync(self, ContainsSpace, f"pnode/{pnode}/contains_space", self.cbgroup_client) 
         self.pnode_confidence = self.create_subscription(SuccessRate, f'pnode/{str(pnode)}/success_rate', self.read_confidence, 1, callback_group=self.cbgroup_activation) #TODO: REMOVE?
+        self.pnode_configured = True
+
 
     def calculate_activation(self, perception, activation_list):
         """
@@ -781,6 +791,21 @@ class GoalActivatePNode(GoalLearnedSpace):
         response.reward = await self._get_reward(old_perception_msg=request.old_perception, perception_msg=request.perception)
         response.updated = True
         self.get_logger().info("Obtaining reward from " + self.name + " => " + str(response.reward))
+        return response
+
+    def add_neighbor_callback(self, request, response):
+        """
+        This method extends the base add_neighbor_callback by handling the the configuration of the P-Node.
+
+        :param request: The request that contains the neighbor info.
+        :type request: cognitive_node_interfaces.srv.AddNeighbor.Request
+        :param response: The response that indicates if the neighbor was added.
+        :type response: cognitive_node_interfaces.srv.AddNeighbor.Response
+        :return: The response that indicates if the neighbor was added.
+        :rtype: cognitive_node_interfaces.srv.AddNeighbor.Response
+        """        
+        response = super().add_neighbor_callback(request, response)
+        self.setup_pnode()
         return response
 
 
