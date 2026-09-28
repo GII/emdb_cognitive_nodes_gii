@@ -241,7 +241,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self._known_goals = set()
         self._ltm_signature = None
         self._candidate_cache = []
-        self._space_cache = {}
+        self._space_data_cache = {}
         self._score_cache = {}
         self._pending_pnode_subscriptions = {}
         self._pending_pnode_candidates = set()
@@ -343,7 +343,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             f"Knowledge reuse: received success-rate update for pending "
             f"P-Node {pnode_name}; retrying candidate selection."
         )
-        self._space_cache.pop(pnode_name, None)
+        self._space_data_cache.pop(pnode_name, None)
         self._score_cache = {
             key: value
             for key, value in self._score_cache.items()
@@ -353,7 +353,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
         self.reuse_candidates = self.reusable_knowledge["candidates"]
 
-    async def _request_space(self, pnode_name):
+    async def _request_space_data(self, pnode_name):
         service_name = f"pnode/{pnode_name}/send_space"
         if service_name not in self.node_clients:
             self.node_clients[service_name] = ServiceClientAsync(
@@ -362,7 +362,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         response = await self.node_clients[service_name].send_request_async()
         return Container.from_msg(response.space)
 
-    async def _request_activations(self, pnode_name, space):
+    async def _request_activations(self, pnode_name, space_data):
         """Evaluate candidate points with the mature P-Node model."""
         service_name = f"cognitive_node/{pnode_name}/get_activation"
         if service_name not in self.node_clients:
@@ -370,7 +370,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 self, GetActivation, service_name, self.cbgroup_client
             )
         response = await self.node_clients[service_name].send_request_async(
-            perception=space.to_msg()
+            perception=space_data.to_msg()
         )
         return np.asarray(response.activation, dtype=float).reshape(-1)
 
@@ -401,40 +401,40 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             if not target or not mature:
                 continue
             try:
-                if target not in self._space_cache:
+                if target not in self._space_data_cache:
                     self.get_logger().debug(
                         f"Knowledge reuse: requesting space for candidate P-Node {target}."
                     )
-                    self._space_cache[target] = await self._request_space(target)
+                    self._space_data_cache[target] = await self._request_space_data(target)
                 else:
                     self.get_logger().debug(
                         f"Knowledge reuse: using cached space for candidate P-Node {target}."
                     )
-                target_space = self._space_cache[target]
+                target_space_data = self._space_data_cache[target]
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(
                     f"Failed to read P-Node spaces for knowledge reuse: {error}"
                 )
                 continue
-            if target_space is None:
+            if target_space_data is None:
                 continue
-            if target_space.size < self.min_points:
+            if target_space_data.size < self.min_points:
                 self.get_logger().debug(
                     f"Knowledge reuse: candidate P-Node {target} has "
-                    f"{target_space.size}/{self.min_points} points."
+                    f"{target_space_data.size}/{self.min_points} points."
                 )
                 self._pending_pnode_candidates.add(target)
                 self._subscribe_pending_pnode(target)
                 continue
             self._pending_pnode_candidates.discard(target)
             self._unsubscribe_pending_pnode(target)
-            space_signature = self._space_signature(target_space)
+            space_data_signature = self._space_data_signature(target_space_data)
             score_key = (
                 candidate["goal"],
                 candidate["candidate_goal"],
                 mature,
                 target,
-                space_signature,
+                space_data_signature,
             )
             if score_key in self._score_cache:
                 scored_candidate = self._score_cache[score_key]
@@ -449,7 +449,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                     selected[target_goal] = scored_candidate
                 continue
             try:
-                activations = await self._request_activations(mature, target_space)
+                activations = await self._request_activations(mature, target_space_data)
             except (RuntimeError, ValueError) as error:
                 self.get_logger().error(
                     f"Failed to evaluate candidate points with mature P-Node "
@@ -458,7 +458,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 continue
             scored_candidate = dict(candidate)
             scored_candidate["error"] = self._activation_mse(
-                activations, target_space.memberships
+                activations, target_space_data.read().sel(features=["confidence"]).values.reshape(-1)
             )
             if not np.isfinite(scored_candidate["error"]):
                 self.get_logger().warning(
@@ -488,14 +488,12 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         return self._build_instructions(selected.values())
 
     @staticmethod
-    def _space_signature(space):
+    def _space_data_signature(space_data: Container):
         """Identify the point data used for a cached mature-model score."""
-        members = np.asarray(space.members, dtype=float)
-        memberships = np.asarray(space.memberships, dtype=float)
+        data = space_data.read().values.tobytes()
         return (
-            int(space.size),
-            members.tobytes(),
-            memberships.tobytes(),
+            int(space_data.size),
+            data,
         )
 
     def _build_instructions(self, selected_candidates):
@@ -823,16 +821,16 @@ class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
         self.depth_threshold = CHAIN_DEPTH_THRESHOLD
         self.goal_chains = build_goal_chains(ltm_dump)
         self.get_logger = DummyNode().get_logger
-        self._space_cache = {}
+        self._space_data_cache = {}
         self._score_cache = {}
         self._pending_pnode_candidates = set()
         self._pending_pnode_subscriptions = {}
 
-    async def _request_space(self, pnode_name):
+    async def _request_space_data(self, pnode_name):
         return self._spaces[pnode_name]
 
-    async def _request_activations(self, pnode_name, space):
-        points = space._data
+    async def _request_activations(self, pnode_name, space_data):
+        points = space_data
         return self._mature_pnodes[pnode_name].get_probability(points).reshape(-1)
 
     def _subscribe_pending_pnode(self, pnode_name):
@@ -883,7 +881,7 @@ def _load_candidate_spaces(path, pnode_names, min_points, logger):
             labels=feature_labels + ["confidence"],
         )
         data.push(values, timestamps=np.full(len(values), 0.0), src_labels=feature_labels + ["confidence"])
-        spaces[name] = ANNSpace.populate_space(data, logger=logger, device="cpu")
+        spaces[name] = data
     return spaces
 
 
