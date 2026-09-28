@@ -872,29 +872,15 @@ def _load_mature_pnodes(fixture_dir, logger):
     import pandas as pd
     from cognitive_nodes.space import ANNSpace
 
-    columns = pd.read_csv(
-        fixture_dir / "pnodes_content_0.txt",
-        sep="\t",
-        nrows=0,
-    ).columns.tolist()
-    input_labels = [
-        label for label in columns if label not in {"Iteration", "Ident", "confidence"}
-    ]
     models = {}
     for model_file in fixture_dir.glob("pnode_*.pth"):
         name = model_file.stem
-        checkpoint = torch.load(model_file, map_location="cpu")
-        checkpoint["input_labels"] = input_labels
-        temporary_model = tempfile.NamedTemporaryFile(suffix=".pth", delete=False)
-        temporary_model.close()
-        torch.save(checkpoint, temporary_model.name)
         models[name] = ANNSpace(
             ident=name,
-            model_file=temporary_model.name,
+            model_file=str(model_file),
             logger=logger,
             device="cpu",
         )
-        Path(temporary_model.name).unlink()
     return models
 
 
@@ -912,7 +898,7 @@ async def comparison_main_async(fixture_dir, max_points=25):
         if pnode
     }
     spaces = _load_candidate_spaces(
-        fixture_dir / "pnodes_content_0.txt",
+        fixture_dir / "pnodes_content_test.txt",
         candidate_names,
         max_points,
         logger,
