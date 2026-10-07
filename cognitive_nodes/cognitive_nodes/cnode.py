@@ -115,14 +115,15 @@ class CNode(CognitiveNode):
         :rtype: cognitive_node_interfaces.msg.Activation
         """
         if activation_list is None:
-            node_activations = []
-            neighbors_name = [
-                neighbor["name"]
+            activation_list = {}
+            neighbors = [
+                neighbor
                 for neighbor in self.neighbors
                 if neighbor["node_type"] != "Policy"
             ]
             perception_msg = perception.to_msg()
-            for name in neighbors_name:
+            for neighbor in neighbors:
+                name = neighbor["name"]
                 service_name = "cognitive_node/" + str(name) + "/get_activation"
                 if not service_name in self.node_clients:
                     self.node_clients[service_name] = ServiceClientAsync(
@@ -133,28 +134,77 @@ class CNode(CognitiveNode):
                     perception=perception_msg
                 )
                 self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}")
-                node_activations.append(activation.activation)
-            self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}")
-            activation_list = np.prod(node_activations)
-            self.activation.activation = float(np.max(activation_list))
-            self.activation.timestamp=self.get_clock().now().to_msg()
-            activation = await self.node_clients[service_name].send_request_async(
-                perception=perception_msg
-            )
-            self.get_logger().debug(f"DEBUG CNODE: Activation for {name}: {activation.activation}.")
-            node_activations.append(activation.activation)
-            self.get_logger().debug(f"DEBUG CNODE: Activation list {node_activations}.")
-            activation_list = np.prod(node_activations)
-            self.activation = np.max(activation_list)
+                activation_list[name] = {
+                    "node_type": neighbor["node_type"],
+                    "data": activation,
+                }
 
-            self.get_logger().debug(
-                f"{self.node_type} activation for {self.name} = {self.activation}"
-            )
-        else:
-            # Use existing logic based on a provided activation list
-            self.calculate_activation_prod(activation_list)
+        self.calculate_activation_prod(activation_list)
 
         return self.activation
+
+
+class CNodeWorldPreactive(CNode):
+
+    def __init__(
+        self,
+        name="cnode",
+        class_name="cognitive_nodes.cnode.CNodeWorldPreactive",
+        node_type="CNode",
+        history_size=40,
+        track_competence=True,
+        default_competence=1,
+        preactive_factor=0.5,
+        **params,
+    ):
+        super().__init__(
+            name,
+            class_name,
+            node_type,
+            history_size,
+            track_competence,
+            default_competence,
+            **params,
+        )
+        self.preactive_factor = preactive_factor
+        self.register_duplicate_parameters(preactive_factor=preactive_factor)
+
+    def calculate_activation_prod(self, activation_list):
+        """
+        Calculate activation while keeping inactive WorldModels preactive.
+
+        WorldModel activation is normally one of the factors in the product.
+        When it is inactive, use ``preactive_factor`` for that factor instead
+        of zero so the remaining activation inputs can still activate the
+        C-Node.
+        """
+        node_activations = []
+        pnode_activations = []
+        preactive = False
+        for node_name in activation_list:
+            node = activation_list[node_name]
+            activation = node["data"].activation
+            if node["node_type"] == "PNode":
+                pnode_activations.append(activation)
+            if node["node_type"] == "WorldModel" and np.isclose(activation, 0.0):
+                preactive = True
+            node_activations.append(activation)
+
+        timestamp, _ = self.extract_oldest_timestamp(activation_list)
+        if node_activations and not preactive:
+            activation = np.prod(node_activations)
+        elif node_activations and preactive:
+            if pnode_activations:
+                self.get_logger().debug("WorldModel inactive, using preactive factor for activation calculation.")
+                activation = np.prod(pnode_activations) * self.preactive_factor
+            else:
+                self.get_logger().warn("WorldModel inactive, but no PNode activations found. Using preactive factor for activation calculation.")
+                activation = self.preactive_factor
+        else:
+            self.get_logger().debug("Node activation list empty!!")
+            activation = 0.0
+        self.activation.activation = float(activation)
+        self.activation.timestamp = timestamp
 
 
 def main(args=None):

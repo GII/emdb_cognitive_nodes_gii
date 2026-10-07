@@ -190,6 +190,8 @@ def _find_candidates(goal_chains, new_goals, depth_threshold):
                     and candidate_policy == policy
                     and candidate_domain != domain
                     and depth - candidate_depth >= depth_threshold
+                    and candidate_depth == 1 # TODO: Current instuctions only support copying the complete chain. If the candidate depth is greater than 1, the instructions will not be valid.
+                                             # This is a temporary restriction until the instruction generation is updated to support copying partial chains.
                 ):
                     candidates.append(
                         {
@@ -352,6 +354,12 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         candidates = self._candidate_cache
         self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
         self.reuse_candidates = self.reusable_knowledge["candidates"]
+        self.get_logger().info(
+            "Knowledge reuse: selected "
+            f"{len(self.reuse_candidates)} candidates and generated "
+            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            "instructions."
+        )
 
     async def _request_space_data(self, pnode_name):
         service_name = f"pnode/{pnode_name}/send_space"
@@ -419,7 +427,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             if target_space_data is None:
                 continue
             if target_space_data.size < self.min_points:
-                self.get_logger().debug(
+                self.get_logger().info(
                     f"Knowledge reuse: candidate P-Node {target} has "
                     f"{target_space_data.size}/{self.min_points} points."
                 )
