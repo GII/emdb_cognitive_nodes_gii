@@ -238,7 +238,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.min_points = min_points
         self.goal_chains = {}
         self.reuse_candidates = []
-        self.reusable_knowledge = {"instructions": {}, "candidates": []}
+        self.reusable_knowledge = {"instructions": [], "candidates": []}
         self._ltm_dump = {}
         self._known_goals = set()
         self._ltm_signature = None
@@ -292,7 +292,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.get_logger().info(
             "Knowledge reuse: selected "
             f"{len(self.reuse_candidates)} candidates and generated "
-            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            f"{self._instruction_count(self.reusable_knowledge)} "
             "instructions."
         )
 
@@ -357,7 +357,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.get_logger().info(
             "Knowledge reuse: selected "
             f"{len(self.reuse_candidates)} candidates and generated "
-            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            f"{self._instruction_count(self.reusable_knowledge)} "
             "instructions."
         )
 
@@ -505,8 +505,15 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         )
 
     def _build_instructions(self, selected_candidates):
-        """Serialize selected source chains using experiment YAML conventions."""
-        instructions = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+        """Serialize selected source chains using experiment YAML conventions.
+
+        One entry is generated per selected candidate, so a source chain
+        reused for several target goals is copied once for each of them. The
+        source goal itself is not copied: its ``aliases`` map the source goal
+        and its P-Node to the target goal and P-Node, so the copied subgoals
+        are attached to the target context instead of the source one.
+        """
+        instructions = []
         policies = _nodes(self._ltm_dump, "Policy")
         selected_candidates = list(selected_candidates)
         for candidate in selected_candidates:
@@ -515,30 +522,47 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 f"from source goal {candidate['goal']} to target goal "
                 f"{candidate['candidate_goal']}."
             )
-            first_element = True
-            for goal_name in self._downstream_chain(candidate["goal"]):
-                if first_element:
-                    first_element = False
-                    continue
+            nodes = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+            for goal_name in self._downstream_chain(candidate["goal"])[1:]:
                 goal_data = _nodes(self._ltm_dump, "Goal").get(goal_name, {})
-                self._add_instruction(instructions, "Goal", goal_name, goal_data)
+                self._add_instruction(nodes, "Goal", goal_name, goal_data)
                 for cnode_name, cnode_data in self._context_cnodes(goal_name):
                     self._add_instruction(
-                        instructions, "CNode", cnode_name, cnode_data
+                        nodes, "CNode", cnode_name, cnode_data
                     )
                     for policy_name, policy_data in policies.items():
                         if cnode_name in _neighbor_names(policy_data, "CNode"):
                             self._add_instruction(
-                                instructions, "Policy", policy_name, policy_data
+                                nodes, "Policy", policy_name, policy_data
                             )
                     for pnode_name in _neighbor_names(cnode_data, "PNode"):
                         pnode_data = _nodes(self._ltm_dump, "PNode").get(
                             pnode_name, {}
                         )
                         self._add_instruction(
-                            instructions, "PNode", pnode_name, pnode_data
+                            nodes, "PNode", pnode_name, pnode_data
                         )
+            aliases = {candidate["goal"]: candidate["candidate_goal"]}
+            if candidate["pnode"] and candidate["candidate_pnode"]:
+                aliases[candidate["pnode"]] = candidate["candidate_pnode"]
+            instructions.append(
+                {
+                    "source_goal": candidate["goal"],
+                    "target_goal": candidate["candidate_goal"],
+                    "aliases": aliases,
+                    "nodes": nodes,
+                }
+            )
         return {"instructions": instructions, "candidates": selected_candidates}
+
+    @staticmethod
+    def _instruction_count(reusable_knowledge):
+        """Return the number of node instructions over all copy entries."""
+        return sum(
+            len(nodes)
+            for entry in reusable_knowledge["instructions"]
+            for nodes in entry["nodes"].values()
+        )
 
     def _downstream_chain(self, root_goal):
         """Return all downstream goals, including the root, without cycles."""
@@ -668,9 +692,25 @@ class PolicyKnowledgeReuse(Policy):
             )
             response.policy = self.name
             return response
-        instructions = knowledge.get("instructions", {})
-        self.aliases = await self._duplicate_nodes(instructions)
-        await self._restore_neighbors(instructions, self.aliases)
+        instructions = knowledge.get("instructions", [])
+        if not isinstance(instructions, list):
+            self.get_logger().error(
+                "Knowledge reuse instructions must contain a list of entries."
+            )
+            response.policy = self.name
+            return response
+        self.aliases = {}
+        for entry in instructions:
+            if not isinstance(entry, dict):
+                self.get_logger().error("Invalid knowledge reuse entry.")
+                continue
+            nodes = entry.get("nodes", {})
+            # Seed the aliases with the source-to-target root context, so the
+            # copied subgoals are attached to the target goal and P-Node.
+            aliases = dict(entry.get("aliases", {}))
+            aliases.update(await self._duplicate_nodes(nodes))
+            await self._restore_neighbors(nodes, aliases)
+            self.aliases[entry.get("target_goal")] = aliases
         response.policy = self.name
         return response
 
