@@ -708,17 +708,21 @@ class PolicyKnowledgeReuse(Policy):
         # Temporarily disable the LTM changes topic while duplicating nodes and
         # restoring neighbors, so the other nodes in the system do not see the intermediate state of the copied chain.
         await self.ltm_set_changes_topic_client.send_request_async(changes_topic=False)
-        for entry in instructions:
-            if not isinstance(entry, dict):
-                self.get_logger().error("Invalid knowledge reuse entry.")
-                continue
-            nodes = entry.get("nodes", {})
-            # Seed the aliases with the source-to-target root context, so the
-            # copied subgoals are attached to the target goal and P-Node.
-            aliases = dict(entry.get("aliases", {}))
-            aliases.update(await self._duplicate_nodes(nodes))
-            await self._restore_neighbors(nodes, aliases)
-        await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
+        try:
+            for entry in instructions:
+                if not isinstance(entry, dict):
+                    self.get_logger().error("Invalid knowledge reuse entry.")
+                    continue
+                nodes = entry.get("nodes", {})
+                # Seed the aliases with the source-to-target root context, so the
+                # copied subgoals are attached to the target goal and P-Node.
+                aliases = dict(entry.get("aliases", {}))
+                aliases.update(await self._duplicate_nodes(nodes))
+                await self._restore_neighbors(nodes, aliases)
+        finally:
+            # Re-enable the topic even if copying fails halfway; otherwise the
+            # cognitive processes would stop receiving LTM changes.
+            await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
         response.policy = self.name
         return response
 
