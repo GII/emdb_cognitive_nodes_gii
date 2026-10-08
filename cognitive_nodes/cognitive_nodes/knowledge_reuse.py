@@ -13,7 +13,7 @@ try:
     from cognitive_nodes.policy import Policy
     from cognitive_nodes.utils import LTMSubscription
     from core.container import Container
-    from core_interfaces.srv import UpdateNeighbor
+    from core_interfaces.srv import UpdateNeighbor, SetChangesTopic
     from core.service_client import ServiceClientAsync
     from cognitive_node_interfaces.msg import SuccessRate
     from cognitive_node_interfaces.srv import (
@@ -42,6 +42,7 @@ except ModuleNotFoundError as error:
     GetActivation = None
     DuplicateNode = None
     UpdateNeighbor = None
+    SetChangesTopic = None
     SuccessRate = None
 
 
@@ -659,6 +660,12 @@ class PolicyKnowledgeReuse(Policy):
         super().__init__(name, class_name, ltm_id=ltm_id, **params)
         self.LTM_id = ltm_id
         self.drive_name = drive_name
+        self.ltm_set_changes_topic_client = ServiceClientAsync(
+            self,
+            SetChangesTopic,
+            f"{ltm_id}/set_changes_topic",
+            callback_group=self.cbgroup_client,
+        )
         self.knowledge_client = ServiceClientAsync(
             self,
             GetReusableKnowledge,
@@ -698,6 +705,9 @@ class PolicyKnowledgeReuse(Policy):
             )
             response.policy = self.name
             return response
+        # Temporarily disable the LTM changes topic while duplicating nodes and
+        # restoring neighbors, so the other nodes in the system do not see the intermediate state of the copied chain.
+        await self.ltm_set_changes_topic_client.send_request_async(changes_topic=False)
         for entry in instructions:
             if not isinstance(entry, dict):
                 self.get_logger().error("Invalid knowledge reuse entry.")
@@ -708,6 +718,7 @@ class PolicyKnowledgeReuse(Policy):
             aliases = dict(entry.get("aliases", {}))
             aliases.update(await self._duplicate_nodes(nodes))
             await self._restore_neighbors(nodes, aliases)
+        await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
         response.policy = self.name
         return response
 
