@@ -13,7 +13,7 @@ try:
     from cognitive_nodes.policy import Policy
     from cognitive_nodes.utils import LTMSubscription
     from core.container import Container
-    from core_interfaces.srv import UpdateNeighbor, SetChangesTopic
+    from core_interfaces.srv import SetChangesTopic
     from core.service_client import ServiceClientAsync
     from cognitive_node_interfaces.msg import SuccessRate
     from cognitive_node_interfaces.srv import (
@@ -41,7 +41,6 @@ except ModuleNotFoundError as error:
     SendSpace = None
     GetActivation = None
     DuplicateNode = None
-    UpdateNeighbor = None
     SetChangesTopic = None
     SuccessRate = None
 
@@ -510,9 +509,10 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
 
         One entry is generated per selected candidate, so a source chain
         reused for several target goals is copied once for each of them. The
-        source goal itself is not copied: its ``aliases`` map the source goal
-        and its P-Node to the target goal and P-Node, so the copied subgoals
-        are attached to the target context instead of the source one.
+        source goal itself is not copied: its ``aliases`` map the source goal,
+        its P-Node and its domain (WorldModel) to the target goal, P-Node and
+        domain, so the copied nodes are attached to the target context instead
+        of the source one.
         """
         instructions = []
         policies = _nodes(self._ltm_dump, "Policy")
@@ -543,7 +543,9 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                         self._add_instruction(
                             nodes, "PNode", pnode_name, pnode_data
                         )
-            aliases = {candidate["goal"]: candidate["candidate_goal"], candidate["domain"]: candidate["candidate_domain"]}
+            aliases = {candidate["goal"]: candidate["candidate_goal"]}
+            if candidate["domain"] and candidate["candidate_domain"]:
+                aliases[candidate["domain"]] = candidate["candidate_domain"]
             if candidate["pnode"] and candidate["candidate_pnode"]:
                 aliases[candidate["pnode"]] = candidate["candidate_pnode"]
             instructions.append(
@@ -643,8 +645,6 @@ KnowledgeReuseDrive = DriveKnowledgeReuse
 class PolicyKnowledgeReuse(Policy):
     """Duplicate and reconnect the node chain returned by the reuse drive."""
 
-    _DUPLICABLE_TYPES = frozenset({"Goal", "PNode", "CNode"})
-
     def __init__(
         self,
         name="policy_knowledge_reuse",
@@ -671,12 +671,6 @@ class PolicyKnowledgeReuse(Policy):
             GetReusableKnowledge,
             f"drive/{drive_name}/get_reusable_knowledge",
             callback_group=self.cbgroup_client,
-        )
-        self._neighbor_client = ServiceClientAsync(
-            self,
-            UpdateNeighbor,
-            f"{ltm_id}/update_neighbor",
-            self.cbgroup_client,
         )
 
     async def execute_callback(self, request, response):
@@ -706,7 +700,8 @@ class PolicyKnowledgeReuse(Policy):
             response.policy = self.name
             return response
         # Temporarily disable the LTM changes topic while duplicating nodes and
-        # restoring neighbors, so the other nodes in the system do not see the intermediate state of the copied chain.
+        # restoring neighbors, so the other nodes in the system do not see the
+        # intermediate state of the copied chain.
         await self.ltm_set_changes_topic_client.send_request_async(changes_topic=False)
         try:
             for entry in instructions:
@@ -872,7 +867,6 @@ class DummyNode:
 
 class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
     """Run production knowledge-reuse logic against real P-Node models."""
-    from core.container import Container
 
     def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=1):
         self._ltm_dump = ltm_dump
