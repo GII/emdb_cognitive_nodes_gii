@@ -542,7 +542,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                         self._add_instruction(
                             nodes, "PNode", pnode_name, pnode_data
                         )
-            aliases = {candidate["goal"]: candidate["candidate_goal"]}
+            aliases = {candidate["goal"]: candidate["candidate_goal"], candidate["domain"]: candidate["candidate_domain"]}
             if candidate["pnode"] and candidate["candidate_pnode"]:
                 aliases[candidate["pnode"]] = candidate["candidate_pnode"]
             instructions.append(
@@ -671,7 +671,6 @@ class PolicyKnowledgeReuse(Policy):
             f"{ltm_id}/update_neighbor",
             self.cbgroup_client,
         )
-        self.aliases = {}
 
     async def execute_callback(self, request, response):
         """Duplicate the reusable chain and restore its aliased neighbors."""
@@ -699,7 +698,6 @@ class PolicyKnowledgeReuse(Policy):
             )
             response.policy = self.name
             return response
-        self.aliases = {}
         for entry in instructions:
             if not isinstance(entry, dict):
                 self.get_logger().error("Invalid knowledge reuse entry.")
@@ -710,7 +708,6 @@ class PolicyKnowledgeReuse(Policy):
             aliases = dict(entry.get("aliases", {}))
             aliases.update(await self._duplicate_nodes(nodes))
             await self._restore_neighbors(nodes, aliases)
-            self.aliases[entry.get("target_goal")] = aliases
         response.policy = self.name
         return response
 
@@ -728,13 +725,14 @@ class PolicyKnowledgeReuse(Policy):
                     f"cognitive_node/{source_name}/duplicate_node"
                 )
                 try:
-                    client = ServiceClientAsync(
-                        self,
-                        DuplicateNode,
-                        duplicate_service,
-                        self.cbgroup_client,
-                    )
-                    result = await client.send_request_async(
+                    if duplicate_service not in self.node_clients:
+                        self.node_clients[duplicate_service] = ServiceClientAsync(
+                            self,
+                            DuplicateNode,
+                            duplicate_service,
+                            self.cbgroup_client,
+                        )
+                    result = await self.node_clients[duplicate_service].send_request_async(
                         name="",
                         include_neighbors=False,
                     )
