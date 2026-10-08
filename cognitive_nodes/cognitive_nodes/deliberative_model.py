@@ -263,7 +263,7 @@ class ANNLearner(Learner):
 
     def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', 
                  hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, loss_function=nn.MSELoss, val_function=nn.L1Loss, 
-                 model_file=None, device='cuda', **params):
+                 model_file=None, device='auto', **params):
         """Initialize the ANNLearner with PyTorch-based neural network configuration.
 
         :param node: The cognitive node that uses this learner.
@@ -288,16 +288,19 @@ class ANNLearner(Learner):
         :type val_function: type, optional
         :param model_file: Path to pre-trained model file to load, defaults to None
         :type model_file: str, optional
-        :param device: Device to use for training ('cpu' or 'cuda'), defaults to 'cpu'
+        :param device: Device to use for training ('auto', 'cpu' or 'cuda'); 'auto' uses CUDA when
+            available and the CPU otherwise, defaults to 'auto'
         :type device: str, optional
         :param params: Additional keyword parameters reserved for future use.
         :type params: dict
         """
         super().__init__(node, buffer, **params)
         
-        # Device configuration
+        # Device configuration: "auto" uses CUDA when available and the CPU otherwise.
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         if device not in ["cpu", "cuda"]:
-            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+            raise ValueError("Invalid device specified. Use 'auto', 'cpu' or 'cuda'.")
         elif device == "cuda" and not torch.cuda.is_available():
             raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
         self.device = device
