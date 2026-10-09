@@ -212,13 +212,7 @@ class PNode(CognitiveNode):
                 return self.activation
             else:
                 consolidate_containers(data, write_container=self.perception)
-            try:
-                space_activation = self.space.get_probability(self.perception) if self.space else np.zeros(len(self.perception))
-            except KeyError:
-                # The LTM adds the perception neighbors one by one after creating the P-Node, so the
-                # perception may not include all the features of the space yet.
-                self.get_logger().debug(f"Perception of {self.name} does not include all the features of its space yet.")
-                space_activation = np.zeros(1)
+            space_activation = self.space.get_probability(self.perception) if self.space else np.zeros(len(self.perception))
             activation_value = max(0.0, space_activation.reshape(-1)[0])
             self.activation.activation = float(activation_value)
             perception_timestamp = self.perception.data.coords["timestamp"].values[-1]
