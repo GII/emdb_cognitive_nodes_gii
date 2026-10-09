@@ -248,7 +248,20 @@ class PNode(CognitiveNode):
             updated=False
             new_input=dict(subscriber=subscriber, data=data, updated=updated)
             self.activation_inputs[name]=new_input
+            # Rebuild the perception container with the new set of perceptions in the next activation.
+            self.perception = None
             self.get_logger().debug(f'{self.name} -- Created new activation input: {name} of type {node_type}')
+
+    def delete_activation_input(self, node: dict):
+        """
+        Deletes a perception from the activation inputs list.
+
+        :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}.
+        :type node: dict
+        """
+        super().delete_activation_input(node)
+        # Rebuild the perception container with the new set of perceptions in the next activation.
+        self.perception = None
 
     def read_activation_callback(self, msg: ContainerMsg):
         """

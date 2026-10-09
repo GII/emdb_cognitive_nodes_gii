@@ -878,12 +878,14 @@ class ANNSpace(PointBasedSpace):
         loss_function=nn.BCEWithLogitsLoss,
         val_function=nn.BCEWithLogitsLoss,
         model_file=None,
-        device="cuda",
+        device="auto",
         **kwargs,
     ):
-        # Device configuration
+        # Device configuration: "auto" uses CUDA when available and the CPU otherwise.
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         if device not in ["cpu", "cuda"]:
-            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+            raise ValueError("Invalid device specified. Use 'auto', 'cpu' or 'cuda'.")
         elif device == "cuda" and not torch.cuda.is_available():
             raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
         self.device = device
