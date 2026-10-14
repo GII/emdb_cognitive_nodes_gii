@@ -13,7 +13,7 @@ try:
     from cognitive_nodes.policy import Policy
     from cognitive_nodes.utils import LTMSubscription
     from core.container import Container
-    from core_interfaces.srv import UpdateNeighbor
+    from core_interfaces.srv import SetChangesTopic
     from core.service_client import ServiceClientAsync
     from cognitive_node_interfaces.msg import SuccessRate
     from cognitive_node_interfaces.srv import (
@@ -41,7 +41,7 @@ except ModuleNotFoundError as error:
     SendSpace = None
     GetActivation = None
     DuplicateNode = None
-    UpdateNeighbor = None
+    SetChangesTopic = None
     SuccessRate = None
 
 
@@ -238,7 +238,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.min_points = min_points
         self.goal_chains = {}
         self.reuse_candidates = []
-        self.reusable_knowledge = {"instructions": {}, "candidates": []}
+        self.reusable_knowledge = {"instructions": [], "candidates": []}
         self._ltm_dump = {}
         self._known_goals = set()
         self._ltm_signature = None
@@ -292,7 +292,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.get_logger().info(
             "Knowledge reuse: selected "
             f"{len(self.reuse_candidates)} candidates and generated "
-            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            f"{self._instruction_count(self.reusable_knowledge)} "
             "instructions."
         )
 
@@ -357,7 +357,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.get_logger().info(
             "Knowledge reuse: selected "
             f"{len(self.reuse_candidates)} candidates and generated "
-            f"{sum(len(nodes) for nodes in self.reusable_knowledge['instructions'].values())} "
+            f"{self._instruction_count(self.reusable_knowledge)} "
             "instructions."
         )
 
@@ -505,8 +505,16 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         )
 
     def _build_instructions(self, selected_candidates):
-        """Serialize selected source chains using experiment YAML conventions."""
-        instructions = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+        """Serialize selected source chains using experiment YAML conventions.
+
+        One entry is generated per selected candidate, so a source chain
+        reused for several target goals is copied once for each of them. The
+        source goal itself is not copied: its ``aliases`` map the source goal,
+        its P-Node and its domain (WorldModel) to the target goal, P-Node and
+        domain, so the copied nodes are attached to the target context instead
+        of the source one.
+        """
+        instructions = []
         policies = _nodes(self._ltm_dump, "Policy")
         selected_candidates = list(selected_candidates)
         for candidate in selected_candidates:
@@ -515,30 +523,49 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 f"from source goal {candidate['goal']} to target goal "
                 f"{candidate['candidate_goal']}."
             )
-            first_element = True
-            for goal_name in self._downstream_chain(candidate["goal"]):
-                if first_element:
-                    first_element = False
-                    continue
+            nodes = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+            for goal_name in self._downstream_chain(candidate["goal"])[1:]:
                 goal_data = _nodes(self._ltm_dump, "Goal").get(goal_name, {})
-                self._add_instruction(instructions, "Goal", goal_name, goal_data)
+                self._add_instruction(nodes, "Goal", goal_name, goal_data)
                 for cnode_name, cnode_data in self._context_cnodes(goal_name):
                     self._add_instruction(
-                        instructions, "CNode", cnode_name, cnode_data
+                        nodes, "CNode", cnode_name, cnode_data
                     )
                     for policy_name, policy_data in policies.items():
                         if cnode_name in _neighbor_names(policy_data, "CNode"):
                             self._add_instruction(
-                                instructions, "Policy", policy_name, policy_data
+                                nodes, "Policy", policy_name, policy_data
                             )
                     for pnode_name in _neighbor_names(cnode_data, "PNode"):
                         pnode_data = _nodes(self._ltm_dump, "PNode").get(
                             pnode_name, {}
                         )
                         self._add_instruction(
-                            instructions, "PNode", pnode_name, pnode_data
+                            nodes, "PNode", pnode_name, pnode_data
                         )
+            aliases = {candidate["goal"]: candidate["candidate_goal"]}
+            if candidate["domain"] and candidate["candidate_domain"]:
+                aliases[candidate["domain"]] = candidate["candidate_domain"]
+            if candidate["pnode"] and candidate["candidate_pnode"]:
+                aliases[candidate["pnode"]] = candidate["candidate_pnode"]
+            instructions.append(
+                {
+                    "source_goal": candidate["goal"],
+                    "target_goal": candidate["candidate_goal"],
+                    "aliases": aliases,
+                    "nodes": nodes,
+                }
+            )
         return {"instructions": instructions, "candidates": selected_candidates}
+
+    @staticmethod
+    def _instruction_count(reusable_knowledge):
+        """Return the number of node instructions over all copy entries."""
+        return sum(
+            len(nodes)
+            for entry in reusable_knowledge["instructions"]
+            for nodes in entry["nodes"].values()
+        )
 
     def _downstream_chain(self, root_goal):
         """Return all downstream goals, including the root, without cycles."""
@@ -618,8 +645,6 @@ KnowledgeReuseDrive = DriveKnowledgeReuse
 class PolicyKnowledgeReuse(Policy):
     """Duplicate and reconnect the node chain returned by the reuse drive."""
 
-    _DUPLICABLE_TYPES = frozenset({"Goal", "PNode", "CNode"})
-
     def __init__(
         self,
         name="policy_knowledge_reuse",
@@ -635,19 +660,18 @@ class PolicyKnowledgeReuse(Policy):
         super().__init__(name, class_name, ltm_id=ltm_id, **params)
         self.LTM_id = ltm_id
         self.drive_name = drive_name
+        self.ltm_set_changes_topic_client = ServiceClientAsync(
+            self,
+            SetChangesTopic,
+            f"{ltm_id}/set_changes_topic",
+            callback_group=self.cbgroup_client,
+        )
         self.knowledge_client = ServiceClientAsync(
             self,
             GetReusableKnowledge,
             f"drive/{drive_name}/get_reusable_knowledge",
             callback_group=self.cbgroup_client,
         )
-        self._neighbor_client = ServiceClientAsync(
-            self,
-            UpdateNeighbor,
-            f"{ltm_id}/update_neighbor",
-            self.cbgroup_client,
-        )
-        self.aliases = {}
 
     async def execute_callback(self, request, response):
         """Duplicate the reusable chain and restore its aliased neighbors."""
@@ -668,9 +692,32 @@ class PolicyKnowledgeReuse(Policy):
             )
             response.policy = self.name
             return response
-        instructions = knowledge.get("instructions", {})
-        self.aliases = await self._duplicate_nodes(instructions)
-        await self._restore_neighbors(instructions, self.aliases)
+        instructions = knowledge.get("instructions", [])
+        if not isinstance(instructions, list):
+            self.get_logger().error(
+                "Knowledge reuse instructions must contain a list of entries."
+            )
+            response.policy = self.name
+            return response
+        # Temporarily disable the LTM changes topic while duplicating nodes and
+        # restoring neighbors, so the other nodes in the system do not see the
+        # intermediate state of the copied chain.
+        await self.ltm_set_changes_topic_client.send_request_async(changes_topic=False)
+        try:
+            for entry in instructions:
+                if not isinstance(entry, dict):
+                    self.get_logger().error("Invalid knowledge reuse entry.")
+                    continue
+                nodes = entry.get("nodes", {})
+                # Seed the aliases with the source-to-target root context, so the
+                # copied subgoals are attached to the target goal and P-Node.
+                aliases = dict(entry.get("aliases", {}))
+                aliases.update(await self._duplicate_nodes(nodes))
+                await self._restore_neighbors(nodes, aliases)
+        finally:
+            # Re-enable the topic even if copying fails halfway; otherwise the
+            # cognitive processes would stop receiving LTM changes.
+            await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
         response.policy = self.name
         return response
 
@@ -688,13 +735,14 @@ class PolicyKnowledgeReuse(Policy):
                     f"cognitive_node/{source_name}/duplicate_node"
                 )
                 try:
-                    client = ServiceClientAsync(
-                        self,
-                        DuplicateNode,
-                        duplicate_service,
-                        self.cbgroup_client,
-                    )
-                    result = await client.send_request_async(
+                    if duplicate_service not in self.node_clients:
+                        self.node_clients[duplicate_service] = ServiceClientAsync(
+                            self,
+                            DuplicateNode,
+                            duplicate_service,
+                            self.cbgroup_client,
+                        )
+                    result = await self.node_clients[duplicate_service].send_request_async(
                         name="",
                         include_neighbors=False,
                     )
@@ -819,7 +867,6 @@ class DummyNode:
 
 class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
     """Run production knowledge-reuse logic against real P-Node models."""
-    from core.container import Container
 
     def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=1):
         self._ltm_dump = ltm_dump
