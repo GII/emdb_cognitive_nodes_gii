@@ -1295,40 +1295,11 @@ class Dreaming(CognitiveProcess):
         self.get_logger().info(
             f"[Dreaming] Updating activations... timeout={timeout_sec}s"
         )
+        return super().update_activations(timeout=timeout_sec)
 
-        self.semaphore.acquire()
-        try:
-            self.activation_time = self.get_clock().now().nanoseconds
-
-            for node in self.activation_inputs:
-                self.activation_inputs[node]["flag"].clear()
-
-            for node in self.activation_inputs:
-                if node == self.node.name:
-                    self.activation_inputs[node]["flag"].set()
-
-                self.get_logger().info(
-                    f"[Dreaming] Waiting for activation from node={node}"
-                )
-
-                activated = self.activation_inputs[node]["flag"].wait(
-                    timeout=timeout_sec
-                )
-
-                if not activated:
-                    self.get_logger().warning(
-                        f"[Dreaming] Activation timeout while waiting for node={node}"
-                    )
-                    return False
-
-                self.activation_inputs[node]["flag"].clear()
-
-            self.get_logger().info("[Dreaming] All activations received")
-            self.get_logger().debug("DEBUG - LTM CACHE: " + str(self.LTM_cache))
-            return True
-
-        finally:
-            self.semaphore.release()
+    def skipped_activation_inputs(self):
+        # The parent policy node does not publish its activation while dreaming
+        return {self.node.name}
 
     def get_linked_goals(self):
         cnodes = [
