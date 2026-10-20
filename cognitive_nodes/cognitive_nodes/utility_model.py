@@ -555,6 +555,8 @@ class LearnedUtilityModel(UtilityModel):
                     rewards, and parent policy information.
         :type msg: cognitive_node_interfaces.msg.Episode
         """
+        # The deliberation process is configured in its own thread after this node starts
+        self.deliberation.wait_ready()
         episode = container_msg_to_episode(msg)
         if episode.parent_policy == "reset_world":
             self.get_logger().info("World reset detected, clearing buffer")
