@@ -108,14 +108,13 @@ class PolicyNovelty(Policy):
         :param ltm_cache: LTM cache.
         :type ltm_cache: dict
         """        
-        policies = list(ltm_cache["Policy"].keys())
+        # Excluded policies are filtered out before merging, so that the queue is only reshuffled when the set of eligible policies changes
+        policies = [policy for policy in ltm_cache["Policy"] if policy not in self.exclude_list]
         self.get_logger().info(f"Configuring Policies: {policies}")
         changes = self.policies.merge(policies)
         if changes:
             self.policies.shuffle(self.rng)
             self.counter=0
-        for policy in self.exclude_list:
-            self.policies.remove(policy)
         self.policies_configured = True
         self.get_logger().info(f"Configured policies: {self.policies.queue}")
 
