@@ -12,7 +12,7 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy, PolicyBlocking
 from cognitive_nodes.episode import reward_msg_to_dict
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum, resolve_seed
 
 from std_msgs.msg import String
@@ -89,27 +89,24 @@ class PolicyLLMExploration(Policy):
         self.episodes_subscriber = self.create_subscription(EpisodeMsg, "/main_loop/episodes", self.episodes_callback, 1, callback_group=self.cbgroup_client)
         self.control_subscriber = self.create_subscription(ControlMsg, "/main_loop/control", self.control_callback, 1, callback_group=self.cbgroup_client)
         self.episodes = []
-        self.policies = self.configure_policies()
+        self.ltm_client = ServiceClientAsync(self, GetNodeFromLTM, "/" + str(self.LTM_id) + "/get_node", self.cbgroup_client)
+        self.policies = None # Configured from the LTM in the first execution (see execute_callback)
         random_seed = getattr(self, 'random_seed', None)
         self.rng = np.random.default_rng(resolve_seed(random_seed))
 
-    def request_ltm(self):
+    async def request_ltm(self):
         """
         Requests data from the LTM.
         """        
-        # Call get_node service from LTM
-        service_name = "/" + str(self.LTM_id) + "/get_node"
-        request = ""
-        client = ServiceClient(GetNodeFromLTM, service_name)
-        ltm_response = client.send_request(name=request)
+        ltm_response = await self.ltm_client.send_request_async(name="")
         ltm = yaml.safe_load(ltm_response.data)
         return ltm
     
-    def configure_policies(self):
+    async def configure_policies(self):
         """
         Creates a list of eligible policies to be executed and shuffles it.
         """
-        ltm_cache = self.request_ltm()        
+        ltm_cache = await self.request_ltm()        
         policies = list(ltm_cache["Policy"].keys())
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
@@ -200,6 +197,8 @@ class PolicyLLMExploration(Policy):
         :return: Response that contains the executed policy.
         :rtype:  cognitive_node_interfaces.srv.Execute.Response
         """
+        if self.policies is None:
+            self.policies = await self.configure_policies()
         self.get_logger().info("Sending request to LLM...")
         if not self.episodes:
             self.episodes = [[None, None, perception_msg_to_dict(request.perception), False]]

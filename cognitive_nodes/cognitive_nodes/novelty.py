@@ -6,7 +6,7 @@ from collections import deque
 
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from core.utils import resolve_seed
 
 from std_msgs.msg import String
@@ -62,6 +62,7 @@ class PolicyNovelty(Policy):
         self.LTM_id = ltm_id
         self.exclude_list=exclude_list
         self.exclude_list.append(self.name)
+        self.policies_configured = False
         self.setup()
         self.counter=0
         self.ltm_subscriber = self.create_subscription(String, "/state", self.ltm_change_callback, 1, callback_group=self.cbgroup_client)
@@ -70,25 +71,22 @@ class PolicyNovelty(Policy):
     def setup(self):
         """
         Setup method that configures the PolicyNovelty node.
+
+        The policies are configured from the LTM changes topic or, if no change has been
+        received yet, from an LTM request in the first execution (see execute_callback).
         """        
-        ltm = self.request_ltm()
         random_seed = getattr(self, 'random_seed', None)
         self.rng = np.random.default_rng(resolve_seed(random_seed))
-        self.configure_policies(ltm)
-        self.get_logger().info("Configured Novelty Policy.")
+        self.ltm_client = ServiceClientAsync(self, GetNodeFromLTM, "/" + str(self.LTM_id) + "/get_node", self.cbgroup_client)
 
-    def request_ltm(self):
+    async def request_ltm(self):
         """
         Requests data from the LTM.
 
         :return: LTM dump.
         :rtype: dict
         """        
-        # Call get_node service from LTM
-        service_name = "/" + str(self.LTM_id) + "/get_node"
-        request = ""
-        client = ServiceClient(GetNodeFromLTM, service_name)
-        ltm_response = client.send_request(name=request)
+        ltm_response = await self.ltm_client.send_request_async(name="")
         ltm = yaml.safe_load(ltm_response.data)
         return ltm
     
@@ -118,6 +116,7 @@ class PolicyNovelty(Policy):
             self.counter=0
         for policy in self.exclude_list:
             self.policies.remove(policy)
+        self.policies_configured = True
         self.get_logger().info(f"Configured policies: {self.policies.queue}")
 
     def select_policy(self):
@@ -148,6 +147,9 @@ class PolicyNovelty(Policy):
         :return: Response of the execution.
         :rtype: cognitive_node_interfaces.srv.Execute.Response
         """        
+        if not self.policies_configured:
+            self.configure_policies(await self.request_ltm())
+            self.get_logger().info("Configured Novelty Policy.")
         policy = self.select_policy()
         if policy not in self.node_clients:
             self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
