@@ -91,6 +91,19 @@ class PointBasedSpace(Space):
             return self._data.read(ordered=True).drop_sel(features=["confidence"]).values
         else:
             return np.array([])
+
+    @property
+    def feature_labels(self):
+        """
+        Get the feature labels of the space.
+
+        :return: The feature labels of the space.
+        :rtype: list
+        """
+        if self._data is not None:
+            return self._data.feature_labels[:-1]  # Exclude the last label which is "confidence"
+        else:
+            return []
     
     @property
     def memberships(self):
@@ -140,6 +153,7 @@ class PointBasedSpace(Space):
         :type size: int
         """
         labels = point.feature_labels + ["confidence"]
+        self.input_labels = point.feature_labels
         self._data = Container(name=self.ident + "_data", max_size=size, container_type="space", labels=labels)
 
     def learnable(self):
@@ -356,57 +370,6 @@ class PointBasedSpace(Space):
         self._data = Container(name=self.ident + "_data", max_size=self.real_size, container_type="space", labels=common_sensors)
         self._data.push(data, common_sensors, timestamps=timestamps)
 
-class ClosestPointBasedSpace(PointBasedSpace):
-    """
-    Calculate the new activation value.
-
-    This activation value is for a given perception and it is calculated as follows:
-    - Calculate the closest point to the new point.
-    - If the closest point has a positive membership, the membership of the new point is that divided by the distance
-    between them. Otherwise, the activation is -1.
-    """
-    def get_probability(self, perceptions):
-        """
-        Calculate the new activation value for multiple perception rows.
-
-        :param perceptions: The given perceptions to calculate the activation.
-        :type perceptions: core.container.Container
-        :return: The activation values, one per perception row.
-        :rtype: np.ndarray
-        """
-        # Obtain the datapoint from the given perception (selects the appropriate features)
-        if self._data is not None:
-            points = self.data_from_perception(perceptions)
-        else:
-            return np.zeros(perceptions.size, dtype=float)
-        # Obtain the members and memberships of the space
-        members = self.members
-        memberships = self.memberships
-        # Calculate the activation value
-        n_rows = points.shape[0]
-        # No stored points yet -> no activation
-        if members.size == 0 or memberships.size == 0:
-            activation = np.zeros(n_rows, dtype=float)
-        else:
-            # members: shape (None, n_members, n_features)
-            # points: shape (n_rows, None, n_features)
-            # distances: shape (n_rows, n_members)
-            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
-
-            pos_closest = np.argmin(distances, axis=1)  # one closest member per row
-            closest_dist = distances[np.arange(n_rows), pos_closest]
-            closest_membership = memberships[pos_closest]
-
-            activation = np.where(
-                closest_membership > 0.0,
-                closest_membership / (closest_dist + 1.0),
-                -1.0,
-            )
-        if self.parent_space:
-            parent_act = self.parent_space.get_probability(perceptions)
-            activation = np.minimum(activation, parent_act)
-        return activation.reshape(-1)
-
 class RulesBasedSpace(PointBasedSpace):
     """
     Parent class for rule-based spaces. This class is intended to be subclassed by specific rule-based space implementations.
@@ -471,6 +434,56 @@ class ExactClosestPointBasedSpace(RulesBasedSpace):
             activation = np.minimum(activation, parent_act)
         return activation.reshape(-1)
 
+class ClosestPointBasedSpace(RulesBasedSpace):
+    """
+    Calculate the new activation value.
+
+    This activation value is for a given perception and it is calculated as follows:
+    - Calculate the closest point to the new point.
+    - If the closest point has a positive membership, the membership of the new point is that divided by the distance
+    between them. Otherwise, the activation is -1.
+    """
+    def get_probability(self, perceptions):
+        """
+        Calculate the new activation value for multiple perception rows.
+
+        :param perceptions: The given perceptions to calculate the activation.
+        :type perceptions: core.container.Container
+        :return: The activation values, one per perception row.
+        :rtype: np.ndarray
+        """
+        # Obtain the datapoint from the given perception (selects the appropriate features)
+        if self._data is not None:
+            points = self.data_from_perception(perceptions)
+        else:
+            return np.zeros(perceptions.size, dtype=float)
+        # Obtain the members and memberships of the space
+        members = self.members
+        memberships = self.memberships
+        # Calculate the activation value
+        n_rows = points.shape[0]
+        # No stored points yet -> no activation
+        if members.size == 0 or memberships.size == 0:
+            activation = np.zeros(n_rows, dtype=float)
+        else:
+            # members: shape (None, n_members, n_features)
+            # points: shape (n_rows, None, n_features)
+            # distances: shape (n_rows, n_members)
+            distances = np.linalg.norm(members[None, :, :] - points[:, None, :], axis=2)
+
+            pos_closest = np.argmin(distances, axis=1)  # one closest member per row
+            closest_dist = distances[np.arange(n_rows), pos_closest]
+            closest_membership = memberships[pos_closest]
+
+            activation = np.where(
+                closest_membership > 0.0,
+                closest_membership / (closest_dist + 1.0),
+                -1.0,
+            )
+        if self.parent_space:
+            parent_act = self.parent_space.get_probability(perceptions)
+            activation = np.minimum(activation, parent_act)
+        return activation.reshape(-1)
 
 class CentroidPointBasedSpace(RulesBasedSpace):
     """
@@ -854,7 +867,7 @@ class ANNSpace(PointBasedSpace):
         min_warmup_samples=32,
         warmup_activation = 0.1,
         min_samples_per_class=8,
-        recent_fraction=0.5,
+        backup_space = CentroidPointBasedSpace,
         output_activation="sigmoid",
         hidden_activation="relu",
         hidden_layers=[32, 32],
@@ -865,12 +878,14 @@ class ANNSpace(PointBasedSpace):
         loss_function=nn.BCEWithLogitsLoss,
         val_function=nn.BCEWithLogitsLoss,
         model_file=None,
-        device="cuda",
+        device="auto",
         **kwargs,
     ):
-        # Device configuration
+        # Device configuration: "auto" uses CUDA when available and the CPU otherwise.
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         if device not in ["cpu", "cuda"]:
-            raise ValueError("Invalid device specified. Use 'cpu' or 'cuda'.")
+            raise ValueError("Invalid device specified. Use 'auto', 'cpu' or 'cuda'.")
         elif device == "cuda" and not torch.cuda.is_available():
             raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
         self.device = device
@@ -892,7 +907,12 @@ class ANNSpace(PointBasedSpace):
         self.min_warmup_samples = min_warmup_samples
         self.warmup_activation = warmup_activation
         self.min_samples_per_class = min_samples_per_class
-        self.recent_fraction = recent_fraction
+        if backup_space is None:
+            self.backup_function = None
+        else:
+            if not issubclass(backup_space, RulesBasedSpace):
+                raise ValueError("backup_space must be a subclass of RulesBasedSpace.")
+            self.backup_function = backup_space.get_probability
         self.weight_decay = weight_decay
         self.dropout = dropout
 
@@ -960,6 +980,7 @@ class ANNSpace(PointBasedSpace):
             self.dropout = checkpoint['dropout']
             self.learning_rate = checkpoint['learning_rate']
             self.weight_decay = checkpoint['weight_decay']
+            self.input_labels = checkpoint.get("input_labels")
             
             # Configure model architecture
             self.configure_model(self.input_length)
@@ -967,6 +988,14 @@ class ANNSpace(PointBasedSpace):
             # Load weights
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if self.input_labels:
+                point = Container(
+                    name=f"{self.ident}_perception",
+                    max_size=1,
+                    container_type="perception",
+                    labels=self.input_labels,
+                )
+                self.initialize_data_structure(point, self.real_size)
             
             self.logger.info(f"Model loaded from {self.model_file}")
         else:
@@ -1000,6 +1029,7 @@ class ANNSpace(PointBasedSpace):
             "learning_rate": self.learning_rate,
             "weight_decay": self.weight_decay,
             "dropout": self.dropout,
+            "input_labels": getattr(self, "input_labels", self.feature_labels),
         }
         
         torch.save(checkpoint, filepath)
@@ -1424,6 +1454,8 @@ class ANNSpace(PointBasedSpace):
         if self._configured:
             activation = self._call(points)
         else:
+            if self.backup_function is not None:
+                return self.backup_function(self, perceptions)
             activation = np.full(points.shape[0], self.warmup_activation, dtype=float)
         if self.parent_space:
             parent_act = self.parent_space.get_probability(perceptions)
