@@ -9,7 +9,7 @@ import inspect
 from math import isclose
 
 from core.cognitive_node import CognitiveNode
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from cognitive_nodes.space import PointBasedSpace
 from core.utils import class_from_classname, compare_perceptions
 from core.container import Container
@@ -271,6 +271,9 @@ class GoalObjectInBoxStandalone(Goal):
         service_name_too_far = self.robot_service + '/object_too_far'
         self.too_far_client = ServiceClientAsync(self, ObjectTooFar, service_name_too_far, self.cbgroup_client)
 
+        service_name_closest_position = self.robot_service + '/calculate_closest_position'
+        self.closest_position_client = ServiceClientAsync(self, CalculateClosestPosition, service_name_closest_position, self.cbgroup_client)
+
         self.normalize_values=normalize_data
 
         if data:
@@ -318,7 +321,7 @@ class GoalObjectInBoxStandalone(Goal):
         too_far = self.too_far_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
         return too_far
     
-    def calculate_closest_position(self, angle):
+    async def calculate_closest_position(self, angle):
         """
         Calculate the closest position from a given cylinder angle.
 
@@ -327,10 +330,7 @@ class GoalObjectInBoxStandalone(Goal):
         :return: The closest distance and angle.
         :rtype: float, float
         """
-        service_name = self.robot_service + '/calculate_closest_position'
-        closest_position_client = ServiceClient(CalculateClosestPosition, service_name)
-        response = closest_position_client.send_request(angle = angle)
-        closest_position_client.destroy_node()
+        response = await self.closest_position_client.send_request_async(angle = angle)
         return response.dist_near, response.ang_near
     
     def object_pickable_with_two_hands_request(self, distance, angle):
@@ -383,7 +383,7 @@ class GoalObjectInBoxStandalone(Goal):
                         break
         return inside
     
-    def object_with_robot(self):
+    async def object_with_robot(self):
         """
         Check if there is an object adjacent to the robot.
 
@@ -393,7 +393,7 @@ class GoalObjectInBoxStandalone(Goal):
         together = False
         if not self.object_held():
             for cylinder in self.perception["cylinders"]:
-                dist_near, ang_near = self.calculate_closest_position(cylinder["angle"])
+                dist_near, ang_near = await self.calculate_closest_position(cylinder["angle"])
                 together = (abs(cylinder["distance"] - dist_near) < 0.03) and (
                     abs(cylinder["angle"] - ang_near) < 0.02
                 )

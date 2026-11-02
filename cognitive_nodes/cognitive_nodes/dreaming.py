@@ -1284,8 +1284,6 @@ class Dreaming(CognitiveProcess):
         self.summary_episode.parent_policy = self.node.name
 
         self.set_attributes_from_params(params)
-        self.setup()
-        self.start_threading()
 
     def setup(self):
         super().setup()

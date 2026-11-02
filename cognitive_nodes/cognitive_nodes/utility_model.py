@@ -438,6 +438,7 @@ class LearnedUtilityModel(UtilityModel):
         )
         episodes_topic = self.Control["episodes_topic"]
         episodes_msg = self.Control["episodes_msg"]
+        self.pending_episodes = [] # Episodes received before the deliberation process is ready (see episode_callback)
         self.episode_subscription = self.create_subscription(
             class_from_classname(episodes_msg),
             episodes_topic,
@@ -551,8 +552,31 @@ class LearnedUtilityModel(UtilityModel):
         episodic buffer, and triggering model training if positive rewards are present. Long-term memory
         is asynchronously updated in a separate thread when new successful traces are added.
 
+        The deliberation process is configured in its own thread after this node starts. Episodes
+        received before it is ready are kept, without waiting, and processed in order once it is.
+
         :param msg: The episode message received from the subscription, containing perception data,
                     rewards, and parent policy information.
+        :type msg: cognitive_node_interfaces.msg.Episode
+        """
+        if self.pending_episodes or not self.deliberation.ready.is_set():
+            self.pending_episodes.append(msg)
+            if len(self.pending_episodes) == 1:
+                self.deliberation.call_when_ready(self, self.process_pending_episodes)
+            return
+        self.process_episode(msg)
+
+    def process_pending_episodes(self):
+        """Process, in order, the episodes received before the deliberation process was ready.
+        """
+        self.get_logger().info(f"Deliberation ready, processing {len(self.pending_episodes)} pending episodes")
+        while self.pending_episodes:
+            self.process_episode(self.pending_episodes.pop(0))
+
+    def process_episode(self, msg):
+        """Update the episodic buffer and learning model with an episode message (see episode_callback).
+
+        :param msg: The episode message.
         :type msg: cognitive_node_interfaces.msg.Episode
         """
         episode = container_msg_to_episode(msg)
