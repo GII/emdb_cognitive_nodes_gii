@@ -2,7 +2,7 @@ import rclpy
 import numpy as np
 import tempfile
 from pathlib import Path
-from collections import deque
+from collections import deque, OrderedDict
 from rclpy.time import Time
 
 from core.service_client import ServiceClientAsync
@@ -14,6 +14,8 @@ from core.utils import class_from_classname
 from cognitive_node_interfaces.srv import AddPoints, SendSpace, ContainsSpace, SaveModel, LoadSpace
 from cognitive_node_interfaces.msg import SuccessRate
 from core_interfaces.msg import Container as ContainerMsg
+
+ACTIVATION_CACHE_SIZE = 16  # Perceptions whose activations each P-Node keeps (see cached_probability)
 
 class PNode(CognitiveNode):
     """
@@ -48,6 +50,7 @@ class PNode(CognitiveNode):
         self.spaces = [space if space else class_from_classname(
             space_class)(ident=name + " space", **space_parameters)]
         self.space=self.spaces[0]
+        self.activation_cache = OrderedDict()  # Activations of the space by perception values (see cached_probability)
         self.added_point = False
         self.add_points_service = self.create_service(AddPoints, 'pnode/' + str(
             name) + '/add_points', self.add_points_callback, callback_group=self.cbgroup_server)
@@ -151,6 +154,7 @@ class PNode(CognitiveNode):
         if self.space and self.space._data is None:
             space_data.name = self.space.ident + "_data"
             self.space._data = space_data
+            self.space_changed()
             self.get_logger().info(f"Loaded space into P-Node {self.name}.")
             response.loaded=True
         elif self.space and self.space._data is not None:
@@ -161,6 +165,7 @@ class PNode(CognitiveNode):
                 return response
             self.space._data.clear()
             self.space._data.push(space_data)
+            self.space_changed()
             self.get_logger().info(f"Loaded space into P-Node {self.name}.")
             response.loaded=True
         else:
@@ -181,6 +186,7 @@ class PNode(CognitiveNode):
             self.get_logger().error("No space defined for the P-Node. Cannot add points.")
             return
         self.space.add_point(points, confidences)
+        self.space_changed()
         self.added_point = True
         for confidence in confidences:
             self.update_history(confidence)
@@ -212,7 +218,7 @@ class PNode(CognitiveNode):
                 return self.activation
             else:
                 consolidate_containers(data, write_container=self.perception)
-            space_activation = self.space.get_probability(self.perception) if self.space else np.zeros(len(self.perception))
+            space_activation = self.cached_probability(self.perception) if self.space else np.zeros(len(self.perception))
             activation_value = max(0.0, space_activation.reshape(-1)[0])
             self.activation.activation = float(activation_value)
             perception_timestamp = self.perception.data.coords["timestamp"].values[-1]
@@ -221,8 +227,38 @@ class PNode(CognitiveNode):
         
         if perception:
             # Uses the provided perception to calculate the activation. This is used when the activation is requested from outside (e.g., get_activation service).
-            activations = self.space.get_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
+            activations = self.cached_probability(perception).reshape(-1) if self.space else np.zeros(len(perception))
             return activations.tolist()
+
+    def cached_probability(self, perception):
+        """
+        Activations of the space for the rows of a perception. They only depend on the values of the
+        perception and on the space, so they are calculated once and reused while neither changes (e.g.
+        the perception, which is published every few milliseconds, between two policy executions, or the
+        same perception asked by several goals). The timestamps of the perception are not part of the key:
+        they change with every reading, even when the values don't.
+
+        :param perception: The perception.
+        :type perception: core.container.Container
+        :return: The activation of each row of the perception.
+        :rtype: numpy.ndarray
+        """
+        values, _ = perception.read_numpy()
+        key = (tuple(perception.feature_labels), values.shape, values.tobytes())
+        activations = self.activation_cache.get(key)
+        if activations is None:
+            activations = self.space.get_probability(perception)
+            self.activation_cache[key] = activations
+            if len(self.activation_cache) > ACTIVATION_CACHE_SIZE:
+                self.activation_cache.popitem(last=False)
+        return activations
+
+    def space_changed(self):
+        """
+        Discards the cached activations. Called whenever the space of the P-Node changes (points added,
+        which may also train its model, or space loaded).
+        """
+        self.activation_cache.clear()
 
     def calculate_metacognitive_params(self):
         """
