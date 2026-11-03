@@ -4,6 +4,7 @@ import numpy as np
 import xarray as xr
 from collections import deque
 from copy import deepcopy
+from rclpy.logging import LoggingSeverity
 
 from core.cognitive_node import CognitiveNode
 from core.container import Container, MultiContainer
@@ -90,7 +91,9 @@ class EpisodicBuffer:
         :param episode: Episode object.
         :type episode: cognitive_node_interfaces.msg.Episode
         """
-        self.node.get_logger().debug(f"Updating labels for episodic buffer: {episode}")
+        # The text of the episode is built only if it is going to be logged
+        if self.node.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+            self.node.get_logger().debug(f"Updating labels for episodic buffer: {episode}")
         new_input_labels = self._extract_labels(self.inputs, episode)
         new_output_labels = self._extract_labels(self.outputs, episode)
         # Add new input labels and log warnings
