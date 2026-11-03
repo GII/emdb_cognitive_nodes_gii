@@ -87,8 +87,11 @@ class PointBasedSpace(Space):
         :return: The members of the space.
         :rtype: list
         """
-        if self._data is not None:        
-            return self._data.read(ordered=True).drop_sel(features=["confidence"]).values
+        if self._data is not None:
+            # read_numpy is much cheaper than read(), which builds a new xarray object. Same values and order;
+            # np.delete returns a new array, as before
+            values, _ = self._data.read_numpy()
+            return np.delete(values, self._data.feature_labels.index("confidence"), axis=1)
         else:
             return np.array([])
 
@@ -114,7 +117,9 @@ class PointBasedSpace(Space):
         :rtype: list
         """
         if self._data is not None:
-            return self._data.read(ordered=True).sel(features=["confidence"]).values
+            # A new array of one column, as before (see members)
+            values, _ = self._data.read_numpy()
+            return values[:, [self._data.feature_labels.index("confidence")]]
         else:
             return np.array([])
 
@@ -184,9 +189,14 @@ class PointBasedSpace(Space):
         :return: The structured array created from the given perception.
         :rtype: numpy.ndarray
         """
-        data = perception.read(ordered=True)
-        filtered_features = data.sel(features=self._data.feature_labels[:-1])
-        return filtered_features.values
+        # The features of the space, in its order (see members about read_numpy)
+        perception_labels = perception.feature_labels
+        try:
+            columns = [perception_labels.index(label) for label in self._data.feature_labels[:-1]]
+        except ValueError as error:
+            raise KeyError(f"The perception does not have every feature of the space: {error}") from error
+        values, _ = perception.read_numpy()
+        return values[:, columns]
 
     def to_msg(self):
         """
