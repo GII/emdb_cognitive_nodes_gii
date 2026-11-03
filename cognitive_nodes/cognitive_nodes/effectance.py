@@ -564,7 +564,11 @@ class PolicyEffectanceExternal(Policy):
         :type point: core.container.Container
         """
         pnode_name=f"pnode_{ident}"
-        pnode_params = self.pnode_params
+        pnode_params = dict(self.pnode_params)
+        # The space class goes in the parameters of the PNode connector. If they don't have it, the one of the
+        # Space connector is used, as in CognitiveProcess.new_cnode
+        if pnode_params.get("space_class") is None:
+            pnode_params["space_class"] = self.default_class.get("Space") or self.space_class
         response = await self.create_node_client(name=pnode_name, class_name=self.pnode_class, parameters=pnode_params)
         if not response.created:
             raise RuntimeError(f"Failed creation of P-Node {pnode_name}")
