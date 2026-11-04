@@ -62,7 +62,7 @@ class PointBasedSpace(Space):
         """
         Init attributes when a new object is created.
 
-        :param size: Maximum number of points that the space can contain, defaults to 5000.
+        :param size: Maximum number of points that the space can contain, defaults to 30000.
         :type size: int
         """
         self._data = None
@@ -130,13 +130,11 @@ class PointBasedSpace(Space):
 
         NOTE: This method is intended to be used when loading a space from a saved state, where the data container already contains the necessary information to populate the space. (e.g. it has the confidences stored as a column, so we don't need to pass them separately as in add_point)
 
-        :param point: A perception dictionary describing the structure of the space.
-        :type point: dict
-        :param members: A flattened list of data with size n_dims * n_data.
-        :type members: list
-        :param memberships: A list of membership data with size n_data.
-        :type memberships: list
-        :raises ValueError: If the size of memberships does not match the calculated size of the space.
+        :param data_container: Container with the points of the space (features plus the confidence column). Its name is set to end with "_data" if it does not.
+        :type data_container: core.container.Container
+        :param kwargs: Additional keyword arguments for the constructor of the space.
+        :return: The space populated with the data of the container.
+        :rtype: PointBasedSpace
         """
         data_name = data_container.name
         if data_name.endswith("_data"):
@@ -151,10 +149,10 @@ class PointBasedSpace(Space):
 
     def initialize_data_structure(self, point: Container, size): 
         """
-        Initialize the structured array based on the given point and size.
+        Initialize the data container of the space based on the given point and size.
         :param point: A perception that will provide the structure for the space.
         :type point: Container
-        :param size: The size of the structured array.
+        :param size: The maximum number of points of the container.
         :type size: int
         """
         labels = point.feature_labels + ["confidence"]
@@ -182,11 +180,11 @@ class PointBasedSpace(Space):
 
     def data_from_perception(self, perception: Container):
         """
-        Create a structured array for the given perception.
+        Select the features of the space from the given perception.
 
-        :param perception: The given perception to create the structured array.
+        :param perception: The given perception to select the features from.
         :type perception: Container
-        :return: The structured array created from the given perception.
+        :return: Array with one row per perception row and one column per feature of the space.
         :rtype: numpy.ndarray
         """
         # The features of the space, in its order (see members about read_numpy)
@@ -263,11 +261,11 @@ class PointBasedSpace(Space):
         """
         Add a new point to the P-Node.
 
-        :param perception: A given perception to add.
-        :type perception: Container
-        :param confidence: The confidence of the added point that specifies if it is a point or an
-            antipoint.
-        :type confidence: float
+        :param perceptions: A given perception to add.
+        :type perceptions: core.container.Container
+        :param confidences: The confidences of the added points that specify if they are points or
+            antipoints.
+        :type confidences: numpy.ndarray
         :raises RuntimeError: If LTM operation cannot continue.
         :return: The position of the added point.
         :rtype: int | numpy.ndarray
@@ -702,10 +700,10 @@ class ActivatedDummySpace(PointBasedSpace):
         Dummy method to add a point to the space.
         This method does not actually add any points.
 
-        :param perception: A given perception to add. It is not used.
-        :type perception: dict
-        :param confidence: The confidence of the added point. Irrelevant in this case.
-        :type confidence: float
+        :param perceptions: A given perception to add. It is not used.
+        :type perceptions: core.container.Container
+        :param confidences: The confidences of the added points. Irrelevant in this case.
+        :type confidences: numpy.ndarray
         :return: -1
         :rtype: int
         """
@@ -813,11 +811,11 @@ class SVMSpace(PointBasedSpace):
         """
         Add a new point to the P-Node.
 
-        :param perception: A given perception to add.
-        :type perception: dict
-        :param confidence: The confidence of the added point that specifies if it is a point or an
-            antipoint.
-        :type confidence: float
+        :param perceptions: A given perception to add.
+        :type perceptions: core.container.Container
+        :param confidences: The confidences of the added points that specify if they are points or
+            antipoints.
+        :type confidences: numpy.ndarray
         :return: The position of the added point.
         :rtype: int
         """
@@ -954,8 +952,6 @@ class ANNSpace(PointBasedSpace):
 
         :param input_length: Number of input features for the neural network.
         :type input_length: int
-        :param output_length: Number of output features/predictions from the neural network.
-        :type output_length: int
         """
         # Seed torch (and python/numpy globals) so weight initialisation and
         # DataLoader shuffling are reproducible when a seed is configured.
@@ -1362,9 +1358,9 @@ class ANNSpace(PointBasedSpace):
         Add a new point to the P-Node.
 
         :param perceptions: A given perception to add.
-        :type perceptions: dict
+        :type perceptions: core.container.Container
         :param confidences: The confidences of the added points that specify if they are points or antipoints.
-        :type confidences: float
+        :type confidences: numpy.ndarray
         :return: The position of the added point.
         :rtype: int
         """

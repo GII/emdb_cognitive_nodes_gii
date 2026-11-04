@@ -34,8 +34,8 @@ class Competence(RobotPurpose, LTMSubscription):
         """
         Extract the goal name from an entry in the LTM dump.
 
-        :param goal_data: Goal information received from the LTM.
-        :type goal_data: dict
+        :param node_data: Goal information received from the LTM.
+        :type node_data: dict
         :return: Goal name or None if it cannot be resolved.
         :rtype: str
         """
@@ -165,8 +165,7 @@ class Competence(RobotPurpose, LTMSubscription):
     def calculate_override_activations(self, activation_list=None):
         """
         Calculate the override activations for each goal based on the competence of the robot in achieving them.
-        :param perception: The current perception of the robot.
-        :type perception: dict
+
         :param activation_list: List of activations from other nodes.
         :type activation_list: list
         """
@@ -202,7 +201,7 @@ class Competence(RobotPurpose, LTMSubscription):
         Calculate the activation of the Competence node based on the competence of the robot in achieving its goals.
         Publishes override activations for each goal based on their competence and delta competence.
         :param perception: The current perception of the robot.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activations from other nodes.
         :type activation_list: list
         """

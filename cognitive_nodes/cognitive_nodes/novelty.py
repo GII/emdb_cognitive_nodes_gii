@@ -31,10 +31,10 @@ class DriveNovelty(Drive):
 
     def evaluate(self, perception=None):
         """
-        Evaluation that always returns 1.0, as the drive is always .
+        Evaluation that always returns 1.0, as the drive is always active.
 
         :param perception: Unused perception.
-        :type perception: dict or Any.
+        :type perception: core.container.Container or None
         :return: Evaluation of the Drive.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        

@@ -389,7 +389,7 @@ class ProspectionDrive(Drive, LTMSubscription):
         Evaluates the drive depending if there is newly discovered knowledge.
 
         :param perception: Unused perception
-        :type perception: dict or NoneType
+        :type perception: core.container.Container or None
         """
         self.evaluation.evaluation=float(self.new_knowledge)
         self.evaluation.timestamp=self.get_clock().now().to_msg()

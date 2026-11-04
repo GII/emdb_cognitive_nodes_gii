@@ -79,7 +79,7 @@ class DriveEffectanceInternal(Drive, PNodeSuccess):
         Calculates drive evaluation. If any P-Node is above the minimum confidence, drive evaluation is 1.0.
 
         :return: Drive evaluation and its timestamp.
-        :rtype: cognitive_node_interfaces.Evaluation
+        :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
         max_pnode= max(self.pnode_evaluation.values(), default=0.0)
         if max_pnode>=self.min_confidence:
@@ -105,7 +105,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :type class_name: str
         :param episodes_topic: Topic from where to read the episodes.
         :type episodes_topic: str
-        :param episodes_msg: Message type of the episodes topic (most cases: cognitive_node_interfaces.msg.Episode).
+        :param episodes_msg: Message type of the episodes topic (most cases: core_interfaces.msg.Container).
         :type episodes_msg: str
         :raises Exception: Raises exception if no episode topic was provided.
         """        
@@ -125,8 +125,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         """
         Callback that processes an episode message.
 
-        :param msg: Episode message.
-        :type msg: ROS Message (most cases: cognitive_node_interfaces.msg.Episode)
+        :param msg: Message of the episodes topic, containing a flattened episode.
+        :type msg: ROS Message (most cases: core_interfaces.msg.Container)
         """
         episode = container_msg_to_episode(msg)
         self.find_effects(episode)
@@ -135,10 +135,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         """
         Checks consecutive perceptions if effects were generated.
 
-        :param perception: Current perception.
-        :type perception: core.container.Container
-        :param old_perception: Previous perception.
-        :type old_perception: core.container.Container
+        :param episode: Episode whose consecutive perceptions are checked.
+        :type episode: cognitive_nodes.episode.Episode
         """
         old_perception = episode.old_perception
         perception = episode.perception
@@ -211,7 +209,7 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         Calculates drive evaluation. If any new effect has been found, drive evaluation is 1.0.
 
         :return: Drive evaluation and its timestamp.
-        :rtype: cognitive_node_interfaces.Evaluation
+        :rtype: cognitive_node_interfaces.msg.Evaluation
         """   
         self.evaluation.evaluation=1.0 if self.new_effects else 0.0
         self.evaluation.timestamp = self.get_clock().now().to_msg()
@@ -585,7 +583,7 @@ class PolicyEffectanceExternal(Policy):
 
     async def create_cnode(self, sensor, attribute, episode):
         """
-        Method that creates all the nodes that correspond to the 
+        Method that creates all the nodes that correspond to a detected effect: a Goal, a P-Node and a C-Node.
 
         :param sensor: Name of the sensor to which the effect is related.
         :type sensor: str
@@ -670,7 +668,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
 
         :param perception: Unused perception.
-        :type perception: dict
+        :type perception: core.container.Container
         :param activation_list: List of activations of the neighboring nodes.
         :type activation_list: list
         """        
@@ -727,8 +725,8 @@ class GoalActivatePNode(GoalLearnedSpace):
         
         :param point: The point that is added to the Goal.
         :type point: core.container.Container
-        :param confidence: Indicates if the perception added is a point or an antipoint.
-        :type confidence: float
+        :param confidences: Indicates if each perception added is a point or an antipoint.
+        :type confidences: numpy.ndarray
         """
         self.get_logger().debug("The space of this Goal is related to a P-Node. Ignoring the points added to it.")
 
@@ -817,12 +815,12 @@ class GoalActivatePNode(GoalLearnedSpace):
         """
         Method that obtains the reward for the goal. It recieves two consecutive perceptions, calculates the related P-Node activation for each and detects if the P-Node was activated.
 
-        :param old_perception: First state perception dictionary.
-        :type old_perception: core_interfaces.msg.Container
-        :param perception: Second state perception dictionary.
-        :type perception: core_interfaces.msg.Container
-        :return: Reward and current timestamp.
-        :rtype: Tuple (float, builtin_interfaces.msg.Time)
+        :param old_perception_msg: First state perception.
+        :type old_perception_msg: core_interfaces.msg.Container
+        :param perception_msg: Second state perception.
+        :type perception_msg: core_interfaces.msg.Container
+        :return: The reward.
+        :rtype: float
         """        
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
@@ -923,8 +921,8 @@ class GoalRecreateEffect(GoalLearnedSpace):
         """
         Callback method that reads a perception and stores it in the activation inputs list.
 
-        :param msg: PerceptionStamped message that contains the perception and its timestamp.
-        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        :param msg: Container message that contains the perception and its timestamps.
+        :type msg: core_interfaces.msg.Container
         """        
         if msg.max_size>1:
             self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')
@@ -948,7 +946,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
         Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
 
         :param perception: Unused perception.
-        :type perception: dict
+        :type perception: core.container.Container
         :param activation_list: List of activations of the neighboring nodes.
         :type activation_list: list
         """        
@@ -995,8 +993,8 @@ class GoalRecreateEffect(GoalLearnedSpace):
             
             :param point: The point that is added to the Goal.
             :type point: core.container.Container
-            :param confidence: Indicates if the perception added is a point or an antipoint.
-            :type confidence: float
+            :param confidences: Indicates if each perception added is a point or an antipoint.
+            :type confidences: numpy.ndarray
             """
             self.get_logger().info("Added point to effect goal, ignoring." )  # This goal does not take into account the points added to it, since the space is defined by the effect itself. The method is overridden to avoid adding points to the goal.
 
@@ -1025,8 +1023,8 @@ class SpaceEffectActive(PointBasedSpace):
         """
         Indicates that the space is configured if the effect label is not None.
 
-        returns: True if the effect label is not None, False otherwise.
-        rtype: bool
+        :return: True if the effect label is not None, False otherwise.
+        :rtype: bool
         """
         return True if self.effect_label is not None else False
 
@@ -1042,11 +1040,11 @@ class SpaceEffectActive(PointBasedSpace):
 
     def data_from_perception(self, perception: Container):
         """
-        Create a structured array for the given perception.
+        Select the features of the space from the given perception.
 
-        :param perception: The given perception to create the structured array.
+        :param perception: The given perception to select the features from.
         :type perception: Container
-        :return: The structured array created from the given perception.
+        :return: Array with one row per perception row and one column per feature of the space.
         :rtype: numpy.ndarray
         """
         data = perception.read(ordered=True)

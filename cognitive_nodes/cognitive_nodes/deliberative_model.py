@@ -193,7 +193,7 @@ class DeliberativeModel(CognitiveNode):
         Returns the activation value of the Model.
 
         :param perception: Perception does not influence the activation.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activation values from other sources, defaults to None.
         :type activation_list: list
         :return: The activation of the instance and its timestamp.
@@ -246,10 +246,8 @@ class Learner:
         """
         Placeholder method for predicting an outcome.
 
-        :param perception: Perception dictionary.
-        :type perception: dict
-        :param action: Candidate action dictionary.
-        :type action: dict
+        :param x: The inputs of the model.
+        :type x: numpy.ndarray
         :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError

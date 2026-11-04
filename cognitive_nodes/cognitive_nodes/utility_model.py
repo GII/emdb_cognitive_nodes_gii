@@ -83,7 +83,7 @@ class UtilityModel(DeliberativeModel):
         """Calculate the activation level of the utility model based on perception or activation inputs.
 
         :param perception: Perception data to use for activation calculation, defaults to None
-        :type perception: dict, optional
+        :type perception: core.container.Container, optional
         :param activation_list: List of activations from connected nodes to aggregate, defaults to None
         :type activation_list: list, optional
         :return: None
@@ -463,7 +463,7 @@ class LearnedUtilityModel(UtilityModel):
         """Calculate the activation level of the utility model based on perception or activation inputs.
 
         :param perception: Perception data to use for activation calculation, defaults to None
-        :type perception: dict, optional
+        :type perception: core.container.Container, optional
         :param activation_list: List of activations from connected nodes to aggregate, defaults to None
         :type activation_list: list, optional
         :return: None
@@ -555,7 +555,7 @@ class LearnedUtilityModel(UtilityModel):
 
         :param msg: The episode message received from the subscription, containing perception data,
                     rewards, and parent policy information.
-        :type msg: cognitive_node_interfaces.msg.Episode
+        :type msg: core_interfaces.msg.Container
         """
         if self.pending_episodes or not self.deliberation.ready.is_set():
             self.pending_episodes.append(msg)
@@ -575,7 +575,7 @@ class LearnedUtilityModel(UtilityModel):
         """Update the episodic buffer and learning model with an episode message (see episode_callback).
 
         :param msg: The episode message.
-        :type msg: cognitive_node_interfaces.msg.Episode
+        :type msg: core_interfaces.msg.Container
         """
         episode = container_msg_to_episode(msg)
         if episode.parent_policy == "reset_world":
@@ -596,14 +596,8 @@ class LearnedUtilityModel(UtilityModel):
     def update_ltm_and_train(self, reward_list, ltm_cache):
         """Update the Long-Term Memory cache with new reward basis information.
         This method updates the Long-Term Memory (LTM) cache with new reward basis information
-        based on the provided perceptions, policy, and reward list. It uses a semaphore to ensure
+        based on the provided reward list. It uses a semaphore to ensure
         thread-safe access to the LTM during the update process.
-        :param old_perception: The previous perception state before the episode.
-        :type old_perception: dict
-        :param perception: The current perception state after the episode.
-        :type perception: dict
-        :param policy: The policy name associated with the episode.
-        :type policy: str
         :param reward_list: The list of rewards associated with the episode.
         :type reward_list: dict
         :param ltm_cache: The Long-Term Memory cache to be updated.
@@ -974,12 +968,10 @@ class DefaultUtilityEvaluator(Evaluator):
 
     def evaluate(self):
         """
-        Evaluates the input episodes and returns a list of evaluated episodes.
+        Returns the constant confidence of the model. No evaluation is performed.
 
-        :param input_episodes: List of input episodes to evaluate.
-        :type input_episodes: list
-        :return: List of evaluated episodes.
-        :rtype: list
+        :return: Confidence of the model.
+        :rtype: float
         """
         return self.model_confidence
 

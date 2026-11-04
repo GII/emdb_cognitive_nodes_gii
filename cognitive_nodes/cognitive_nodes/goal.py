@@ -213,9 +213,9 @@ class Goal(CognitiveNode):
         calls can be awaited.  
 
         :param old_perception: The previous perception data. Defaults to None.
-        :type old_perception: Any
+        :type old_perception: core.container.Container or None
         :param perception: The current perception data. Defaults to None.
-        :type perception: Any
+        :type perception: core.container.Container or None
         :raises NotImplementedError: If the method is not overridden in a subclass.
         """
         raise NotImplementedError
@@ -572,7 +572,7 @@ class GoalObjectInBoxStandalone(Goal):
         Returns the the activation value of the goal.
 
         :param perception: Perception does not influence the activation.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activations. Not used.
         :type activation_list: list
         :return: The activation of the goal and its timestamp.
@@ -594,9 +594,9 @@ class GoalObjectInBoxStandalone(Goal):
         Calculate the reward for the current sensor values.
 
         :param old_perception: The previous perception. Not used.
-        :type old_perception: Any
+        :type old_perception: core.container.Container or None
         :param perception: The current perception. Not used.
-        :type perception: Any
+        :type perception: core.container.Container or None
         :return: The reward obtained.
         :rtype: float
         """
@@ -806,7 +806,7 @@ class GoalMotiven(Goal):
         Calculates the activation of the goal based on the activations of the neighboring drives and goals.
 
         :param perception: Unused perception.
-        :type perception: dict
+        :type perception: core.container.Container
         :param activation_list: List of activations of the neighboring nodes.
         :type activation_list: list
         """        
@@ -855,9 +855,9 @@ class GoalMotiven(Goal):
         Returns the reward of the goal.
 
         :param old_perception: Unused perception, defaults to None.
-        :type old_perception: Any
+        :type old_perception: core.container.Container or None
         :param perception: Unused perception.
-        :type perception: Any.
+        :type perception: core.container.Container or None
         :return: Reward of the goal and its timestamp.
         :rtype: tuple (float, builtin_interfaces.msg.Time)
         """        
@@ -955,11 +955,11 @@ class GoalLearnedSpace(GoalMotiven):
         Callback that sends the space of the goal.
 
         :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :type request: cognitive_node_interfaces.srv.SendSpace.Request
         :param response: Response that contains the space of the goal.
-        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :type response: cognitive_node_interfaces.srv.SendSpace.Response
         :return: Response that contains the space of the goal.
-        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :rtype: cognitive_node_interfaces.srv.SendSpace.Response
         """        
         if self.space:
             response.space = self.space.to_msg()
@@ -990,8 +990,8 @@ class GoalLearnedSpace(GoalMotiven):
         
         :param point: The point that is added to the Goal.
         :type point: core.container.Container
-        :param confidence: Indicates if the perception added is a point or an antipoint.
-        :type confidence: float
+        :param confidences: Indicates if each perception added is a point or an antipoint.
+        :type confidences: numpy.ndarray
         """
         if not self.space:
             self.get_logger().error("No space defined for the Goal. Cannot add points.")
@@ -1063,10 +1063,8 @@ class GoalLearnedSpace(GoalMotiven):
 
     def get_drive_activation(self):
         """
-        Get the activation of a specific drive.
+        Get the activation of the drive linked to the goal.
 
-        :param drive_name: Name of the drive.
-        :type drive_name: str
         :return: Activation value and timestamp of the drive.
         :rtype: tuple (float, builtin_interfaces.msg.Time)
         """
