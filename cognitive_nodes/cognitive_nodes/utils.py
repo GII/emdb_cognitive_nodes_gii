@@ -103,8 +103,8 @@ class EpisodeSubscription:
         """
         Callback that processes the episodes.
 
-        :param msg: Episode message.
-        :type msg: ROS2 message. Typically cognitive_process_interfaces.msg.Episode
+        :param msg: Message of the episodes topic, containing a flattened episode.
+        :type msg: ROS2 message. Typically core_interfaces.msg.Container
         :raises NotImplementedError: Method must be implemented in the subclass.
         """        
         raise NotImplementedError

@@ -82,11 +82,11 @@ class PNode(CognitiveNode):
         Callback that sends the space of the P-Node.
 
         :param request: Empty request.
-        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :type request: cognitive_node_interfaces.srv.SendSpace.Request
         :param response: Response that contains the space of the P-Node.
-        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :type response: cognitive_node_interfaces.srv.SendSpace.Response
         :return: Response that contains the space of the P-Node.
-        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :rtype: cognitive_node_interfaces.srv.SendSpace.Response
         """
         if self.space:
             response.space = self.space.to_msg()
@@ -117,7 +117,7 @@ class PNode(CognitiveNode):
         :param request: The request that contains the list of points that are added and their confidence.
         :type request: cognitive_node_interfaces.srv.AddPoints.Request
         :param response: The response indicating if the points were added to the P-Node.
-        :type respone: core_interfaces.srv.AddPoints.Response
+        :type response: cognitive_node_interfaces.srv.AddPoints.Response
         :return: The response indicating if the points were added to the P-Node.
         :rtype: cognitive_node_interfaces.srv.AddPoints.Response
         """
@@ -142,7 +142,7 @@ class PNode(CognitiveNode):
         :param request: The request that contains the space to be loaded.
         :type request: cognitive_node_interfaces.srv.LoadSpace.Request
         :param response: The response indicating if the space was loaded into the P-Node.
-        :type respone: core_interfaces.srv.LoadSpace.Response
+        :type response: cognitive_node_interfaces.srv.LoadSpace.Response
         :return: The response indicating if the space was loaded into the P-Node.
         :rtype: cognitive_node_interfaces.srv.LoadSpace.Response
         """
@@ -262,10 +262,8 @@ class PNode(CognitiveNode):
 
     def calculate_metacognitive_params(self):
         """
-        Calculate the metacognitive parameters of the P-Node.
-
-        :return: The metacognitive parameters of the P-Node.
-        :rtype: cognitive_node_interfaces.msg.MetacognitiveParams
+        Calculate the metacognitive parameters of the P-Node and store them in metacognitive_params: its
+        confidence is its success rate.
         """
         self.metacognitive_params["confidence"] = self.success_rate
     
@@ -303,8 +301,8 @@ class PNode(CognitiveNode):
         """
         Callback method that reads a perception and stores it in the activation inputs list.
 
-        :param msg: PerceptionStamped message that contains the perception and its timestamp.
-        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        :param msg: Container message that contains the perception and its timestamps.
+        :type msg: core_interfaces.msg.Container
         """        
         if msg.max_size>1:
             self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')

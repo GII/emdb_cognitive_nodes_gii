@@ -50,7 +50,7 @@ class DriveAlignment(Drive):
         Evaluation that always returns 1.0, as the drive is always active.
 
         :param perception: Unused perception, defaults to None.
-        :type perception: dict or NoneType
+        :type perception: core.container.Container or None
         :return: Evaluation of the Drive. It always returns 1.0.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        

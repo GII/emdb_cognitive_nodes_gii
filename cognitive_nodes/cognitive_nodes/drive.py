@@ -94,7 +94,7 @@ class Drive(CognitiveNode):
         Get expected valuation for a given perception.
 
         :param perception: The given normalized perception.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :raises NotImplementedError: Evaluate method has to be implemented in a child class.
         """
         raise NotImplementedError
@@ -160,7 +160,7 @@ class Drive(CognitiveNode):
         Returns the the activation value of the Drive.
 
         :param perception: The given perception.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :return: The activation of the instance and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
@@ -258,7 +258,7 @@ class DriveExponential(DriveTopicInput):
         Evaluates the drive value according to an exponential function.
 
         :param perception: The given normalized perception.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :return: The valuation of the perception and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """
@@ -276,20 +276,16 @@ class DriveExponential(DriveTopicInput):
 
 class DriveLLM(Drive):
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", drive_function=None, **params):
-        """Constructor of the DriveTopicInput class.
+        """Constructor of the DriveLLM class.
 
-        Initializes a base class Drive instance and creates a subscriptor to the input topic.
+        Initializes a base class Drive instance and creates a subscriptor to the input topic of each sensor used in the drive function.
 
         :param name: The name of the drive instance.
         :type name: str
         :param class_name: The name of the base Drive class.
         :type class_name: str
-        :param input_topic: Topic where the input will be published.
-        :type input_topic: str
-        :param input_msg: Message type of the input topic.
-        :type input_msg: ROS2 Interface
-        :param min_eval: Minimum evaluation value as input reaches 1.0, defaults to 0.0.
-        :type min_eval: float
+        :param drive_function: Expression (provided by the LLM) that computes the drive evaluation from the sensor values.
+        :type drive_function: str
         """        
         super().__init__(name, class_name, **params)
         self.drive_function = drive_function
