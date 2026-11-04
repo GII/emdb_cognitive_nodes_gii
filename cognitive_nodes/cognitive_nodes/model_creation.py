@@ -6,10 +6,11 @@ from rclpy.time import Time
 
 from core.service_client import ServiceClientAsync
 from core.container import Container
+from core.utils import class_from_classname
 from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from cognitive_nodes.drive import Drive
-from cognitive_nodes.policy import Policy
+from cognitive_nodes.policy import Policy, PolicyLearned
 from cognitive_nodes.utils import LTMSubscription, EpisodeSubscription
 
 from cognitive_node_interfaces.srv import AddPoints, AddTrace
@@ -20,6 +21,7 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         self.missing_world_model = False
         self.LTM_cache = {}
         self.unlinked_drives = []
+        self.generated_names = set()  # Names of the nodes created that may not be in the LTM cache yet
         self.configure_ltm_subscription(self.LTM_id, self.cbgroup_server)
         self.configure_episode_subscription(episode_topic=episode_topic, episode_msg=episode_msg, callback_group=self.cbgroup_server)
         self.default_class = {}
@@ -51,10 +53,10 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         
         #Remove elements in LTM Cache that were removed from LTM.
         for node_type in self.LTM_cache.keys():
-            for node in self.LTM_cache[node_type]:
-                if ltm_dump[node_type].get(node, None) is None:
+            for node in list(self.LTM_cache[node_type]):
+                if ltm_dump.get(node_type, {}).get(node, None) is None:
                     del self.LTM_cache[node_type][node]
-                    self.delete_activation_input({node: node_type})
+                    self.delete_activation_input({"name": node, "node_type": node_type})
 
         # Check if there are any drives not linked to goals
         self.unlinked_drives = self.get_unlinked_drives()
@@ -106,7 +108,8 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         index = 0
         while True:
             name = f"{node_type}_{index}"
-            if name not in self.LTM_cache.get(node_type, {}):
+            if name not in self.LTM_cache.get(node_type, {}) and name not in self.generated_names:
+                self.generated_names.add(name)
                 return name
             index += 1
 
@@ -219,11 +222,16 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             reward_list = episode.reward_list
             for goal, reward in reward_list.items():
                 if not isclose(reward, 0.0):
+                    # Each drive or goal needs its models only once, however many rewarded episodes arrive before the policy runs
                     if goal in self.unlinked_drives:
                         drive = goal
                         goal = None
+                        if any(node.get("drive") == drive for node in self.node_data):
+                            continue
                         self.node_data.append(dict(node_type="Goal", drive=drive))
                         self.get_logger().info(f"Unlinked drive found: {drive}. Goal node to be created.")
+                    elif any(node.get("goal") == goal for node in self.node_data):
+                        continue
                     if not self.linked_cnode(goal):
                         trace = self.episodic_buffer.main_buffer.read()
                         self.node_data.append(dict(node_type="UtilityModel", goal=goal, trace=trace))
@@ -370,6 +378,10 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
     async def create_policy(self, goal, drive, cnode_name):
         policy_name = f"policy_{drive if drive else goal}"
         policy_class = self.default_class.get("Policy", "cognitive_nodes.policy.PolicyLearned")
+        # Only a policy that learns can be created for a goal: other classes need parameters of their own (e.g. PolicyBlocking)
+        if not issubclass(class_from_classname(policy_class), PolicyLearned):
+            self.get_logger().info(f"{policy_class} is not a learned policy, not creating a policy for {drive if drive else goal}.")
+            return None
         policy_parameters = self.default_params.get("Policy", {})
         neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
         params = {**policy_parameters, **neighbors, "target_reward": goal}
