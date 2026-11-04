@@ -10,7 +10,7 @@ from cognitive_node_interfaces.msg import Evaluation
 from math import isclose
 
 class RobotPurpose(CognitiveNode):
-    """"
+    """
     Robot Purpose Class.
     """
     def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
@@ -133,7 +133,7 @@ class RobotPurpose(CognitiveNode):
         Returns the the activation value of the robot purpose.
 
         :param perception: Perception does not influence the activation.
-        :type perception: dict.
+        :type perception: core.container.Container or None
         :param activation_list: Activation list does not influence the activation.
         :type activation_list: list
         :return: The activation of the instance and its timestamp.
@@ -144,7 +144,7 @@ class RobotPurpose(CognitiveNode):
     
     
 class AlignmentMission(RobotPurpose):
-    """"
+    """
     Need Class for Alignment purposes.
     """
     def calculate_satisfaction(self):

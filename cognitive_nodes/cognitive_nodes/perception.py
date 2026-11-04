@@ -72,7 +72,7 @@ class Perception(CognitiveNode):
         Returns the the activation value of the instance.
 
         :param perception: Perception does not influence the activation of the instance.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activations. Not used in this case.
         :type activation_list: list
         :return: The activation of the instance and its timestamp.
@@ -105,11 +105,11 @@ class Perception(CognitiveNode):
         This method is not working yet.
 
         :param request: The request that contains the inputs data.
-        :type request: cognitive_node_interfaces.SetInputs.Request
+        :type request: cognitive_node_interfaces.srv.SetInputs.Request
         :param response: The response that indicates if the inputs were set.
-        :type response: cognitive_node_interfaces.SetInputs.Response
+        :type response: cognitive_node_interfaces.srv.SetInputs.Response
         :return: The response that indicates if the inputs were set.
-        :rtype: cognitive_node_interfaces.SetInputs.Response
+        :rtype: cognitive_node_interfaces.srv.SetInputs.Response
         """
         input_topics = request.input_topics
         input_msgs = request.input_msgs

@@ -217,10 +217,10 @@ class Sim2DWorldModel(WorldModel):
 
         :param name: The name of the World Model instance.
         :type name: str
-        :param actuation_config: Dictionary with the parameters of the actuation.
-        :type actuation_config: dict
-        :param perception_config: Dictionary with the parameters of the perception.
-        :type perception_config: dict
+        :param wm_actuation_config: Dictionary with the parameters of the actuation.
+        :type wm_actuation_config: dict
+        :param wm_perception_config: Dictionary with the parameters of the perception.
+        :type wm_perception_config: dict
         :param class_name: Name of the base WorldModel class, defaults to 'cognitive_nodes.world_model.WorldModel'.
         :type class_name: str
         """        

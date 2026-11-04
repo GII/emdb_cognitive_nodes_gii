@@ -73,7 +73,7 @@ class EpisodicBuffer:
         Creates the label list.
 
         :param episode: Episode object.
-        :type episode: cognitive_node_interfaces.msg.Episode
+        :type episode: cognitive_nodes.episode.Episode
         """
         self.node.get_logger().info(f"Configuring labels for episodic buffer: {episode}")
         self.input_labels.clear()
@@ -89,7 +89,7 @@ class EpisodicBuffer:
         Updates the label list based on the given episode.
 
         :param episode: Episode object.
-        :type episode: cognitive_node_interfaces.msg.Episode
+        :type episode: cognitive_nodes.episode.Episode
         """
         # The text of the episode is built only if it is going to be logged
         if self.node.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
@@ -195,7 +195,7 @@ class EpisodicBuffer:
         Checks if the episode is compatible with the current buffer configuration.
 
         :param episode: Episode object to check compatibility.
-        :type episode: cognitive_node_interfaces.msg.Episode
+        :type episode: cognitive_nodes.episode.Episode
         :return: True if compatible, False otherwise.
         :rtype: bool
         """
@@ -466,8 +466,8 @@ class EpisodicBuffer:
         :type io_list: list
         :param episode: Episode object to extract labels from.
         :type episode: Episode
-        :param label_list: List to append the extracted labels to.
-        :type label_list: list
+        :return: List of the extracted labels.
+        :rtype: list
         """
         label_list=[]
         for io in io_list:

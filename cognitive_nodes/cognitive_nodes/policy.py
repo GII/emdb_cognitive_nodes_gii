@@ -32,10 +32,6 @@ class Policy(CognitiveNode):
         :type name: str
         :param class_name: The name of the Policy class.
         :type class_name: str
-        :param publisher_msg: The publisher message to publicate the execution of the policy.
-        :type publisher: str
-        :param publisher_topic: The publisher topic to publicate the execution of the policy.
-        :type publisher: str
         """
         
         super().__init__(name, class_name, node_type=node_type, **params)
@@ -239,7 +235,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
     episodes_topic : str
         ROS 2 topic for Episode messages (subscribe + publish).
     episodes_msg : str
-        Fully qualified Episode message class.
+        Fully qualified message class of the episodes topic, usually ``core_interfaces.msg.Container``.
     actuation_config : dict
         Actuator structure, e.g. ``{"left_arm": ["dist", "angle"]}``.
     obs_dim : int
@@ -554,7 +550,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
     # ── Episode callback (passive collector) ──────────────────────────────────
 
     def episode_callback(self, msg):
-        """Receive Episode messages and accumulate them into the TraceBuffer.
+        """Receive the messages of the episodes topic (flattened episodes) and accumulate them into the TraceBuffer.
 
         Each step is staged with reward=0.0.  On success (reward > 0), the final
         step is added with the actual reward, which causes TraceBuffer to evaluate

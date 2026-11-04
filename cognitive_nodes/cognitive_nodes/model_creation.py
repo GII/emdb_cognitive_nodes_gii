@@ -166,7 +166,7 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
         Returns the the activation value of the Drive.
 
         :param perception: The given perception.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :return: The activation of the instance and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """

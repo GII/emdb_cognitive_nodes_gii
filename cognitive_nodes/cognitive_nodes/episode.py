@@ -144,8 +144,8 @@ class Episode:
     def update_reward(self, reward_dict_list: dict | list[dict], timestamp: float|Time) -> None:
         """Update the episode's rewards with new reward values.
 
-        :param reward_dict: A dictionary mapping goal identifiers to reward values.
-        :type reward_dict: dict
+        :param reward_dict_list: A dictionary (or list of dictionaries) mapping goal identifiers to reward values.
+        :type reward_dict_list: dict | list[dict]
         :param timestamp: A single timestamp for the rewards.
         :type timestamp: float | Time
         :return: None
@@ -259,12 +259,12 @@ def container_to_episode_obj(container: Container|xr.DataArray) -> Episode:
 
 def episode_obj_to_msg(episode: Episode, name="episodes") -> ContainerMsg:
     """
-    Convert an Episode object to a ROS2 Episode message.
+    Convert an Episode object to a ROS2 Container message.
 
     :param episode: The Episode object.
     :type episode: Episode
-    :return: A ROS2 Episode message.
-    :rtype: cognitive_node_interfaces.msg.Episode
+    :return: A ROS2 Container message with the flattened episode.
+    :rtype: core_interfaces.msg.Container
     """
     cont = episode.obtain_flattened_episode()
     return cont.to_msg() if cont is not None else ContainerMsg()
