@@ -7,9 +7,9 @@ This [repository](https://github.com/pillar-robots/emdb_cognitive_nodes_gii) con
 There are two ROS 2 packages in this repository:
 
 - **cognitive_nodes:** Implementations of the cognitive nodes.
-- **cognitive_nodes_interfaces:** Services and messages definitions.
+- **cognitive_node_interfaces:** Services and messages definitions.
 
-We can find four sections in this documentation:
+We can find five sections in this documentation:
 
 - [Concepts:](concepts/concepts.md) Theoretical concepts about the cognitive nodes into the cognitive architecture and explanation of the intrinsic motivations implemented in the cognitive architecture.
 - [Cognitive Nodes API documentation:](cognitive_nodes/cn_api_documentation.rst) API of the cognitive nodes implemented by the GII.
