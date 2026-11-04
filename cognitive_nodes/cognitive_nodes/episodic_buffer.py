@@ -127,23 +127,22 @@ class EpisodicBuffer:
         - Empty episodes (w.r.t configured inputs/outputs) are skipped with a warning.
         - Labels are configured lazily on the first episode and updated when new dimensions appear.
         """
-        self.semaphore.acquire()
-        if self.empty_episode(episode, self.inputs, self.outputs):
-            self.node.get_logger().warning("The episode is empty, not adding to buffer.")
-        else:
-            if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
-                self.configure_labels(episode)
+        with self.semaphore:
+            if self.empty_episode(episode, self.inputs, self.outputs):
+                self.node.get_logger().warning("The episode is empty, not adding to buffer.")
             else:
-                self.update_labels(episode)
-            if self.rng.uniform() < self.train_split:
-                # Add to main buffer
-                self.main_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
-                self.new_sample_count_main += 1
-            else:
-                # Add to secondary buffer
-                self.secondary_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
-                self.new_sample_count_secondary += 1
-        self.semaphore.release()
+                if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
+                    self.configure_labels(episode)
+                else:
+                    self.update_labels(episode)
+                if self.rng.uniform() < self.train_split:
+                    # Add to main buffer
+                    self.main_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
+                    self.new_sample_count_main += 1
+                else:
+                    # Add to secondary buffer
+                    self.secondary_buffer.push(episode.obtain_flattened_episode(), extend_labels=self.flexible_labels, allow_missing=self.flexible_labels)
+                    self.new_sample_count_secondary += 1
 
     def remove_episode(self, index=None, remove_from_main=True):
         """Remove an episode from the buffer.
@@ -160,16 +159,17 @@ class EpisodicBuffer:
         :rtype: None
 
         """
-        self.semaphore.acquire() # Remember to apply the semaphore once the method is implemented to ensure thread safety
-        raise NotImplementedError("remove_episode method is not implemented yet.")
-        self.semaphore.release()
+        with self.semaphore: # Remember to apply the semaphore once the method is implemented to ensure thread safety
+            raise NotImplementedError("remove_episode method is not implemented yet.")
 
     def clear(self):
         """
-        Clears the episodic buffer.
+        Clears the episodic buffer. The buffers don't exist until the labels are configured.
         """
-        self.main_buffer.clear()
-        self.secondary_buffer.clear()
+        if self.main_buffer is not None:
+            self.main_buffer.clear()
+        if self.secondary_buffer is not None:
+            self.secondary_buffer.clear()
         self.main_dataframe = None
         self.secondary_dataframe = None
         self.new_sample_count_main = 0
@@ -592,19 +592,18 @@ class TraceBuffer(EpisodicBuffer):
         - Positive rewards trigger utility evaluation and trace storage.
         - The buffer is cleared after storing a successful trace.
         """
-        self.semaphore.acquire()
-        if type(episode) is not Episode:
-            raise ValueError("The episode must be of type Episode.")
-        if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
-            self.configure_labels(episode)
-        self.main_buffer.push(episode.obtain_flattened_episode())
-        self.new_sample_count_main += 1
+        with self.semaphore:
+            if type(episode) is not Episode:
+                raise ValueError("The episode must be of type Episode.")
+            if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
+                self.configure_labels(episode)
+            self.main_buffer.push(episode.obtain_flattened_episode())
+            self.new_sample_count_main += 1
 
-        #Add corresponding trace
-        if reward > 0: # If the reward is positive, consider it a successful trace
-            trace=self.main_buffer # Trace corresponds to the contents of the main buffer
-            self._add_trace(trace, reward, clear_main_buffer=True) # Add the trace to the traces buffer with the corresponding reward, and clear the main buffer for the next trace
-        self.semaphore.release()
+            #Add corresponding trace
+            if reward > 0: # If the reward is positive, consider it a successful trace
+                trace=self.main_buffer # Trace corresponds to the contents of the main buffer
+                self._add_trace(trace, reward, clear_main_buffer=True) # Add the trace to the traces buffer with the corresponding reward, and clear the main buffer for the next trace
 
     def add_trace (self, trace: Episode, reward: float = 0, reward_trace: np.ndarray = None):
         """Public method to add a trace to the buffer with an associated reward.
@@ -619,13 +618,12 @@ class TraceBuffer(EpisodicBuffer):
         :param reward_trace: Optional precomputed utility values for the trace; if None, utilities are computed using the evaluation method, defaults to None
         :type reward_trace: np.ndarray | None, optional
         """
-        self.semaphore.acquire()
-        if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
-            self.configure_labels(trace)
+        with self.semaphore:
+            if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
+                self.configure_labels(trace)
 
-        flat_episodes = trace.obtain_flattened_episode()
-        self._add_trace(flat_episodes, reward, reward_trace, clear_main_buffer=False)
-        self.semaphore.release()
+            flat_episodes = trace.obtain_flattened_episode()
+            self._add_trace(flat_episodes, reward, reward_trace, clear_main_buffer=False)
 
 
     def _add_trace(self, trace: Container, reward: float = 0, reward_trace: np.ndarray = None, clear_main_buffer: bool = True):
@@ -658,17 +656,16 @@ class TraceBuffer(EpisodicBuffer):
     def add_antitrace(self):
         """Add an antitrace to the buffer if enough traces exist.
         """        
-        self.semaphore.acquire()
-        if self.n_traces >= self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
-            self.node.get_logger().info("Adding antitrace")
-            trace=self.main_buffer.read(None, ordered=True) # Ensure the buffer is ordered for correct utility assignment
-            trace_data = np.concatenate((trace.values, np.zeros((len(trace.values), 1))), axis=1) # Combine episode data with utility values
-            trace_labels = self.main_buffer.feature_labels + ["utility"]
-            trace_timestamps = trace.coords["timestamp"].values 
-            dtype = self.main_buffer.data.dtype
-            self.antitraces_buffer.push(trace_data, src_labels=trace_labels, src_dtype=dtype, timestamps=trace_timestamps)
-            self.clear()
-        self.semaphore.release()
+        with self.semaphore:
+            if self.n_traces >= self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
+                self.node.get_logger().info("Adding antitrace")
+                trace=self.main_buffer.read(None, ordered=True) # Ensure the buffer is ordered for correct utility assignment
+                trace_data = np.concatenate((trace.values, np.zeros((len(trace.values), 1))), axis=1) # Combine episode data with utility values
+                trace_labels = self.main_buffer.feature_labels + ["utility"]
+                trace_timestamps = trace.coords["timestamp"].values 
+                dtype = self.main_buffer.data.dtype
+                self.antitraces_buffer.push(trace_data, src_labels=trace_labels, src_dtype=dtype, timestamps=trace_timestamps)
+                self.clear()
 
     def evaluate_trace(self, reward, n=None):
         """Compute utility values for each episode in the current trace.
