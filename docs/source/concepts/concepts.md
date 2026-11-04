@@ -83,7 +83,7 @@ Each of these mechanisms contributes to the autonomous creation and organization
 ### Exploration
 
 Exploration encourages the robot to actively seek new and previously unvisited areas of its perceptual space. The system is motivated to identify novel situations and construct new P-Nodes and goals that help represent and structure the state space.
-Within the e-MDB cognitive architecture, exploration is a fundamental intrinsic motivation expand its knowledge. This exploration, at this moment, can be operated by two mechanisms:
+Within the e-MDB cognitive architecture, exploration is a fundamental intrinsic motivation expand its knowledge. This exploration, at this moment, can be operated by three mechanisms:
 
 1. **Random Exploration**: The robot randomly selects actions to explore its environment. This approach allows the system to discover new perceptual states and learn about them without any prior knowledge or specific goals. Random exploration is particularly useful in the early stages of learning, where the robot has limited information about its surroundings.
 
