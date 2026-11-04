@@ -76,7 +76,7 @@ class UtilityModel(DeliberativeModel):
         """        
         self.deliberation_executor = SingleThreadedExecutor()
         self.deliberation_executor.add_node(self.deliberation)
-        self.deliberation_thread = threading.Thread(target=self.deliberation_executor.spin)
+        self.deliberation_thread = threading.Thread(target=self.deliberation_executor.spin, daemon=True)
         self.deliberation_thread.start()
 
     def calculate_activation(self, perception = None, activation_list=None):
@@ -131,10 +131,11 @@ class UtilityModel(DeliberativeModel):
 
         return response
     
-    def execute_callback(self, request, response):
+    async def execute_callback(self, request, response):
         """
         Callback for the execute service.
-        Executes the action and returns the response.
+        Runs a deliberation cycle in the process thread and returns the response. The callback is suspended
+        meanwhile: the deliberation needs services and activations of nodes that may share this executor.
 
         :param request: The request from the service.
         :type request: cognitive_node_interfaces.srv.Execute.Request
@@ -144,14 +145,19 @@ class UtilityModel(DeliberativeModel):
         :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info(f"Executing deliberation: {self.name}")
-        self.deliberation.start_flag.set()
-        self.deliberation.finished_flag.wait()
-        self.deliberation.finished_flag.clear()
+        await self.deliberation.run_cycle(self)
         self.get_logger().info(f"Deliberation finished: {self.name}")
         response.policy = self.name
         response.episode = episode_obj_to_msg(self.deliberation.summary_episode)
 
         return response
+
+    def after_deliberation(self):
+        """
+        Work to do at the end of each deliberation cycle, in the process thread, before the execute
+        callback responds. By default, nothing.
+        """
+        pass
     
     def predict_callback(self, request, response):
         """
@@ -525,24 +531,16 @@ class LearnedUtilityModel(UtilityModel):
             self.learner.train(x_train, y_train, validation_split=self.validation_split)
             self.episodic_buffer.reset_new_sample_count()
 
-    def execute_callback(self, request, response):
-        """Execute the deliberation process and perform a training step if sufficient traces are available.
-        
-        This method extends the parent class execution callback by adding a training step
-        after deliberation completes. It logs the current state of the episodic buffer
-        including trace counts and triggers model training if the minimum trace threshold is met.
+    def after_deliberation(self):
+        """Perform a training step if sufficient traces are available.
 
-        :param request: The request object from the Execute service containing execution parameters.
-        :type request: cognitive_node_interfaces.srv.Execute.Request
-        :param response: The response object to be populated with execution results.
-        :type response: cognitive_node_interfaces.srv.Execute.Response
-        :return: The response object containing the policy name and summary episode from deliberation.
-        :rtype: cognitive_node_interfaces.srv.Execute.Response
-        """       
-        response = super().execute_callback(request, response)
+        It runs in the process thread: training takes long and, in QUtilityModel, it calls services and
+        waits for their responses, which a callback must not do. The semaphore keeps it from running at
+        the same time as update_ltm_and_train.
+        """
         self.get_logger().info(f"Total traces: {self.episodic_buffer.n_traces}, Total antitraces: {self.episodic_buffer.n_antitraces} New traces: {self.episodic_buffer.new_traces}, Min traces: {self.min_traces} {self.episodic_buffer.min_traces}")
-        self.train_step()
-        return response
+        with self.update_semaphore:
+            self.train_step()
 
     def episode_callback(self, msg):
         """Handle incoming episode messages and update the episodic buffer and learning model.
@@ -611,10 +609,9 @@ class LearnedUtilityModel(UtilityModel):
         :param ltm_cache: The Long-Term Memory cache to be updated.
         :type ltm_cache: dict
         """
-        self.update_semaphore.acquire()
-        self.deliberation.update_pnodes_reward_basis(reward_list, ltm_cache)
-        self.train_step()
-        self.update_semaphore.release()
+        with self.update_semaphore:
+            self.deliberation.update_pnodes_reward_basis(reward_list, ltm_cache)
+            self.train_step()
         
 
     def add_trace_callback(self, request, response):
@@ -795,9 +792,11 @@ class QUtilityModel(LearnedUtilityModel):
 
             # Compute target Q-values
             candidate_states_actions = self.deliberation.generate_candidate_actions(episodes.perception)
-            if self.deliberation.current_world is None:
-                self.deliberation.current_world = self.deliberation.get_linked_world_model()[0]
-            next_states = self.deliberation.predict_perceptions(self.deliberation.current_world, candidate_states_actions)
+            world_model = self.deliberation.current_world
+            if world_model is None:
+                linked_world_models = self.deliberation.get_linked_world_model()
+                world_model = linked_world_models[0] if linked_world_models else None
+            next_states = self.deliberation.predict_perceptions(world_model, candidate_states_actions)
             q_values_next = self.predict(next_states, target_learner=True)
             max_q_values_next = self.obtain_maximum_value(q_values_next)
             y_train = np.array([reward + self.discount_factor * max_q if reward < 1.0 else reward for reward, max_q in zip(rewards, max_q_values_next)])
