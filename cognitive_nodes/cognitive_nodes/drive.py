@@ -3,6 +3,7 @@ from copy import copy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.time import Time
+from rclpy.logging import LoggingSeverity
 
 from core.utils import class_from_classname, perception_msg_to_dict
 from core.cognitive_node import CognitiveNode
@@ -237,7 +238,9 @@ class DriveTopicInput(Drive):
         Timed publish of the activation value. This method will calculate the activation based on the evaluation of the drive and the activation of its neighbors, and then publish it in the corresponding topic.
         """   
         if self.activation_topic:
-            self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
+            # The text is built only if it is going to be logged: building it every period is expensive
+            if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+                self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
             updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
             updated_evaluations= self.input_flag
 
@@ -404,7 +407,9 @@ class DriveLLM(Drive):
         
         """   
         if self.activation_topic:
-            self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
+            # The text is built only if it is going to be logged: building it every period is expensive
+            if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+                self.get_logger().debug(f'Activation Inputs: {str(self.activation_inputs)}')
             updated_activations= all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs))
             updated_evaluations= self.input_flag
 

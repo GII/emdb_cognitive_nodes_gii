@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.logging import LoggingSeverity
 import numpy as np
 from math import isclose, cos, sin, pi
 
@@ -129,7 +130,9 @@ class Perception(CognitiveNode):
         :type reading: cognitive_node_interfaces.msg.Perception
         """
         if self.activation.activation > self.threshold:
-            self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
+            # The debug texts are built only if they are going to be logged: perceptions arrive every period
+            if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+                self.get_logger().debug("Receiving " + self.name + " = " + str(reading))
             self.reading = reading
             self.process_and_send_reading()
         else:
@@ -202,7 +205,8 @@ class DiscreteEventSimulatorPerception(Perception):
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
         self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+            self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()
         self.perception_publisher.publish(sensor_msg)
 
@@ -283,7 +287,8 @@ class FruitShopPerception(Perception):
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
         self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+            self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()
         self.perception_publisher.publish(sensor_msg)
 
@@ -368,7 +373,8 @@ class OscarLLMPerception(Perception):
             self.container = Container(self.name, max_size=1, container_type="perception", labels=labels)
         self.container.push(data, labels, timestamps=self.get_clock().now().nanoseconds)
 
-        self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
+        if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+            self.get_logger().debug("Publishing normalized " + self.name + " = " + str(self.container))
         sensor_msg = self.container.to_msg()
         self.perception_publisher.publish(sensor_msg)
 
