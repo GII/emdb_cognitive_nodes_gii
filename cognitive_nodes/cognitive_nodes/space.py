@@ -23,7 +23,11 @@ from cognitive_nodes.random_utils import set_global_seeds
 from core_interfaces.msg import Container as ContainerMsg
 
 class Space(object):
-    """A n-dimensional state space."""
+    """A n-dimensional state space.
+
+    Base class of the spaces used by the cognitive nodes. It stores the identifier, an optional parent space, a logger
+    and a random number generator. Subclasses implement the ``configured`` property.
+    """
 
     def __init__(self, ident=None, random_seed=0, logger=None, **kwargs):
         """Init attributes when a new object is created.
@@ -31,9 +35,12 @@ class Space(object):
         :param ident: The name of the space.
         :type ident: str
         :param random_seed: Seed for the space's random number generator. Set it
-            to make stochastic space operations reproducible. ``None`` (default)
-            keeps the previous non-deterministic behaviour.
+            to make stochastic space operations reproducible. Defaults to 0; 0 and ``None`` both mean that a seed is derived
+            from the current time (see :func:`core.utils.resolve_seed`). The resolved seed is stored in ``self.random_seed``.
         :type random_seed: int or None
+        :param logger: Logger to use. If None, one named ``space_<ident>`` is obtained with ``rclpy.logging.get_logger``.
+        :type logger: rclpy.impl.rcutils_logger.RcutilsLogger or None
+        :param kwargs: Additional keyword arguments, ignored.
         """
         self.ident = ident
         self.parent_space = None
@@ -56,7 +63,18 @@ class Space(object):
 
 
 class PointBasedSpace(Space):
-    """A state space based on points."""
+    """A state space based on points.
+
+    The points are stored in a :class:`core.container.Container` named ``<ident>_data`` (type ``"space"``) with one row per
+    point. Its columns are the features of the perceptions the space was built from, followed by a last column
+    ``confidence``. A point with a positive confidence is a point of the space; a point with a confidence of 0 or less
+    is an antipoint (the code uses -1.0 for them). When the container is full, new points overwrite the oldest ones.
+
+    The container is created when the first point is added (see :meth:`add_point`), so ``members`` and ``memberships`` are
+    empty until then. Subclasses implement :meth:`get_probability`, which gives the activation of the perceptions.
+    If the space has a ``parent_space``, the subclasses in this module combine the activations by taking the minimum
+    of both, and :meth:`add_point` also adds the points to the parent.
+    """
 
     def __init__(self, size=30000, **kwargs):
         """
@@ -84,8 +102,11 @@ class PointBasedSpace(Space):
         """
         Get the members of the space.
 
-        :return: The members of the space.
-        :rtype: list
+        The values are read with ``Container.read_numpy`` (cheaper than ``read``), from the oldest point to the newest, and
+        the ``confidence`` column is removed. The result is a new array.
+
+        :return: The points and antipoints, with one row per point and one column per feature of the space. An empty 1D array if the space has no data yet.
+        :rtype: numpy.ndarray
         """
         if self._data is not None:
             # read_numpy is much cheaper than read(), which builds a new xarray object. Same values and order;
@@ -100,8 +121,8 @@ class PointBasedSpace(Space):
         """
         Get the feature labels of the space.
 
-        :return: The feature labels of the space.
-        :rtype: list
+        :return: The feature labels of the space, without ``confidence``. An empty list if the space has no data yet.
+        :rtype: list[str]
         """
         if self._data is not None:
             return self._data.feature_labels[:-1]  # Exclude the last label which is "confidence"
@@ -113,8 +134,10 @@ class PointBasedSpace(Space):
         """
         Get the memberships of the space.
 
-        :return: The memberships of the space.
-        :rtype: list
+        These are the values of the ``confidence`` column, in the same order as the rows of ``members``.
+
+        :return: The confidences of the points, as an array of one column (shape (n, 1)). An empty 1D array if the space has no data yet.
+        :rtype: numpy.ndarray
         """
         if self._data is not None:
             # A new array of one column, as before (see members)
@@ -150,6 +173,10 @@ class PointBasedSpace(Space):
     def initialize_data_structure(self, point: Container, size): 
         """
         Initialize the data container of the space based on the given point and size.
+
+        Creates the empty Container ``<ident>_data`` (type ``"space"``) with the features of the point plus ``confidence``,
+        and stores the features in ``input_labels``.
+
         :param point: A perception that will provide the structure for the space.
         :type point: Container
         :param size: The maximum number of points of the container.
@@ -163,7 +190,9 @@ class PointBasedSpace(Space):
         """
         Only antipoints are considered learnables.
 
-        :return: Return if the perception (point) is learnable or not.
+        The space is learnable if at least one of its stored points has a confidence of -1.0.
+
+        :return: True if the space contains an antipoint with confidence -1.0, False otherwise.
         :rtype: bool
         """
         for i in self.memberships[0 : self.size]:
@@ -172,7 +201,17 @@ class PointBasedSpace(Space):
         return False
     
     def reload_members(self, members, memberships, timestamps):
-        """ Reload the members and memberships of the space with new values."""
+        """Reload the members and memberships of the space with new values.
+
+        The container is cleared and the given points are pushed in order.
+
+        :param members: Features of the points, one row per point.
+        :type members: numpy.ndarray
+        :param memberships: Confidence of each point.
+        :type memberships: numpy.ndarray
+        :param timestamps: Timestamp of each point.
+        :type timestamps: numpy.ndarray
+        """
         self._data.clear()
         data = np.concatenate([members, memberships.reshape(-1, 1)], axis=1)
         labels = self._data.feature_labels
@@ -182,10 +221,13 @@ class PointBasedSpace(Space):
         """
         Select the features of the space from the given perception.
 
+        The columns are taken by label, in the order of the features of the space (read with ``Container.read_numpy``).
+
         :param perception: The given perception to select the features from.
         :type perception: Container
         :return: Array with one row per perception row and one column per feature of the space.
         :rtype: numpy.ndarray
+        :raises KeyError: If the perception lacks any feature of the space.
         """
         # The features of the space, in its order (see members about read_numpy)
         perception_labels = perception.feature_labels
@@ -216,15 +258,18 @@ class PointBasedSpace(Space):
         """
         Obtain info about the closest point and antipoint for a given foreigner.
 
-        :param members: Set of the points and antipoints.
+        Euclidean distances are used. A member is a point if its membership is greater than 0 and an antipoint otherwise.
+
+        :param members: Set of the points and antipoints, one per row.
         :type members: np.ndarray
-        :param memberships: The confidence of the points contained in members.
+        :param memberships: The confidence of the points contained in members, one value per row of members.
         :type memberships: numpy.ndarray
         :param foreigner: The given foreigner point in order to obtain the info.
         :type foreigner: numpy.ndarray
-        :return: The position of in the members array the closest point and antipoints and
-            their distance with the foreigner point.
-        :rtype: int (position), float (distance)
+        :return: Tuple (closest point position, closest point distance, closest antipoint position, closest antipoint distance).
+            The positions are indexes of the rows of members. If there is no point (or no antipoint), its position is None and its distance
+            is the largest float (``numpy.finfo(float).max``).
+        :rtype: tuple[int | None, float, int | None, float]
         """
         distances = np.linalg.norm(members - foreigner, axis=1)
         closest_point_pos = None
@@ -244,12 +289,17 @@ class PointBasedSpace(Space):
 
     def specialize(self, space=None):
         """
-        Return a new space with those fields that are in r"space" and not in r"self".
+        Return a new, more specific space whose parent is this one.
 
-        :param space: Space used to specialize.
-        :type space: cognitive_nodes.Space
+        The new space is of the same class, created with the default arguments of its constructor, and its ``parent_space`` is
+        this space. Points added to the new space are also added to the parent (see :meth:`add_point`), and its activations
+        are limited by the parent's. If ``space`` is given, the code calls ``new_space.add_point(space, 1.0)``, that is, it passes
+        it as the perceptions and 1.0 as the confidence.
+
+        :param space: Perception passed to ``add_point`` of the new space, defaults to None (nothing is added).
+        :type space: core.container.Container
         :return: The new space.
-        :rtype: cognitive_nodes.Space
+        :rtype: PointBasedSpace
         """
         new_space = type(self)()
         new_space.parent_space = self
@@ -259,15 +309,23 @@ class PointBasedSpace(Space):
 
     def add_point(self, perceptions: Container, confidences: np.ndarray):
         """
-        Add a new point to the P-Node.
+        Add new points to the space.
 
-        :param perceptions: A given perception to add.
+        Rule for antipoints: a row is added if its confidence is greater than 0.0 (a point), or if the space already gives it a
+        probability greater than 0.0 (``get_probability``). An antipoint (confidence 0 or less) for which the space does not activate
+        is therefore discarded. The probabilities are those of the space before adding anything, so when the space is still empty
+        its subclasses return 0 and only points are added.
+
+        If at least one row is added: the whole ``perceptions`` and ``confidences`` are first passed to ``add_point`` of the
+        parent space, if there is one; the data container is created if the space is empty (with ``real_size`` as the maximum
+        size); and the selected rows are pushed with their timestamps and the confidence as the last column.
+
+        :param perceptions: A given perception to add, with one row per point.
         :type perceptions: core.container.Container
         :param confidences: The confidences of the added points that specify if they are points or
-            antipoints.
+            antipoints, one per row of perceptions.
         :type confidences: numpy.ndarray
-        :raises RuntimeError: If LTM operation cannot continue.
-        :return: The position of the added point.
+        :return: The result of ``Container.push`` for the added rows (the slot of a single row, or an array of slots), or -1 if no row was added.
         :rtype: int | numpy.ndarray
         """
         added_point_pos = -1
@@ -296,6 +354,8 @@ class PointBasedSpace(Space):
         """
         Calculate the new activation value.
 
+        Implemented by the subclasses, which return one value per row of the perceptions.
+
         :param perceptions: The given perceptions to calculate the activation.
         :type perceptions: core.container.Container
         :raises NotImplementedError: The method has to be implemented in a child class.
@@ -306,6 +366,16 @@ class PointBasedSpace(Space):
         """
         Check if other space is contained inside this one.
         That happens if this space has a given value of probability for every point belonging to the other space.
+
+        Only the points of the other space (confidence greater than 0) are checked, using ``get_probability`` of this space.
+        The points that are below the threshold are written to the log.
+
+        :param space_data: Data container of the other space, with a ``confidence`` column.
+        :type space_data: core.container.Container
+        :param threshold: Minimum probability that every point must have, defaults to 0.9.
+        :type threshold: float
+        :return: True if every point of the other space has a probability of at least the threshold, or if the other space only has antipoints (nothing to check). False if the other space is empty or some point is below the threshold.
+        :rtype: bool
         """
         data_name = space_data.name[:-5] if space_data.name.endswith("_data") else space_data.name
         self.logger.info(f"Checking if space {space_data.name} is contained with threshold {threshold}")
@@ -366,6 +436,8 @@ class PointBasedSpace(Space):
         """
         Prune sensors that are present only in this space or in the space given for comparison.
 
+        The data container of this space is replaced by one with only the features that both spaces have.
+
         :param space: The given space.
         :type space: cognitive_nodes.Space
         """
@@ -394,11 +466,14 @@ class RulesBasedSpace(PointBasedSpace):
 
 class ExactClosestPointBasedSpace(RulesBasedSpace):
     """
-    Calculate the new activation value.
+    Space whose activation is 1 for the points it already contains and -1 for the rest.
 
-    This activation value is for a given perception and it is calculated as follows:
-    - Calculate the closest point to the new point.
-    - If the closest point has a positive membership, and the distance between points is small, the membership of the new point is 1. Otherwise, the activation is -1.
+    The activation of each row of a perception is calculated as follows:
+
+    - Find the closest stored member (Euclidean distance).
+    - If it has a positive membership and the distance is practically zero (``numpy.isclose`` with ``atol=1e-6``), the activation is 1.0. Otherwise it is -1.0.
+    - If the space has no points yet, the activation is 0.0.
+    - If there is a parent space, the result is the elementwise minimum of both activations.
     """
     
     def get_probability(self, perceptions):
@@ -444,12 +519,14 @@ class ExactClosestPointBasedSpace(RulesBasedSpace):
 
 class ClosestPointBasedSpace(RulesBasedSpace):
     """
-    Calculate the new activation value.
+    Space whose activation depends on the closest stored member.
 
-    This activation value is for a given perception and it is calculated as follows:
-    - Calculate the closest point to the new point.
-    - If the closest point has a positive membership, the membership of the new point is that divided by the distance
-    between them. Otherwise, the activation is -1.
+    The activation of each row of a perception is calculated as follows:
+
+    - Find the closest stored member (Euclidean distance).
+    - If it has a positive membership, the activation is that membership divided by (distance + 1). Otherwise it is -1.0.
+    - If the space has no points yet, the activation is 0.0.
+    - If there is a parent space, the result is the elementwise minimum of both activations.
     """
     def get_probability(self, perceptions):
         """
@@ -495,17 +572,15 @@ class ClosestPointBasedSpace(RulesBasedSpace):
 
 class CentroidPointBasedSpace(RulesBasedSpace):
     """
-    Calculate the new activation value.
+    Space whose activation depends on the closest member and on the centroid of the points.
 
-    This activation value is for a given perception and it is calculated as follows:
-    - Calculate the closest point to the new point.
-    - If the closest point has a positive membership, the membership of the new point is that divided by the distance
-    between them.
-    - Otherwise:
-    * Calculate the centroid of points with a positive membership.
-    * If the distance from the new point to the centroid is less than the distance from the closest point to the
-    centroid, then the activation is calculated as before but using the closest point with positive
-    membership. Otherwise the activation is -1.
+    The activation of each row of a perception is calculated as follows:
+
+    - Find the closest stored member (Euclidean distance).
+    - If it has a positive membership, the activation is that membership divided by (distance + 1).
+    - Otherwise (the closest member is an antipoint), the centroid of the members with a positive membership is computed. If the new point is closer to the centroid than the antipoint is (with a margin of 1e-6), the activation is calculated as above but with the closest member of positive membership. If not, it is -1.0.
+    - If the space has no points yet, the activation is 0.0.
+    - If there is a parent space, the result is the elementwise minimum of both activations.
     """
 
     def get_probability(self, perceptions):
@@ -581,18 +656,15 @@ class CentroidPointBasedSpace(RulesBasedSpace):
 
 class NormalCentroidPointBasedSpace(RulesBasedSpace):
     """
-    Calculate the new activation value.
+    Variant of :class:`CentroidPointBasedSpace` with a stochastic condition for the antipoints.
 
-    This activation value is for a given perception and it is calculated as follows:
-    - Calculate the closest point to the new point.
-    - If the closest point has a positive membership, the membership of the new point is that divided by the distance
-    between them.
-    - Otherwise:
-    * Calculate the centroid of points with a positive membership.
-    * If the distance from the new point to the centroid is less than the distance from the closest point to the
-    centroid, or the distance of the closest point to the line that goes from the new point to the centroid is high
-    (see source code), then the activation is calculated as before but using the closest point with positive
-    membership, otherwise the activation is -1.
+    The activation of each row of a perception is calculated as follows:
+
+    - Find the closest stored member (Euclidean distance).
+    - If it has a positive membership, the activation is that membership divided by (distance + 1).
+    - Otherwise (the closest member is an antipoint), the centroid of the members with a positive membership is computed. The activation is calculated as above but with the closest member of positive membership if the new point is closer to the centroid than the antipoint, or if a random number drawn from [0, 1) (with the random number generator of the space, so it depends on ``random_seed``) is less than ``distance(antipoint, centroid) * separation / distance(new point, centroid)``, where ``separation`` is the distance from the antipoint to the line that goes from the centroid to the new point. Otherwise it is -1.0.
+    - If the space has no points yet, the activation is 0.0.
+    - If there is a parent space, the result is the elementwise minimum of both activations.
     """
 
     def get_probability(self, perceptions):
@@ -723,11 +795,25 @@ class ActivatedDummySpace(PointBasedSpace):
 class SVMSpace(PointBasedSpace):
     """
     Use a SVM to calculate activations.
+
+    The space is configured (``configured`` is True) once it contains an antipoint with confidence -1.0 and the SVM has been
+    fitted. Before that, the activation of every perception is 1.0. After that, the activation is the decision function of
+    the SVM, limited to 2 and divided by 2 (so at most 1). With a parent space, the minimum of both is returned.
     """
 
     def __init__(self, kernel="poly", degree=32, max_iter=200000, **kwargs):
         """
         Init attributes when a new object is created.
+
+        Creates a ``sklearn.svm.SVC`` and then initializes the space.
+
+        :param kernel: Kernel of the SVM, defaults to "poly".
+        :type kernel: str
+        :param degree: Degree of the polynomial kernel, defaults to 32.
+        :type degree: int
+        :param max_iter: Maximum number of iterations of the SVM solver, defaults to 200000.
+        :type max_iter: int
+        :param kwargs: Arguments for :class:`PointBasedSpace` (``size``) and :class:`Space` (``ident``, ``random_seed``, ``logger``). ``random_seed`` is also resolved (see :func:`core.utils.resolve_seed`) to give the ``random_state`` of the SVM; when it is 0 or None, the SVM gets its own time-based seed, which is not the same as ``self.random_seed``.
         """
         # random_seed is read from kwargs because super().__init__ (which stores
         # self.random_seed) has not run yet at this point.
@@ -749,7 +835,10 @@ class SVMSpace(PointBasedSpace):
         """
         Fit and score the SVM Model.
 
-        :return: The score of the model.
+        The SVM is fitted with all the stored points, using as classes 1 for the points (confidence greater than 0) and 0 for
+        the antipoints. The score is measured on the same data.
+
+        :return: The score of the model (mean accuracy over the stored points).
         :rtype: float
         """
         members = self.members
@@ -773,6 +862,11 @@ class SVMSpace(PointBasedSpace):
     def remove_close_points(self):
         """
         Remove points that are too close in space.
+
+        Repeats, until the fitted SVM scores 1.0 on the remaining points: increase a distance threshold by 0.1 and drop the
+        stored points that are at that distance or less from the newest point (which is kept), if that removes other points
+        besides the newest one; then reload the space and refit the SVM. If the space is not learnable after dropping them, the loop ends
+        without fitting.
         """
         threshold = 0
         previous_size = self.size
@@ -809,15 +903,21 @@ class SVMSpace(PointBasedSpace):
 
     def add_point(self, perceptions, confidences):
         """
-        Add a new point to the P-Node.
+        Add a new point and update the SVM.
+
+        The point is added as in :meth:`PointBasedSpace.add_point`. If the space is learnable (it has an antipoint with
+        confidence -1.0), it is marked as configured and the SVM is fitted. Then the prediction for the perception is
+        checked against its confidence: if the sign differs, the SVM is fitted again and, if its score is below 1.0,
+        :meth:`remove_close_points` is called. The code compares the confidence and the prediction with ``and``, so it
+        is meant for perceptions with a single row.
 
         :param perceptions: A given perception to add.
         :type perceptions: core.container.Container
         :param confidences: The confidences of the added points that specify if they are points or
             antipoints.
         :type confidences: numpy.ndarray
-        :return: The position of the added point.
-        :rtype: int
+        :return: The position of the added point, as in :meth:`PointBasedSpace.add_point`.
+        :rtype: int | numpy.ndarray
         """
         pos = super().add_point(perceptions, confidences)
         if self.learnable():
@@ -861,6 +961,17 @@ class SVMSpace(PointBasedSpace):
 class ANNSpace(PointBasedSpace):
     """
     Use and train a Neural Network to calculate the activations.
+
+    The network (:class:`ANNModel_classification`) is a binary classifier: points (confidence greater than 0) have the
+    label 1 and antipoints (0 or less) the label 0. It is trained online as points are added:
+
+    - Warm-up: while there is not enough data (see ``min_warmup_samples`` and ``min_samples_per_class``) the model does not exist, and the activation is given by the ``backup_space`` or, if there is none, by the constant ``warmup_activation``.
+    - Configuration: when there is enough data, the model is created and trained for ``bootstrap_updates`` updates.
+    - Online training: after that, every ``train_every`` new points the model is trained ``updates_per_train`` updates on a class-balanced sample of the stored points.
+
+    One update is one epoch over the sampled points (see :meth:`train_step`). The activation is the output of the network
+    passed through a sigmoid (or the raw output, if ``output_activation`` is "linear"); with a parent space, it is limited by
+    the parent's activation.
     """
 
     def __init__(
@@ -889,6 +1000,56 @@ class ANNSpace(PointBasedSpace):
         device="auto",
         **kwargs,
     ):
+        """
+        Initialize the space and, if model_file is given, load the model from it.
+
+        :param max_data: Only the most recent max_data stored points are used to sample the training data, defaults to 2000.
+        :type max_data: int
+        :param sampled_points: Maximum number of points in each training sample (half points and half antipoints, fewer if a class has less), defaults to 256.
+        :type sampled_points: int
+        :param train_every: Number of points added since the last training that triggers a new training once the model is configured, defaults to 32.
+        :type train_every: int
+        :param updates_per_train: Number of updates (epochs over the sample) of each training after the first one, defaults to 4.
+        :type updates_per_train: int
+        :param batch_size: Mini-batch size used when training, defaults to 25.
+        :type batch_size: int
+        :param epochs: Default number of epochs of ``_train``. ``train_step`` always passes its own number of updates, so it is not used by the training of the space, defaults to 1.
+        :type epochs: int
+        :param bootstrap_updates: Number of updates of the first training, right after the model is configured, defaults to 20.
+        :type bootstrap_updates: int
+        :param min_warmup_samples: Minimum number of stored points and antipoints in total before the model is configured and trained, defaults to 32.
+        :type min_warmup_samples: int
+        :param warmup_activation: Activation returned for every perception while the model is not configured and there is no backup space, defaults to 0.1. It is set to 0.0 when there are too many antipoints (more than ten times the number of points) and is not restored afterwards.
+        :type warmup_activation: float
+        :param min_samples_per_class: Minimum number of points, and of antipoints, needed to train, both among all the stored data and among the most recent max_data points, defaults to 8.
+        :type min_samples_per_class: int
+        :param backup_space: Class (not an instance) of a rule-based space, or None. While the model is not configured, ``get_probability`` returns the ``get_probability`` of this class evaluated on this space, that is, with the points stored in this ANNSpace. If None, ``warmup_activation`` is used. Defaults to :class:`CentroidPointBasedSpace`.
+        :type backup_space: type[RulesBasedSpace] or None
+        :param output_activation: Activation applied to the output of the network to obtain the activation of the space: "sigmoid" or "linear". Defaults to "sigmoid".
+        :type output_activation: str
+        :param hidden_activation: Activation of the hidden layers: "relu", "tanh" or "sigmoid" (anything else gives ReLU), defaults to "relu".
+        :type hidden_activation: str
+        :param hidden_layers: Size of each hidden layer, defaults to [32, 32].
+        :type hidden_layers: list[int]
+        :param learning_rate: Learning rate of the AdamW optimizer, defaults to 0.001.
+        :type learning_rate: float
+        :param weight_decay: Weight decay of the AdamW optimizer, defaults to 0.0001.
+        :type weight_decay: float
+        :param dropout: If greater than 0, a dropout layer is added after each hidden layer (see :class:`ANNModel_classification`), defaults to 0.0.
+        :type dropout: float
+        :param validation_split: Stored in the attribute of the same name, but it is not used by the training of the space, defaults to 0.0.
+        :type validation_split: float
+        :param loss_function: Class of the loss for the training. It is instantiated with ``reduction="none"`` and is applied to the raw outputs of the network, so it should accept logits, like the default. The per-sample losses are multiplied by class weights. Defaults to ``torch.nn.BCEWithLogitsLoss``.
+        :type loss_function: type[torch.nn.Module]
+        :param val_function: Class of the loss for the validation, instantiated without arguments. It is only used if validation data is given to ``_train``, which ``train_step`` does not do. Defaults to ``torch.nn.BCEWithLogitsLoss``.
+        :type val_function: type[torch.nn.Module]
+        :param model_file: Path of a checkpoint (see :meth:`save_model`) to load at the end of the constructor with :meth:`load_model`. The path is used as is. Defaults to None (no model is loaded).
+        :type model_file: str or None
+        :param device: "auto" (default) uses "cuda" if available and "cpu" otherwise; "cpu" and "cuda" can also be requested.
+        :type device: str
+        :param kwargs: Arguments for :class:`PointBasedSpace` (``size``) and :class:`Space` (``ident``, ``random_seed``, ``logger``).
+        :raises ValueError: If device is not "auto", "cpu" or "cuda", if "cuda" is requested but not available, or if backup_space is not a subclass of :class:`RulesBasedSpace`.
+        """
         # Device configuration: "auto" uses CUDA when available and the CPU otherwise.
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -950,6 +1111,9 @@ class ANNSpace(PointBasedSpace):
     def configure_model(self, input_length):
         """Configure the ANN model architecture and initialize the optimizer.
 
+        Seeds the global random generators with ``random_seed``, creates the network on the device and an AdamW
+        optimizer, and marks the space as configured.
+
         :param input_length: Number of input features for the neural network.
         :type input_length: int
         """
@@ -974,7 +1138,12 @@ class ANNSpace(PointBasedSpace):
         self.logger.info(f"Model configured with input: {input_length}")
 
     def load_model(self):
-        """Loads model from file."""
+        """Loads model from file.
+
+        If ``model_file`` exists, reads the checkpoint, restores the architecture and optimizer hyperparameters stored in it,
+        configures the model, and loads the weights and the optimizer state. If the checkpoint has input labels, the data
+        container of the space is also initialized with them. If the file does not exist, only a warning is logged.
+        """
         if os.path.exists(self.model_file):
             checkpoint = torch.load(self.model_file, map_location=self.device)
             
@@ -1010,6 +1179,9 @@ class ANNSpace(PointBasedSpace):
     def save_model(self, filepath):
         """Save the trained model to a PyTorch checkpoint file.
 
+        The checkpoint contains the weights, the optimizer state, the architecture and optimizer hyperparameters and the input labels.
+        Nothing is saved (and a warning is logged) if the model is not configured or filepath is None.
+
         :param filepath: Path where the model checkpoint will be saved. Automatically adds '.pth' extension if not present.
         :type filepath: str
         :return: Tuple containing success status and the path where the model was saved.
@@ -1043,7 +1215,10 @@ class ANNSpace(PointBasedSpace):
         return True, filepath
 
     def reset_model_state(self):
-        """Reset optimizer state while keeping model weights."""
+        """Reset optimizer state while keeping model weights.
+
+        A new AdamW optimizer is created. Nothing happens if the model is not configured.
+        """
         if self._configured:
             # Save current weights
             weights = self.model.state_dict().copy()
@@ -1082,6 +1257,11 @@ class ANNSpace(PointBasedSpace):
         :type verbose: int, optional
         :param reset_optimizer: Whether to reset the optimizer state before training, defaults to True
         :type reset_optimizer: bool, optional
+
+        Notes:
+
+        - The loss of each sample is multiplied by its weight and the batch loss is the weighted mean.
+        - Validation, learning rate scheduling and early stopping only happen if validation data is given or ``validation_split`` (the argument) is greater than 0.
         """
         
         # Convert numpy arrays to torch tensors
@@ -1224,8 +1404,9 @@ class ANNSpace(PointBasedSpace):
 
         :param x: Input data for prediction. Can be numpy array or torch tensor.
         :type x: np.ndarray or torch.Tensor
-        :return: Model predictions as a numpy array, or None if model is not configured.
+        :return: Model predictions as a numpy array after the output activation, or None if model is not configured. The array is squeezed, so a single row gives a 0-dimensional array.
         :rtype: np.ndarray or None
+        :raises ValueError: If ``output_activation`` is neither "sigmoid" nor "linear".
         """        
         if not self._configured:
             return None
@@ -1256,7 +1437,11 @@ class ANNSpace(PointBasedSpace):
         return predictions
     
     def get_weights(self):
-        """Get the current model , uses the state dictionary."""
+        """Get the weights of the model.
+
+        :return: The state dictionary of the model, or None (with a warning) if the model is not configured.
+        :rtype: dict or None
+        """
         if not self._configured:
             self.logger.warning("Model not configured. Cannot get weights.")
             return None
@@ -1283,7 +1468,11 @@ class ANNSpace(PointBasedSpace):
             return False
         
     def _class_counts(self):
-        """Return the number of positive and non-positive stored samples."""
+        """Return the number of positive and non-positive stored samples.
+
+        :return: Tuple (number of points with confidence greater than 0, number of points with confidence 0 or less).
+        :rtype: tuple[int, int]
+        """
         if self.size == 0:
             return 0, 0
 
@@ -1293,7 +1482,12 @@ class ANNSpace(PointBasedSpace):
         return positive_count, negative_count
 
     def _has_training_data(self):
-        """Return whether the space contains enough data to train a classifier."""
+        """Return whether the space contains enough data to train a classifier.
+
+        That requires at least ``min_warmup_samples`` stored points in total and at least ``min_samples_per_class`` of each class.
+
+        :rtype: bool
+        """
         positive_count, negative_count = self._class_counts()
 
         return (
@@ -1305,12 +1499,24 @@ class ANNSpace(PointBasedSpace):
     def _excess_antipoints(self):
         """ 
         Return if there are too many antipoints in the space, which can mean that the space is not learnable.
+
+        True if the number of antipoints is more than ten times the number of points.
+
+        :rtype: bool
         """
         positive_count, negative_count = self._class_counts()
         return negative_count > positive_count * 10
 
     def _sample_training_data(self):
-        """Sample a balanced batch from recent and replay data."""
+        """Sample a balanced batch from recent and replay data.
+
+        Considers only the most recent ``max_data`` stored points. Of them, up to ``sampled_points // 2`` points and the same
+        number of antipoints are chosen at random without replacement (all of a class if it has fewer), and shuffled.
+        The labels are the memberships clipped to [0, 1].
+
+        :return: The features and labels of the sample, or (None, None) if either class has fewer than ``min_samples_per_class`` among those data.
+        :rtype: tuple[numpy.ndarray, numpy.ndarray] or tuple[None, None]
+        """
         ## WARNING: This method assumes that recent data will have both classes represented. 
         # Altough the more realistic case is that recent data will be largely unbalanced, 
         # this is a tradeoff to avoid the model being trained on only one class. 
@@ -1355,14 +1561,22 @@ class ANNSpace(PointBasedSpace):
     
     def add_point(self, perceptions, confidences):
         """
-        Add a new point to the P-Node.
+        Add new points and train the network when it is time.
+
+        The points are added as in :meth:`PointBasedSpace.add_point`, and the counter of new points is increased by the number
+        of rows added. If there are more than ten times as many antipoints as points, ``warmup_activation`` is set to 0.0.
+        Then:
+
+        - If there is not enough data for training (see ``min_warmup_samples`` and ``min_samples_per_class``), nothing else happens.
+        - If the model is not configured, it is configured and trained for ``bootstrap_updates`` updates.
+        - Otherwise, if at least ``train_every`` points have been added since the last training, the model is trained for ``updates_per_train`` updates.
 
         :param perceptions: A given perception to add.
         :type perceptions: core.container.Container
         :param confidences: The confidences of the added points that specify if they are points or antipoints.
         :type confidences: numpy.ndarray
-        :return: The position of the added point.
-        :rtype: int
+        :return: The position of the added point, as in :meth:`PointBasedSpace.add_point`.
+        :rtype: int | numpy.ndarray
         """
         #self.semaphore.acquire()
         pos = super().add_point(perceptions, confidences)
@@ -1397,7 +1611,15 @@ class ANNSpace(PointBasedSpace):
         return pos
 
     def train_step(self, updates=None):
-        """Perform a controlled number of online training updates."""
+        """Perform a controlled number of online training updates.
+
+        Takes a class-balanced sample of the stored points (see :meth:`_sample_training_data`) and trains the network on it
+        with ``updates`` epochs, weighting each class with ``len(sample) / (2 * count of the class)``. The optimizer state is
+        kept. Nothing is done (and a message is logged) if there is not enough data.
+
+        :param updates: Number of updates (epochs over the sample). If None, ``updates_per_train`` is used.
+        :type updates: int or None
+        """
         if not self._has_training_data():
             self.logger.info("Skipping training during warm-up.")
             return
@@ -1446,6 +1668,11 @@ class ANNSpace(PointBasedSpace):
         """
         Calculate the new activation value for multiple perception rows.
 
+        Zeros if the space has no data. If the model is configured, the output of the network. Otherwise, the activation of
+        ``backup_space`` evaluated on this space (returned as is, since it already takes the parent into account), or
+        ``warmup_activation`` for every row if there is no backup space. With a parent space, the minimum with the parent's
+        activation is returned (except in the backup case).
+
         :param perceptions: The given perceptions to calculate the activation.
         :type perceptions: core.container.Container
         :return: The activation values, one per perception row.
@@ -1472,7 +1699,12 @@ class ANNSpace(PointBasedSpace):
     
         
 class ANNModel_classification(nn.Module):
-    """PyTorch neural network model."""
+    """PyTorch neural network model.
+
+    A multilayer perceptron for binary classification. Each hidden layer is a linear layer, a layer normalization and an
+    activation, followed by a dropout layer (with probability 0.1, whatever the value of ``dropout``) if ``dropout`` is greater
+    than 0. The last layer is a linear layer with one output, without activation: the output is a logit.
+    """
     
     def __init__(
             self, 
@@ -1489,6 +1721,8 @@ class ANNModel_classification(nn.Module):
         :type hidden_layers: list, optional
         :param hidden_activation: Activation function for hidden layers ('relu', 'tanh', 'sigmoid'), defaults to 'relu'
         :type hidden_activation: str, optional
+        :param dropout: If greater than 0, a dropout layer is added after each hidden layer, defaults to 0.0
+        :type dropout: float, optional
         """        
         super(ANNModel_classification, self).__init__()
         
@@ -1542,6 +1776,15 @@ class ANNModel_classification(nn.Module):
 class WeightedTensorDataset(TensorDataset):
     """TensorDataset that includes sample weights, defaults to ones if not provided."""
     def __init__(self, x, y, weights=None):
+        """
+        :param x: Inputs.
+        :type x: torch.Tensor
+        :param y: Targets.
+        :type y: torch.Tensor
+        :param weights: Weight of each sample, as a 1D (or one-column) array or tensor. Defaults to ones.
+        :type weights: numpy.ndarray or torch.Tensor or None
+        :raises ValueError: If the number of weights differs from the number of samples.
+        """
         super().__init__(x, y)
         n = len(x)
         if weights is None:
@@ -1558,6 +1801,11 @@ class WeightedTensorDataset(TensorDataset):
         self.weights = weights
         
     def __getitem__(self, idx):
+        """
+        :param idx: Index of the sample.
+        :return: Tuple (input, target, weight).
+        :rtype: tuple
+        """
         x, y = super().__getitem__(idx)
         w = self.weights[idx]
         return x, y, w

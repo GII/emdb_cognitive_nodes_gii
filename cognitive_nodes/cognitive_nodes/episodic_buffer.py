@@ -18,11 +18,22 @@ class EpisodicBuffer:
     """
     Class that creates a buffer of episodes to be used as a STM and learn models. 
     It supports a main buffer for training and a secondary buffer for testing.
+
+    Both buffers are fixed-size :class:`core.container.Container` objects (type ``"buffer"``) with one row per episode, created
+    when the first episode arrives (see :meth:`configure_labels`). Each episode is stored flattened (see
+    :meth:`cognitive_nodes.episode.Episode.obtain_flattened_episode`), so the columns are labeled ``<field>:<feature label>``,
+    for example ``old_perception:x`` or ``action:y``. The input columns come first, followed by the output columns. When a
+    buffer is full, new episodes overwrite the oldest ones. Each new episode goes to the main buffer with probability
+    ``train_split`` and to the secondary one otherwise.
+
+    The data is read back as numpy arrays (:meth:`get_dataset`, :meth:`get_train_samples`, :meth:`get_test_samples`) or as
+    pandas DataFrames (:meth:`get_dataframes`). Adding episodes is protected by a semaphore.
     """    
     def __init__(self, node:CognitiveNode, main_size, secondary_size, train_split=1.0, inputs=[], outputs=[], random_seed=0, flexible_labels=False, **params) -> None:
         """Initialize an EpisodicBuffer.
 
-        Creates bounded buffers for episodes and configures label extraction and RNG.
+        Stores the configuration and the random number generator. The buffers themselves (Containers) are not created
+        here, but when the first episode is added.
 
         :param node: Owning cognitive node used for logging and ROS2 integration.
         :type node: CognitiveNode
@@ -36,8 +47,10 @@ class EpisodicBuffer:
         :type inputs: list[str]
         :param outputs: Episode fields considered outputs/targets (e.g., ['perception']).
         :type outputs: list[str]
-        :param random_seed: Seed for the internal Numpy RNG used for shuffling and sampling.
+        :param random_seed: Seed for the internal Numpy RNG used for the routing of episodes, shuffling and sampling. Defaults to 0; 0 and None mean that a seed is derived from the current time (see :func:`core.utils.resolve_seed`).
         :type random_seed: int
+        :param flexible_labels: If True, labels of an episode that are not in the buffers are added to them, and labels of the buffers that the episode lacks are filled with NaN, when the episode is pushed. If False (default), the Containers keep the labels they were created with. Defaults to False.
+        :type flexible_labels: bool
         :param params: Additional keyword parameters reserved for future use.
         :type params: dict
 
@@ -45,7 +58,8 @@ class EpisodicBuffer:
         :rtype: None
 
         Notes:
-        - Buffers are implemented as bounded deques.
+
+        - Buffers are fixed-size Containers (see the class description), created lazily.
         - Labels are derived from observed episodes based on inputs/outputs.
         """        
         self.node=node
@@ -70,10 +84,15 @@ class EpisodicBuffer:
 
     def configure_labels(self, episode: Episode):
         """
-        Creates the label list.
+        Creates the label list and the buffers.
+
+        The input and output labels are extracted from the episode (see :meth:`_extract_labels`) and the main and secondary
+        buffers are created as empty Containers named "MainBuffer" and "SecondaryBuffer", with input labels followed by
+        output labels and the sizes given to the constructor. Any previous buffer is replaced.
 
         :param episode: Episode object.
         :type episode: cognitive_nodes.episode.Episode
+        :raises ValueError: If a field of inputs or outputs of the episode is a Container without feature labels.
         """
         self.node.get_logger().info(f"Configuring labels for episodic buffer: {episode}")
         self.input_labels.clear()
@@ -88,8 +107,13 @@ class EpisodicBuffer:
         """
         Updates the label list based on the given episode.
 
+        Labels of the episode that are not yet in input_labels or output_labels are appended to those lists, with a warning.
+        The buffers (Containers) are not modified here: whether they accept the new labels depends on flexible_labels when
+        the episode is pushed.
+
         :param episode: Episode object.
         :type episode: cognitive_nodes.episode.Episode
+        :raises ValueError: If a field of inputs or outputs of the episode is a Container without feature labels.
         """
         # The text of the episode is built only if it is going to be logged
         if self.node.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
@@ -113,7 +137,8 @@ class EpisodicBuffer:
         """Add an episode to the buffer.
 
         Validates content, updates labels, and routes the episode to the main or
-        secondary buffer based on train_split.
+        secondary buffer based on train_split. The episode is stored flattened, with its labels
+        prefixed by the field name (``old_perception:...``, ``action:...``).
 
         :param episode: Episode instance to add.
         :type episode: Episode
@@ -124,8 +149,10 @@ class EpisodicBuffer:
         :rtype: None
 
         Notes:
+
         - Empty episodes (w.r.t configured inputs/outputs) are skipped with a warning.
         - Labels are configured lazily on the first episode and updated when new dimensions appear.
+        - The labels of the episode that are not in the buffers are only added to them (and the missing ones filled with NaN) if flexible_labels is True.
         """
         with self.semaphore:
             if self.empty_episode(episode, self.inputs, self.outputs):
@@ -147,8 +174,8 @@ class EpisodicBuffer:
     def remove_episode(self, index=None, remove_from_main=True):
         """Remove an episode from the buffer.
 
-        If index is provided, removes the episode at that position; otherwise,
-        removes the oldest (leftmost) episode from the selected buffer.
+        Not implemented: it always raises NotImplementedError. The parameters describe the intended behaviour: if index is
+        provided, remove the episode at that position; otherwise, remove the oldest episode from the selected buffer.
 
         :param index: Position to remove. If None, removes the oldest entry.
         :type index: int | None
@@ -157,14 +184,17 @@ class EpisodicBuffer:
 
         :return: None
         :rtype: None
-
+        :raises NotImplementedError: Always.
         """
         with self.semaphore: # Remember to apply the semaphore once the method is implemented to ensure thread safety
             raise NotImplementedError("remove_episode method is not implemented yet.")
 
     def clear(self):
         """
-        Clears the episodic buffer. The buffers don't exist until the labels are configured.
+        Clears the episodic buffer.
+
+        Empties the main and secondary Containers (if they exist; they don't until the labels are configured), and resets the
+        new sample counters to 0. Labels are kept.
         """
         if self.main_buffer is not None:
             self.main_buffer.clear()
@@ -178,6 +208,11 @@ class EpisodicBuffer:
     def create_dataframes(self):
         """
         Creates pandas DataFrames from the main and secondary buffers.
+
+        Builds main_dataframe_inputs, main_dataframe_outputs, secondary_dataframe_inputs and secondary_dataframe_outputs
+        with :meth:`buffer_to_dataframe`, using the input or output labels. A DataFrame is only rebuilt if its buffer has
+        episodes and the corresponding label list is not empty; otherwise the attribute keeps its previous value (None
+        at the start). The buffers must exist (labels configured).
         """
         if self.input_labels:
             if len(self.main_buffer) > 0:
@@ -194,10 +229,13 @@ class EpisodicBuffer:
         """
         Checks if the episode is compatible with the current buffer configuration.
 
+        Not implemented: it always raises NotImplementedError.
+
         :param episode: Episode object to check compatibility.
         :type episode: cognitive_nodes.episode.Episode
-        :return: True if compatible, False otherwise.
+        :return: Intended: True if compatible, False otherwise.
         :rtype: bool
+        :raises NotImplementedError: Always.
         """
         raise NotImplementedError("is_compatible method is not implemented yet.")
         
@@ -208,7 +246,7 @@ class EpisodicBuffer:
         """
         Returns the input labels of the episodic buffer.
 
-        :return: List of input labels.
+        :return: List of input labels (``<field>:<label>``), empty until the labels are configured. It is the internal list, not a copy.
         :rtype: list
         """
         return self.input_labels
@@ -217,7 +255,7 @@ class EpisodicBuffer:
         """
         Returns the output labels of the episodic buffer.
 
-        :return: List of output labels.
+        :return: List of output labels (``<field>:<label>``), empty until the labels are configured. It is the internal list, not a copy.
         :rtype: list
         """
         return self.output_labels
@@ -226,12 +264,13 @@ class EpisodicBuffer:
         """
         Method to obtain a sample from the buffer.
 
-        :param index: Index of the sample to obtain.
+        :param index: Index of the sample to obtain, by age (0 is the oldest, -1 the newest).
         :type index: int
         :param main: Whether to get the sample from the main buffer or secondary buffer.
         :type main: bool
-        :return: The requested sample.
-        :rtype: list
+        :return: The requested sample, as read by ``Container.read(index)``: index 0 is the oldest episode and -1 the newest. It has all the columns of the buffer (inputs and outputs), with their timestamp.
+        :rtype: xarray.DataArray
+        :raises IndexError: If the index is out of range.
         """
         if main:
             return self.main_buffer.read(index)
@@ -242,12 +281,15 @@ class EpisodicBuffer:
         """
         Returns the dataset as numpy arrays.
 
+        The main buffer gives the training arrays and the secondary buffer the test arrays (see :meth:`get_samples_from_buffer`).
+        The columns of the inputs and outputs are in the order of input_labels and output_labels.
+
         :param shuffle: Option to shuffle the dataset , defaults to False
         :type shuffle: bool, optional
         :param n_samples: Option to limit the number of samples returned, defaults to None
         :type n_samples: int, optional
         :return: Tuple containing training inputs, training outputs, test inputs, and test outputs as numpy arrays.
-        :rtype: tuple
+        :rtype: tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]
         """
         x_train, y_train = self.get_samples_from_buffer(self.main_buffer, shuffle=shuffle, n_samples=n_samples)
         x_test, y_test = self.get_samples_from_buffer(self.secondary_buffer, shuffle=shuffle, n_samples=n_samples)
@@ -255,26 +297,26 @@ class EpisodicBuffer:
 
 
     def get_train_samples(self, shuffle=False, n_samples=None):
-        """Returns the training samples as lists of input and output dicts.
+        """Returns the training samples (main buffer) as numpy arrays of inputs and outputs.
 
         :param shuffle: Option to shuffle the samples, defaults to False
         :type shuffle: bool, optional
         :param n_samples: Option to limit the number of samples returned, defaults to None
         :type n_samples: int, optional
         :return: Tuple containing training inputs and training outputs as numpy arrays.
-        :rtype: tuple
+        :rtype: tuple[numpy.ndarray, numpy.ndarray]
         """
         return self.get_samples_from_buffer(self.main_buffer, shuffle=shuffle, n_samples=n_samples)
 
     def get_test_samples(self, shuffle=False, n_samples=None):
-        """Returns the test samples as lists of input and output dicts.
+        """Returns the test samples (secondary buffer) as numpy arrays of inputs and outputs.
 
         :param shuffle: Option to shuffle the samples, defaults to False
         :type shuffle: bool, optional
         :param n_samples: Option to limit the number of samples returned, defaults to None
         :type n_samples: int, optional
         :return: Tuple containing test inputs and test outputs as numpy arrays.
-        :rtype: tuple
+        :rtype: tuple[numpy.ndarray, numpy.ndarray]
         """
         return self.get_samples_from_buffer(self.secondary_buffer, shuffle=shuffle, n_samples=n_samples)
     
@@ -282,8 +324,10 @@ class EpisodicBuffer:
         """
         Returns the DataFrames of the main and secondary buffers.
 
-        :return: Tuple with the main and secondary DataFrames.
-        :rtype: tuple
+        Rebuilds them first with :meth:`create_dataframes`.
+
+        :return: Tuple (main inputs, main outputs, secondary inputs, secondary outputs). An element is None if it has never been built (see :meth:`create_dataframes`).
+        :rtype: tuple[pandas.DataFrame | None, pandas.DataFrame | None, pandas.DataFrame | None, pandas.DataFrame | None]
         """
         self.create_dataframes()
         return self.main_dataframe_inputs, self.main_dataframe_outputs, self.secondary_dataframe_inputs, self.secondary_dataframe_outputs
@@ -307,6 +351,9 @@ class EpisodicBuffer:
         """
         Returns the max size of the main buffer.
 
+        Once the buffer exists, it is the max_size of its Container (``inf`` if it has none). Before that, the code returns the
+        ``main_size`` property, which is the current size (0), not the size given to the constructor.
+
         :return: The maximum size of the main buffer.
         :rtype: int
         """        
@@ -318,6 +365,9 @@ class EpisodicBuffer:
     def secondary_max_size(self):
         """
         Returns the max size of the secondary buffer.
+
+        Once the buffer exists, it is the max_size of its Container (``inf`` if it has none). Before that, the code returns the
+        ``secondary_size`` property, which is the current size (0), not the size given to the constructor.
 
         :return: The maximum size of the secondary buffer.
         :rtype: int
@@ -331,7 +381,7 @@ class EpisodicBuffer:
         """
         Returns the current size of the main buffer.
 
-        :return: The current size of the main buffer.
+        :return: The number of episodes in the main buffer, 0 if it does not exist yet.
         :rtype: int
         """
         return len(self.main_buffer) if self.main_buffer is not None else 0
@@ -341,7 +391,7 @@ class EpisodicBuffer:
         """
         Returns the current size of the secondary buffer.
 
-        :return: The current size of the secondary buffer.
+        :return: The number of episodes in the secondary buffer, 0 if it does not exist yet.
         :rtype: int
         """        
         return len(self.secondary_buffer) if self.secondary_buffer is not None else 0
@@ -352,11 +402,13 @@ class EpisodicBuffer:
         """
         Checks if an episode is empty.
 
+        The episode is empty if none of the fields named in inputs and outputs evaluates to True (for example, they are None).
+
         :param episode: Episode object.
         :type episode: Episode
-        :param inputs: Input labels to check.
+        :param inputs: Names of the episode fields used as inputs (e.g. ``["old_perception", "action"]``).
         :type inputs: list
-        :param outputs: Output labels to check.
+        :param outputs: Names of the episode fields used as outputs (e.g. ``["perception"]``).
         :type outputs: list
         :return: True if the episode is empty, False otherwise.
         :rtype: bool
@@ -370,6 +422,21 @@ class EpisodicBuffer:
 
     @staticmethod
     def buffer_to_dataframe(buffer: Container, labels: list[str], ordered: bool = True, include_timestamp: bool = False) -> pd.DataFrame:
+        """
+        Converts some columns of a buffer into a pandas DataFrame.
+
+        :param buffer: Container to read. If it is None or has no samples, an empty DataFrame with the requested columns is returned.
+        :type buffer: Container
+        :param labels: Labels of the columns to extract, which become the columns of the DataFrame in that order.
+        :type labels: list[str]
+        :param ordered: Return the rows from the oldest to the newest, defaults to True.
+        :type ordered: bool
+        :param include_timestamp: Add a first column "timestamp" (float64), defaults to False.
+        :type include_timestamp: bool
+        :return: DataFrame with one row per sample.
+        :rtype: pandas.DataFrame
+        :raises ValueError: If any of the labels is not a feature of the buffer.
+        """
         # Empty/None buffer -> return typed empty frame with expected columns
         base_cols = list(labels)
         cols = (["timestamp"] + base_cols) if include_timestamp else base_cols
@@ -397,14 +464,18 @@ class EpisodicBuffer:
         """
         Internal helper to get (inputs, outputs) numpy arrays from a buffer.
 
+        Reads the samples of the buffer from the oldest to the newest and takes the columns in input_labels and
+        output_labels. If a list of labels is empty, the corresponding array has shape (0, 0). The shuffle, if requested,
+        happens before the sampling.
+
         :param buffer: Episode buffer to extract samples from.
         :type buffer: Container
         :param shuffle: Whether to shuffle the samples, defaults to False
         :type shuffle: bool, optional
         :param n_samples: Number of samples to extract, defaults to None
         :type n_samples: int, optional
-        :return: Tuple of (inputs, outputs) numpy arrays
-        :rtype: tuple
+        :return: Tuple of (inputs, outputs) numpy arrays, with one row per sample. If n_samples is smaller than the number of samples, a random subset of that size is returned, drawn without replacement.
+        :rtype: tuple[numpy.ndarray, numpy.ndarray]
         """
         data= buffer.read(None, ordered=True)
         inputs = data.sel(features=self.input_labels).values if self.input_labels else np.empty((0, 0)) 
@@ -423,12 +494,38 @@ class EpisodicBuffer:
         return inputs, outputs
     
     def input_episodes_to_matrix(self, episodes: Episode):
+        """
+        Converts an Episode into the matrix of input features that the models take.
+
+        The episode is flattened and the columns in input_labels are selected, in that order, so the matrix has the layout of
+        the inputs of the dataset.
+
+        :param episodes: Episode whose rows are the samples to convert. It must contain all the input labels.
+        :type episodes: Episode
+        :return: Array with one row per episode row and one column per input label, ordered from the oldest to the newest; shape (0, 0) if there are no input labels.
+        :rtype: numpy.ndarray
+        """
         buffer = episodes.obtain_flattened_episode()
         data = buffer.read(ordered=True)
         inputs = data.sel(features=self.input_labels).values if self.input_labels else np.empty((0,0))
         return inputs
     
     def matrix_to_output_episodes(self, matrix, timestamps=None):
+        """
+        Converts a matrix of predicted outputs into an Episode.
+
+        It is the inverse of the output part of the dataset: the columns of the matrix are labeled with output_labels and
+        the Episode is rebuilt with :func:`cognitive_nodes.episode.container_to_episode_obj`, so each field named in outputs
+        is filled with the matching columns.
+
+        :param matrix: Array with one row per sample and one column per output label.
+        :type matrix: numpy.ndarray
+        :param timestamps: Timestamp of each row. If not given, zeros are used.
+        :type timestamps: numpy.ndarray | None
+        :return: The Episode, or an empty Episode if there are no output labels.
+        :rtype: Episode
+        :raises ValueError: If the number of columns differs from the number of output labels, or the number of rows from that of timestamps.
+        """
         if not timestamps:
             timestamps = np.zeros(matrix.shape[0])
         if not self.output_labels:
@@ -448,7 +545,7 @@ class EpisodicBuffer:
         :type inputs: np.ndarray
         :param outputs: Outputs array.
         :type outputs: np.ndarray
-        :return: Tuple of shuffled (inputs, outputs) arrays.
+        :return: Tuple of shuffled (inputs, outputs) arrays; the same permutation is applied to both, and outputs is left untouched if it is empty.
         :rtype: tuple
         """        
         idx = self.rng.permutation(inputs.shape[0])
@@ -462,12 +559,16 @@ class EpisodicBuffer:
         """
         Helper method to obtain the label list from a given episode.
 
+        For each name in io_list that is an attribute of the episode, the labels are ``<name>:<feature label>`` for each
+        feature of that field. A name that is not an attribute is used directly as a label.
+
         :param io_list: List that specifies the fields to extract labels from.
         :type io_list: list
         :param episode: Episode object to extract labels from.
         :type episode: Episode
         :return: List of the extracted labels.
         :rtype: list
+        :raises ValueError: If a field is a Container without feature labels.
         """
         label_list=[]
         for io in io_list:
@@ -487,12 +588,17 @@ class EpisodicBuffer:
         """
         Helper method to convert a numpy array back into a Container buffer.
 
-        :param matrix: Numpy array containing episode data.
+        :param matrix: Numpy array containing episode data, one row per sample.
         :type matrix: np.ndarray
+        :param timestamps: Timestamps of the rows.
+        :type timestamps: np.ndarray
         :param labels: List of labels corresponding to the columns in the matrix.
         :type labels: list[str]
-        :return: Container object populated with the data from the matrix.
+        :param name: Name of the Container, defaults to "result_buffer".
+        :type name: str
+        :return: Container object populated with the data from the matrix, with as many rows as the matrix has.
         :rtype: Container
+        :raises ValueError: If the number of columns differs from the number of labels, or the number of rows from the number of timestamps.
         """
         if matrix.shape[1] != len(labels):
             raise ValueError(f"Number of columns in matrix ({matrix.shape[1]}) does not match number of labels ({len(labels)}).")
@@ -507,6 +613,16 @@ class EpisodicBuffer:
 class TraceBuffer(EpisodicBuffer):
     """
     Trace Buffer class, a specialized version of the Episodic Buffer that stores traces of episodes.
+
+    The main buffer (a Container, as in :class:`EpisodicBuffer`) holds the episodes of the trace in progress. When an episode
+    arrives with a positive reward, the trace is complete: a utility is computed for each of its episodes (see
+    :meth:`evaluate_trace`) and the trace is pushed into ``traces_buffer``, a :class:`core.container.MultiContainer`
+    (type ``"trace_buffer"``) with a FIFO of ``max_traces`` traces of up to ``main_size`` rows. Its columns are the input
+    labels, the output labels and a final column ``utility``. Failed traces (antitraces) are stored in ``antitraces_buffer``,
+    another MultiContainer with ``max_antitraces`` traces and the same columns, with utility 0.
+
+    The training dataset is the set of rows of the stored traces with their utilities (see :meth:`get_dataset`).
+    The secondary buffer, the train split and the label updates of :class:`EpisodicBuffer` are not used by this class.
     """
     def __init__(self, node, main_size, secondary_size=0, max_traces=10, min_traces=1, max_antitraces=5, train_split=1.0, inputs=[], outputs=[], evaluation_method='linear', reward_factor=1.0, random_seed=0, **params):
         """Initialize a TraceBuffer for storing episode traces with utility values.
@@ -516,13 +632,13 @@ class TraceBuffer(EpisodicBuffer):
 
         :param node: Owning cognitive node used for logging and ROS2 integration.
         :type node: CognitiveNode
-        :param main_size: Maximum number of episodes stored in a single trace before completion.
+        :param main_size: Maximum number of episodes stored in a single trace, which is the size of the main buffer and the number of rows per trace in the trace buffers.
         :type main_size: int
         :param secondary_size: Maximum number of episodes in secondary buffer (unused in TraceBuffer), defaults to 0
         :type secondary_size: int, optional
         :param max_traces: Maximum number of successful traces to retain, defaults to 10
         :type max_traces: int, optional
-        :param min_traces: Minimum number of traces required before allowing antitraces to be added, defaults to 1
+        :param min_traces: Minimum number of stored traces required before an antitrace can be added, defaults to 1 (stored as a float)
         :type min_traces: int, optional
         :param max_antitraces: Maximum number of failed traces (antitraces) to retain, defaults to 5
         :type max_antitraces: int, optional
@@ -532,18 +648,18 @@ class TraceBuffer(EpisodicBuffer):
         :type inputs: list, optional
         :param outputs: Episode fields considered outputs/targets (e.g., ['perception']), defaults to []
         :type outputs: list, optional
-        :param evaluation_method: Method for computing utility values ('linear', 'exponential', 'goal_only'), defaults to 'linear'
+        :param evaluation_method: Method for computing utility values ('linear', 'exponential', 'goal_only'), defaults to 'linear'. It selects the static method ``eval_<method>``; an unknown name falls back to :meth:`eval_default`, which raises NotImplementedError when a trace is evaluated.
         :type evaluation_method: str, optional
         :param reward_factor: Multiplicative factor applied to the final reward in utility calculation, defaults to 1.0
         :type reward_factor: float, optional
         :param random_seed: Seed for the internal Numpy RNG used for shuffling and sampling, defaults to 0
         :type random_seed: int, optional
-        :param params: Additional keyword parameters reserved for future use.
+        :param params: Additional keyword parameters, passed on to :class:`EpisodicBuffer` (for example flexible_labels, which this class does not use).
         :type params: dict
 
-
         Notes:
-        - Traces are stored as lists of (episode, utility) tuples.
+
+        - Traces are stored in MultiContainers, one row per episode, with a ``utility`` column (see the class description).
         - Utility values are computed when a trace completes based on the evaluation method.
         - Antitraces represent failed sequences and have zero utility values.
         """
@@ -562,8 +678,12 @@ class TraceBuffer(EpisodicBuffer):
         """
         Configures the labels for the trace buffer based on the given episode.
 
+        Calls :meth:`EpisodicBuffer.configure_labels` and then creates the MultiContainers traces_buffer ("TracesBuffer")
+        and antitraces_buffer ("AntitracesBuffer"), with the input labels, the output labels and ``utility`` as columns.
+
         :param episode: Episode object to configure labels from.
         :type episode: Episode
+        :raises ValueError: If a field of inputs or outputs of the episode is a Container without feature labels.
         """
         super().configure_labels(episode)
         self.traces_buffer = MultiContainer("TracesBuffer", max_traces=self.max_traces, max_size=self.main_max_size, container_type="trace_buffer", labels=self.input_labels + self.output_labels + ["utility"])
@@ -587,10 +707,12 @@ class TraceBuffer(EpisodicBuffer):
         :rtype: None
 
         Notes:
+
         - Only episodes of type Episode are accepted.
         - Labels are configured on the first episode if not already set.
         - Positive rewards trigger utility evaluation and trace storage.
         - The buffer is cleared after storing a successful trace.
+        - Unlike :meth:`EpisodicBuffer.add_episode`, episodes are not checked for emptiness and labels are not updated after the first one.
         """
         with self.semaphore:
             if type(episode) is not Episode:
@@ -611,12 +733,18 @@ class TraceBuffer(EpisodicBuffer):
         This method serves as the public interface for adding complete traces along
         with their rewards. It validates the trace format and delegates to the internal
         _add_trace method for processing.
-        :param trace: Episodes that belong to the trace.
+
+        :param trace: Episode whose rows are the episodes of the trace (not a list of Episodes). It is flattened before being stored.
         :type trace: Episode
         :param reward: Reward value for the trace; positive values indicate success, defaults to 0
         :type reward: float, optional
         :param reward_trace: Optional precomputed utility values for the trace; if None, utilities are computed using the evaluation method, defaults to None
         :type reward_trace: np.ndarray | None, optional
+
+        Notes:
+
+        - Labels are configured from the trace if they are not set yet.
+        - The main buffer is not modified.
         """
         with self.semaphore:
             if (not self.input_labels and self.inputs) or (not self.output_labels and self.outputs):
@@ -633,12 +761,14 @@ class TraceBuffer(EpisodicBuffer):
         its reward and optional precomputed utility values. The trace is stored in
         the appropriate buffer based on the reward value.
 
-        :param trace: DataArray containing the sequence of episodes to add as a trace.
-        :type trace: xarray.DataArray
+        :param trace: Container with the sequence of episodes to add as a trace (flattened episodes, such as the main buffer).
+        :type trace: Container
         :param reward: Reward value for the trace; positive values indicate success, defaults to 0
         :type reward: float, optional
         :param reward_trace: Optional precomputed utility values for the trace; if None, utilities are computed using the evaluation method, defaults to None
         :type reward_trace: np.ndarray | None, optional
+        :param clear_main_buffer: Whether to clear the buffers after storing the trace (see :meth:`EpisodicBuffer.clear`), defaults to True
+        :type clear_main_buffer: bool, optional
         """
         trace_array = trace.read(ordered=True)
         if not reward_trace:
@@ -655,6 +785,10 @@ class TraceBuffer(EpisodicBuffer):
 
     def add_antitrace(self):
         """Add an antitrace to the buffer if enough traces exist.
+
+        If the number of stored traces is at least min_traces, the contents of the main buffer (the trace in progress, from
+        the oldest to the newest episode) are pushed into antitraces_buffer with utility 0 for all its rows, and the main
+        buffer is cleared. Otherwise nothing happens.
         """        
         with self.semaphore:
             if self.n_traces >= self.min_traces: # If the buffer is full, and there are enough traces, add an antitrace
@@ -671,15 +805,17 @@ class TraceBuffer(EpisodicBuffer):
         """Compute utility values for each episode in the current trace.
 
         Uses the configured evaluation method to assign utility values to all episodes
-        in the main buffer based on the final reward. The evaluation method determines
-        how utility is distributed across the episode sequence.
+        in the trace based on the final reward. The evaluation method determines
+        how utility is distributed across the episode sequence. The minimum utility is
+        ``reward * min_utility_fraction`` (0.01 of the reward).
 
         :param reward: Final reward value for the trace used to compute utilities.
         :type reward: float
         :param n: Optional number of episodes in the trace; if None, uses the current size of the main buffer, defaults to None
         :type n: int | None, optional
-        :return: List of utility values, one per episode in the trace.
+        :return: Utility values as a column array of shape (n, 1), or an empty list if n is None and the main buffer is empty.
         :rtype: np.ndarray
+        :raises NotImplementedError: If the evaluation method is not one of the implemented ones.
         """
         if n is None:
             n = len(self.main_buffer)
@@ -695,12 +831,16 @@ class TraceBuffer(EpisodicBuffer):
         """Flatten stored traces into a single buffer with corresponding utilities.
 
         Optionally samples a subset of traces, then flattens all (episode, utility) pairs
-        from the selected traces into a single sequential buffer.
+        from the selected traces into a single sequential array.
 
-        :param n_samples: Maximum number of traces to sample; if None, uses all traces, defaults to None
+        :param traces_buffer: MultiContainer with the traces (traces_buffer or antitraces_buffer).
+        :type traces_buffer: MultiContainer
+        :param n_samples: Maximum number of traces to sample (not rows); if None, uses all traces, defaults to None
         :type n_samples: int | None, optional
-        :return: Tuple of (episode buffer, utilities array) containing flattened trace data.
-        :rtype: tuple[list, np.ndarray]
+        :param shuffle: Whether to shuffle the rows with the same permutation for both arrays, defaults to True
+        :type shuffle: bool, optional
+        :return: Tuple (features, utilities): the values of the episode columns of the selected traces, one row per episode and without the ``utility`` column, and a 1D array with the utility of each row.
+        :rtype: tuple[numpy.ndarray, numpy.ndarray]
         """
         if n_samples is not None:
             if traces_buffer.n_traces > n_samples:
@@ -717,14 +857,16 @@ class TraceBuffer(EpisodicBuffer):
         return buffer, utilities
     
     def get_flattened_traces(self, traces_buffer: MultiContainer):
-        """Return a list of Episode objects reconstructed from the stored traces.
+        """Rebuild a single Episode from all the stored traces of a MultiContainer.
+
+        All the traces are flattened, in order, into one Episode whose rows are the episodes of the traces. The traces_buffer
+        argument is required: pass ``self.traces_buffer`` or ``self.antitraces_buffer``, which are None until the labels
+        are configured.
 
         :param traces_buffer: MultiContainer holding the stored traces.
         :type traces_buffer: MultiContainer
-        :return: Episode object containing all episodes from the traces.
-        :rtype: Episode
-        :return: Utilities array corresponding to each episode in the flattened traces.
-        :rtype: np.ndarray
+        :return: Tuple (episode, utilities): an Episode with all the episodes of the traces as rows, and a 1D array with the utility of each row.
+        :rtype: tuple[Episode, numpy.ndarray]
         """
         flattened_traces = traces_buffer.read_flattened(None)
         buffer = flattened_traces.drop_sel(features=["utility"])
@@ -737,8 +879,8 @@ class TraceBuffer(EpisodicBuffer):
     def get_dataset(self, shuffle=True, n_samples=None):
         """Return training dataset from flattened traces as numpy arrays.
 
-        Flattens stored traces into episode states and utilities, optionally shuffling
-        the resulting dataset.
+        Flattens the stored traces (not the antitraces) into episode states and utilities, optionally shuffling
+        the resulting dataset. The main and secondary buffers are not used.
 
         :param shuffle: Whether to shuffle the dataset, defaults to True
         :type shuffle: bool, optional
@@ -751,11 +893,12 @@ class TraceBuffer(EpisodicBuffer):
         return x_train, y_train
 
     def episodes_to_matrix(self):
+        """Placeholder: it does nothing and returns None."""
         pass
     
     def reset_new_sample_count(self, main=True, secondary=True):
         """
-        Resets the new sample count for the trace buffer.
+        Resets the counter of new traces (new_traces) to 0.
 
         :param main: Unused in this class, defaults to True.
         :type main: bool
