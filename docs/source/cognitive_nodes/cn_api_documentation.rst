@@ -21,7 +21,7 @@ Python module that implements the Perception cognitive node, which is responsibl
 
 /perception/id/set_activation => Attention mechanisms can modify a perception's activation.
 
-/perception/id/set_inputs => Set the inputs of the perception (not working yet).
+/perception/id/set_inputs => Set the inputs of the perception (not implemented yet).
 
 .. automodule:: cognitive_nodes.perception
     :members:

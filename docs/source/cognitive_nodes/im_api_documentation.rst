@@ -27,7 +27,7 @@ which enables robots to explore their environment with the help of an LLM.
 
 .. note::
 
-    The API of this module is not available in this version of the documentation. The module cannot be loaded until it is adapted to the current episodes, which are sent as Containers.
+    The API of this module is not available in this version of the documentation.
 
 +++++++++++++++
 Effectance
