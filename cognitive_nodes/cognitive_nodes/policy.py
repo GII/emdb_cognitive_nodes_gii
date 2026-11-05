@@ -526,19 +526,17 @@ class PolicyLearned(Policy, EpisodeSubscription):
 
     # ── Execution loop ────────────────────────────────────────────────────────
 
-    def execute_callback(self, request, response):
-        """Delegate execution to the Reaction process via start/finished flags.
+    async def execute_callback(self, request, response):
+        """Delegate execution to the Reaction process.
 
-        Sets ``self.reaction.start_flag``, blocks until the reaction cycle
-        completes (``finished_flag``), then returns the ``summary_episode``
-        built by the reaction cycle.
+        Runs a reaction cycle in the process thread, suspended until it
+        completes (see ``CognitiveProcess.run_cycle``), then returns the
+        ``summary_episode`` built by the reaction cycle.
 
         Mirrors ``UtilityModel.execute_callback`` with ``Deliberation``.
         """
         self.get_logger().info(f'Executing PolicyLearned: {self.name}')
-        self.reaction.start_flag.set()
-        self.reaction.finished_flag.wait()
-        self.reaction.finished_flag.clear()
+        await self.reaction.run_cycle(self)
         # Record one outcome per cycle (not per step) for activation scaling.
         if self.target_reward is not None:
             cycle_reward = float((self.reaction.summary_episode.reward_list or {}).get(self.target_reward, 0.0))

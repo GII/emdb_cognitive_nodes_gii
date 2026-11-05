@@ -46,9 +46,8 @@ class WorldModel(DeliberativeModel):
         :return: List of predicted episodes with updated perceptions.
         :rtype: Episode
         """        
-        self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the input episodes.")
-        output_episodes = input_episodes
-        return output_episodes
+        self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the old perceptions.")
+        return Episode(perception=input_episodes.old_perception)
     
 
 
@@ -56,7 +55,7 @@ class WorldModelLearned(WorldModel):
     """
     WorldModelLearned class: A world model that uses episodes to learn the dynamics of the world.
     """
-    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_msg=None, episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
+    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_msg='core_interfaces.msg.Container', episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
         """
         Constructor of the WorldModelLearned class.
 
@@ -109,8 +108,7 @@ class WorldModelLearned(WorldModel):
         """  
         if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
             self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the old perceptions.")
-            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
-            return input_episodes
+            return Episode(perception=input_episodes.old_perception)  # If the model is not configured, the perception is not expected to change
         input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         self.get_logger().info(f"Data for prediction: {input_data.shape} samples. Ex: {input_data[:2]}")
         predictions = self.learner.call(input_data)
@@ -201,7 +199,8 @@ class EvaluatorWorldModel(Evaluator):
         Calculate the confidence of the world model based on its prediction error.
         """
         self.node.get_logger().info(f"Calculating confidence for World Model {self.node.name} with prediction error {self.prediction_error}")
-        self.metacognitive_params["confidence"] = self.prediction_error
+        # The prediction error (MSE) is 0 or more: the lower it is, the higher the confidence, between 0 and 1
+        self.node.metacognitive_params["confidence"] = 1.0 / (1.0 + self.prediction_error)
 
 
 

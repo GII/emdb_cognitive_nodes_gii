@@ -419,7 +419,7 @@ class ExactClosestPointBasedSpace(RulesBasedSpace):
             return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
-        memberships = self.memberships
+        memberships = self.memberships.reshape(-1)  # One value per member (self.memberships has one column)
         # Calculate the activation value
         n_rows = points.shape[0]
         # No stored points yet -> no activation
@@ -469,7 +469,7 @@ class ClosestPointBasedSpace(RulesBasedSpace):
             return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
-        memberships = self.memberships
+        memberships = self.memberships.reshape(-1)  # One value per member (self.memberships has one column)
         # Calculate the activation value
         n_rows = points.shape[0]
         # No stored points yet -> no activation
@@ -526,7 +526,7 @@ class CentroidPointBasedSpace(RulesBasedSpace):
             return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
-        memberships = self.memberships
+        memberships = self.memberships.reshape(-1)  # One value per member (self.memberships has one column)
         # Calculate the activation value
         n_rows = points.shape[0]
         # No stored points yet -> no activation
@@ -613,7 +613,7 @@ class NormalCentroidPointBasedSpace(RulesBasedSpace):
             return np.zeros(perceptions.size, dtype=float)
         # Obtain the members and memberships of the space
         members = self.members
-        memberships = self.memberships
+        memberships = self.memberships.reshape(-1)  # One value per member (self.memberships has one column)
         # Calculate the activation value
         n_rows = points.shape[0]
         # No stored points yet -> no activation
