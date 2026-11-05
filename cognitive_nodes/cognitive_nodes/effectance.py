@@ -283,7 +283,11 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         """
         This method proccesses the effectance policy. Selects the higher confidence P-Node.
         and creates a goal linked to it if the confidence threshold is exceeded.
+        Until some P-Node has reported its success rate there is nothing to select: no goal is created.
         """
+        if not self.pnode_evaluation:
+            self.get_logger().info("No PNode has reported its success rate yet.")
+            return
         pnode=self.select_pnode()
         if self.pnode_evaluation[pnode] > self.confidence:
             await self.create_goal(pnode)
