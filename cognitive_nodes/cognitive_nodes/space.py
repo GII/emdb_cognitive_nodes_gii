@@ -1507,7 +1507,7 @@ class ANNModel_classification(nn.Module):
             self.layers.append(nn.LayerNorm(hidden_size))
             self.layers.append(self._get_activation(hidden_activation))
             if dropout > 0.0:
-                self.layers.append(nn.Dropout(0.1))
+                self.layers.append(nn.Dropout(dropout))
             prev_size = hidden_size
             
         # Output layer
