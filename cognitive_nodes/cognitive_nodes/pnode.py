@@ -62,6 +62,7 @@ class PNode(CognitiveNode):
         :param space_parameters: Keyword arguments for the constructor of the space class, in addition to ``ident`` (``"<name> space"``). If it does not have ``random_seed``, the random seed of the node is used (0 if it has none). They are registered so that duplicates of the node are created with them.
         :type space_parameters: dict
         :param params: Additional parameters for :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)
         # Forward the node's random_seed to the space so a configured seed makes

@@ -41,6 +41,7 @@ class Space(object):
         :param logger: Logger to use. If None, one named ``space_<ident>`` is obtained with ``rclpy.logging.get_logger``.
         :type logger: rclpy.impl.rcutils_logger.RcutilsLogger or None
         :param kwargs: Additional keyword arguments, ignored.
+        :type kwargs: dict
         """
         self.ident = ident
         self.parent_space = None
@@ -82,6 +83,8 @@ class PointBasedSpace(Space):
 
         :param size: Maximum number of points that the space can contain, defaults to 30000.
         :type size: int
+        :param kwargs: Arguments for :class:`Space` (``ident``, ``random_seed``, ``logger``).
+        :type kwargs: dict
         """
         self._data = None
         self.real_size = size
@@ -156,6 +159,7 @@ class PointBasedSpace(Space):
         :param data_container: Container with the points of the space (features plus the confidence column). Its name is set to end with "_data" if it does not.
         :type data_container: core.container.Container
         :param kwargs: Additional keyword arguments for the constructor of the space.
+        :type kwargs: dict
         :return: The space populated with the data of the container.
         :rtype: PointBasedSpace
         """
@@ -814,6 +818,7 @@ class SVMSpace(PointBasedSpace):
         :param max_iter: Maximum number of iterations of the SVM solver, defaults to 200000.
         :type max_iter: int
         :param kwargs: Arguments for :class:`PointBasedSpace` (``size``) and :class:`Space` (``ident``, ``random_seed``, ``logger``). ``random_seed`` is also resolved (see :func:`core.utils.resolve_seed`) to give the ``random_state`` of the SVM; when it is 0 or None, the SVM gets its own time-based seed, which is not the same as ``self.random_seed``.
+        :type kwargs: dict
         """
         # random_seed is read from kwargs because super().__init__ (which stores
         # self.random_seed) has not run yet at this point.
@@ -908,8 +913,7 @@ class SVMSpace(PointBasedSpace):
         The point is added as in :meth:`PointBasedSpace.add_point`. If the space is learnable (it has an antipoint with
         confidence -1.0), it is marked as configured and the SVM is fitted. Then the prediction for the perception is
         checked against its confidence: if the sign differs, the SVM is fitted again and, if its score is below 1.0,
-        :meth:`remove_close_points` is called. The code compares the confidence and the prediction with ``and``, so it
-        is meant for perceptions with a single row.
+        :meth:`remove_close_points` is called.
 
         :param perceptions: A given perception to add.
         :type perceptions: core.container.Container
@@ -1048,6 +1052,7 @@ class ANNSpace(PointBasedSpace):
         :param device: "auto" (default) uses "cuda" if available and "cpu" otherwise; "cpu" and "cuda" can also be requested.
         :type device: str
         :param kwargs: Arguments for :class:`PointBasedSpace` (``size``) and :class:`Space` (``ident``, ``random_seed``, ``logger``).
+        :type kwargs: dict
         :raises ValueError: If device is not "auto", "cpu" or "cuda", if "cuda" is requested but not available, or if backup_space is not a subclass of :class:`RulesBasedSpace`.
         """
         # Device configuration: "auto" uses CUDA when available and the CPU otherwise.

@@ -194,6 +194,8 @@ class DiscreteEventSimulatorPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
      
@@ -270,6 +272,8 @@ class FruitShopPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 
@@ -366,6 +370,8 @@ class OscarLLMPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 

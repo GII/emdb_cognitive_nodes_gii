@@ -28,13 +28,28 @@ class Competence(RobotPurpose, LTMSubscription):
 
     def __init__(self, name='robot_purpose', class_name='cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight=1, drive_id=None, purpose_type="Need", terminal=False, min_activation=0, ltm_id="", **params):
         """
-        Constructor of the Competence class. See :class:`cognitive_nodes.robot_purpose.RobotPurpose` for the parameters
-        not described here. Unlike it, ``purpose_type`` defaults to "Need".
+        Constructor of the Competence class. Unlike :class:`cognitive_nodes.robot_purpose.RobotPurpose`, ``purpose_type`` defaults to "Need".
 
+        :param name: The name of the node.
+        :type name: str
+        :param class_name: The name of the node class.
+        :type class_name: str
+        :param node_type: The type of the node, defaults to "RobotPurpose".
+        :type node_type: str
+        :param weight: The weight of the purpose. Defaults to 1.
+        :type weight: float
+        :param drive_id: The ID of the Drive node associated with the purpose.
+        :type drive_id: str or None
+        :param purpose_type: The type of the purpose (Need or Mission). Defaults to "Need".
+        :type purpose_type: str
+        :param terminal: Whether the purpose is terminal; it is returned as is in the ``get_satisfaction`` response. Defaults to False.
+        :type terminal: bool
         :param min_activation: Lower bound of the override activations given to the goals with a positive score. Defaults to 0.
         :type min_activation: float
         :param ltm_id: Id of the LTM whose state the node follows.
         :type ltm_id: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.robot_purpose.RobotPurpose`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type, weight, drive_id, purpose_type, terminal, **params)
         self.configure_ltm_subscription(ltm_id, self.cbgroup_activation)

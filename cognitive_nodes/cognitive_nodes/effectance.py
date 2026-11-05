@@ -58,8 +58,13 @@ class DriveEffectanceInternal(Drive, PNodeSuccess):
         """
         Callback that proccesses a success message from a P-Node.
 
+        If ``limit_depth`` is False it uses the one of the base class. Otherwise it stores in ``pnode_evaluation`` the success rate of the
+        P-Node, or 0.0 if the P-Node is already linked to a Goal or its name contains ``reach_pnode_``.
+
         :param msg: Message with success information.
         :type msg: cognitive_node_interfaces.msg.SuccessRate
+        :return: None
+        :rtype: None
         """        
 
         #UGLY HACK: This was done to limit effectance chains to a depth of 1. 
@@ -278,8 +283,13 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         """
         Callback that proccesses a success message from a P-Node.
 
+        If ``limit_depth`` is False it uses the one of the base class. Otherwise it stores in ``pnode_evaluation`` the success rate of the
+        P-Node, or 0.0 if the P-Node is already linked to a Goal or its name contains ``reach_pnode_``.
+
         :param msg: Message with success information.
         :type msg: cognitive_node_interfaces.msg.SuccessRate
+        :return: None
+        :rtype: None
         """    
 
         if not self.limit_depth:
@@ -765,6 +775,7 @@ class GoalActivatePNode(GoalLearnedSpace):
         :param drive_name: Not used.
         :type drive_name: str or None
         :return: None
+        :rtype: None
         """        
         return None
     
@@ -956,6 +967,14 @@ class GoalRecreateEffect(GoalLearnedSpace):
         self.base_params.update(dict(sensor=sensor, attribute=attribute)) # Add the sensor and attribute to the base parameters to be used by the goal.
 
     def calculate_activation(self, perception, activation_list):
+        """
+        Calculates the activation of the goal. It only calls the method of the base class; the definition of the same name below replaces this one in the class (see there).
+
+        :param perception: Unused perception.
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighboring nodes and perceptions, as kept in ``activation_inputs``.
+        :type activation_list: dict
+        """
         # Add the effect perception to the activation list (Change in effectance policy)
         # Then, call the space with that perception and disable the goal if the space is active. Should this be done for all goals?
         super().calculate_activation(perception, activation_list)
@@ -1092,6 +1111,8 @@ class SpaceEffectActive(PointBasedSpace):
         :type sensor: str
         :param attribute: The attribute associated with the effect.
         :type attribute: str
+        :param kwargs: Arguments for :class:`cognitive_nodes.space.PointBasedSpace` (``size``) and :class:`cognitive_nodes.space.Space` (``ident``, ``random_seed``, ``logger``).
+        :type kwargs: dict
         """
         self.effect_label = f"{sensor}:{attribute}"
         super().__init__(**kwargs)
