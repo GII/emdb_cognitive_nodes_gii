@@ -125,6 +125,18 @@ class UtilityModel(DeliberativeModel):
         return expected_utilities
     
     def predict_callback(self, request, response):
+        """
+        Callback of the prediction service. It converts the episodes of the request to :class:`cognitive_nodes.episode.Episode` objects and
+        predicts their utilities with :meth:`predict`. If the prediction raises an exception, it is logged and the response is
+        marked as not valid, with no utilities.
+
+        :param request: Request with the episodes whose utility is to be predicted in ``input_episodes``.
+        :type request: cognitive_node_interfaces.srv.PredictUtility.Request
+        :param response: Response to fill: ``expected_utilities`` has one value per episode and ``valid`` tells whether the prediction was made.
+        :type response: cognitive_node_interfaces.srv.PredictUtility.Response
+        :return: The filled response.
+        :rtype: cognitive_node_interfaces.srv.PredictUtility.Response
+        """
         self.get_logger().info("Predicting ...")
 
         try:
@@ -204,16 +216,30 @@ class NoveltyUtilityModel(UtilityModel):
     """
     def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", **params):
         """
-        Constructor of the NoveltyUtilityModel class. See :class:`UtilityModel` for the parameters not described here.
+        Constructor of the NoveltyUtilityModel class.
 
+        :param name: The name of the Utility Model instance, defaults to 'utility_model'
+        :type name: str, optional
+        :param class_name: The fully qualified class name for the Utility Model, defaults to 'cognitive_nodes.utility_model.UtilityModel'
+        :type class_name: str, optional
+        :param prediction_srv_type: The service type for predictions, defaults to "cognitive_node_interfaces.srv.PredictUtility"
+        :type prediction_srv_type: str, optional
         :param trace_length: Maximum number of perceptions stored in the buffer, defaults to 20
         :type trace_length: int, optional
+        :param max_iterations: Maximum number of iterations (steps) of a deliberation cycle, defaults to 20
+        :type max_iterations: int, optional
+        :param candidate_actions: Number of candidate actions to generate during deliberation, defaults to 5
+        :type candidate_actions: int, optional
         :param min_traces: Passed on to the base class and the deliberation, defaults to 5
         :type min_traces: int, optional
         :param max_traces: Passed on to the base class and the deliberation, defaults to 50
         :type max_traces: int, optional
         :param max_antitraces: Passed on to the base class and the deliberation, defaults to 10
         :type max_antitraces: int, optional
+        :param ltm_id: Identifier for the Long-Term Memory cache used in deliberation, defaults to ""
+        :type ltm_id: str, optional
+        :param params: Additional keyword parameters passed to :class:`UtilityModel`.
+        :type params: dict
         """
         super().__init__(name=name, class_name=class_name, prediction_srv_type=prediction_srv_type, trace_length=trace_length, max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, min_traces=min_traces, max_traces=max_traces, max_antitraces=max_antitraces, **params)
 
@@ -249,8 +275,22 @@ class HardCodedUtilityModel(UtilityModel):
     """
     def __init__(self, name='utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, min_traces=5, max_traces=50, max_antitraces=10, ltm_id="", perception_config=None, **params):
         """
-        Constructor of the HardCodedUtilityModel class. See :class:`UtilityModel` for the parameters not described here.
+        Constructor of the HardCodedUtilityModel class.
 
+        :param name: The name of the Utility Model instance.
+        :type name: str, optional
+        :param class_name: The fully qualified class name for the Utility Model.
+        :type class_name: str, optional
+        :param prediction_srv_type: The service type for predictions.
+        :type prediction_srv_type: str, optional
+        :param trace_length: Maximum number of episodes of a trace, defaults to 20
+        :type trace_length: int, optional
+        :param max_iterations: Maximum number of iterations (steps) of a deliberation cycle, defaults to 20
+        :type max_iterations: int, optional
+        :param candidate_actions: Number of candidate actions to generate during deliberation, defaults to 5
+        :type candidate_actions: int, optional
+        :param ltm_id: Identifier for the Long-Term Memory cache used in deliberation, defaults to ""
+        :type ltm_id: str, optional
         :param min_traces: Passed on to the base class, defaults to 5
         :type min_traces: int, optional
         :param max_traces: Passed on to the base class, defaults to 50
@@ -259,6 +299,8 @@ class HardCodedUtilityModel(UtilityModel):
         :type max_antitraces: int, optional
         :param perception_config: Configuration of the perceptions (bounds), stored in ``perception_config``.
         :type perception_config: dict, optional
+        :param params: Additional keyword parameters passed to :class:`UtilityModel`.
+        :type params: dict
         """
         super().__init__(
             name=name,
@@ -699,7 +741,24 @@ class DummyUtilityModel(LearnedUtilityModel):
     """
     def __init__(self, name='dummy_utility_model', class_name='cognitive_nodes.utility_model.UtilityModel', prediction_srv_type="cognitive_node_interfaces.srv.PredictUtility", trace_length=20, max_iterations=20, candidate_actions=5, ltm_id="", **params):
         """
-        Constructor of the DummyUtilityModel class. See :class:`LearnedUtilityModel` for the parameters.
+        Constructor of the DummyUtilityModel class.
+
+        :param name: The name of the Utility Model instance.
+        :type name: str, optional
+        :param class_name: The fully qualified class name for the Utility Model.
+        :type class_name: str, optional
+        :param prediction_srv_type: The service type for predictions.
+        :type prediction_srv_type: str, optional
+        :param trace_length: Maximum number of episodes of a trace, defaults to 20
+        :type trace_length: int, optional
+        :param max_iterations: Maximum number of iterations (steps) of a deliberation cycle, defaults to 20
+        :type max_iterations: int, optional
+        :param candidate_actions: Number of candidate actions to generate during deliberation, defaults to 5
+        :type candidate_actions: int, optional
+        :param ltm_id: Identifier for the Long-Term Memory cache used in deliberation, defaults to ""
+        :type ltm_id: str, optional
+        :param params: Additional keyword parameters passed to :class:`LearnedUtilityModel`.
+        :type params: dict
         """
         super().__init__(name=name, class_name=class_name, prediction_srv_type=prediction_srv_type, trace_length=trace_length, max_iterations=max_iterations, candidate_actions=candidate_actions, ltm_id=ltm_id, **params)
 

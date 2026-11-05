@@ -180,10 +180,24 @@ class CNodeWorldPreactive(CNode):
         **params,
     ):
         """
-        Constructor of the CNodeWorldPreactive class. See :class:`CNode` for the common parameters.
+        Constructor of the CNodeWorldPreactive class.
 
+        :param name: The name of the C-Node.
+        :type name: str
+        :param class_name: The name of the C-Node class.
+        :type class_name: str
+        :param node_type: The type of the C-Node.
+        :type node_type: str
+        :param history_size: The size of the history of the C-Node. The history starts filled with zeros.
+        :type history_size: int
+        :param track_competence: If True the competence is calculated from the history. If False, competence is always ``default_competence`` and the delta competence is 0.0. Defaults to True.
+        :type track_competence: bool
+        :param default_competence: Competence used when ``track_competence`` is False. Defaults to 1.
+        :type default_competence: float
         :param preactive_factor: Activation factor used for the World Model when it is inactive. Defaults to 0.5.
         :type preactive_factor: float
+        :param params: Additional parameters passed to :class:`CNode`.
+        :type params: dict
         """
         super().__init__(
             name,

@@ -297,6 +297,8 @@ class GoalObjectInBoxStandalone(Goal):
         :param normalize_data: Normalization data for sensor values
         :type normalize_data: dict
 
+        :param params: Additional parameters passed to :class:`Goal`.
+        :type params: dict
         :raises DeprecationWarning: Always: this class is deprecated, use GoalMotiven instead.
         """
         super().__init__(name, class_name, **params)
@@ -376,12 +378,12 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check of an object is pickable with the two hands of the robot.
 
-        :param angle: The distance of the object relative to the robot.
+        :param distance: The distance of the object relative to the robot (normalized; it is denormalized before calling the service).
+        :type distance: float
+        :param angle: The angle of the object relative to the robot (normalized; it is denormalized before calling the service).
         :type angle: float
-        :param angle: The angle of the object relative to the robot.
-        :type angle: float
-        :return: A value that indicates if the object is pickable or not.
-        :rtype: bool
+        :return: The result of the asynchronous request to the ``<robot_service>/object_pickable_with_two_hands`` service, which indicates if the object is pickable or not.
+        :rtype: object
         """
         pickable = self.pickable_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
         return pickable

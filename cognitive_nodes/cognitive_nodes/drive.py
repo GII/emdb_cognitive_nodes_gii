@@ -417,6 +417,12 @@ class DriveLLM(Drive):
             self.input_flag = True
     # changes format
     def extract_attributes(self):
+        """
+        Flatten the last values received from the sensors into a single dictionary. The ``data`` attribute of each sensor is left out.
+
+        :return: Dictionary with an entry ``<sensor>_<attribute>`` for each attribute of each sensor in ``final_values``, which are the variables that the drive function can use.
+        :rtype: dict
+        """
         output={}
         for sensor in self.final_values.keys():
             for attribute in self.final_values[sensor]:
