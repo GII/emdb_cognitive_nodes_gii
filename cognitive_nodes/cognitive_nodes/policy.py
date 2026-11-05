@@ -608,7 +608,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
         utilities as rewards) then run gradient updates in a daemon thread."""
         with self._sac_lock:
             # Flush every (episode, utility) pair from every stored trace
-            episodes, utilities = self.episodic_buffer.get_flattened_traces()
+            episodes, utilities = self.episodic_buffer.get_flattened_traces(self.episodic_buffer.traces_buffer)
 
             old_perceptions = episodes.old_perception
             perceptions = episodes.perception
