@@ -62,6 +62,7 @@ class CNode(CognitiveNode):
         """
         self.history.append(request.success)
         self.calculate_metacognitive_parameters()
+        response.added = True
         return response
 
     def calculate_metacognitive_parameters(self):
