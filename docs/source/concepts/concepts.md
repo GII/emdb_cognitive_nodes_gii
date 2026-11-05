@@ -69,6 +69,8 @@ The following intrinsic motivations are implemented:
 - Exploration
 - Effectance
 - Prospection
+- Knowledge reuse
+- Competence
 
 Each of these mechanisms contributes to the autonomous creation and organization of knowledge nodes, such as goals and P-Nodes, which are stored and managed by the architecture's Long-Term Memory (LTM).
 
@@ -83,7 +85,7 @@ Each of these mechanisms contributes to the autonomous creation and organization
 ### Exploration
 
 Exploration encourages the robot to actively seek new and previously unvisited areas of its perceptual space. The system is motivated to identify novel situations and construct new P-Nodes and goals that help represent and structure the state space.
-Within the e-MDB cognitive architecture, exploration is a fundamental intrinsic motivation expand its knowledge. This exploration, at this moment, can be operated by two mechanisms:
+Within the e-MDB cognitive architecture, exploration is a fundamental intrinsic motivation expand its knowledge. This exploration, at this moment, can be operated by three mechanisms:
 
 1. **Random Exploration**: The robot randomly selects actions to explore its environment. This approach allows the system to discover new perceptual states and learn about them without any prior knowledge or specific goals. Random exploration is particularly useful in the early stages of learning, where the robot has limited information about its surroundings.
 
@@ -127,6 +129,21 @@ Through prospection, the robot builds a layered understanding of its goals, allo
 
 *Prospection*
 </div>
+
+
+### Knowledge reuse
+
+Knowledge reuse motivates the robot to take advantage of what it has already learned in one domain when it finds itself in another. Within the e-MDB cognitive architecture, it looks for pairs of goals that share a policy but belong to different domains (world models), where one of them is the head of a deep chain of goals and the other has none. If the chain of the mature goal explains the data already collected for the new one, the robot does not need to rebuild that hierarchy from scratch.
+
+To decide this, the system compares the activations that the P-Node of the mature goal gives to the points stored in the P-Node of the new goal with the confidences of those points, and selects the best match for each new goal. The knowledge reuse drive is satisfied while there are selected candidates, and the associated policy then copies the goals, P-Nodes and C-Nodes of the chain and reconnects them to the new goal, P-Node and domain.
+
+
+### Competence
+
+Competence motivates the robot to improve in the goals it is not yet able to achieve reliably. Within the e-MDB cognitive architecture, each C-Node keeps track of how competent the robot is in its context and how that competence is changing. The Competence motivation favors the goals whose competence is low and is changing, so that the robot concentrates its effort on what it is still learning, and still gives a small share of attention to goals whose competence is not changing yet.
+
+The result is expressed as an activation for each goal, which is scaled between a minimum value and the activation of the motivation itself. The motivation is satisfied when the competence in all the goals has been fully reached.
+
 
 ## Purpose alignment
 

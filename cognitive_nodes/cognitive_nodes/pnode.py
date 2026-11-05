@@ -19,14 +19,33 @@ ACTIVATION_CACHE_SIZE = 16  # Perceptions whose activations each P-Node keeps (s
 
 class PNode(CognitiveNode):
     """
-    P-Node class
+    P-Node class.
+
+    A P-Node (perceptual node) represents a region of the perceptual space through a space object
+    (:class:`cognitive_nodes.space.PointBasedSpace` or a subclass). Its activation is the activation of the space for the
+    current perception, clipped to be at least 0. Points and antipoints are added to the space through the
+    ``pnode/<name>/add_points`` service or :meth:`add_points`.
+
+    The node keeps a history of the last ``history_size`` points added, in which a point counts as a success if its
+    confidence is positive and the space is configured. The success rate (fraction of successes over ``history_size``) is
+    published in ``pnode/<name>/success_rate`` and is the node's ``confidence`` metacognitive parameter.
+
+    The activations of the space are cached in ``activation_cache``, an ``OrderedDict`` of at most ``ACTIVATION_CACHE_SIZE``
+    (16) entries. The key is made of the feature labels, the shape and the values of the perception, without the timestamps,
+    because the timestamps change with every reading even if the values do not. The oldest entry is discarded
+    when the cache is full (first in, first out: reading an entry does not renew it). The cache is emptied by
+    :meth:`space_changed`, which is called when points are added or a space is loaded. See :meth:`cached_probability`.
+
+    The node reads its perceptions from the activation inputs (subscriptions to ``perception/<name>/value``), which are
+    consolidated into a single container before each calculation.
     """
     def __init__(self, name= 'pnode', class_name = 'cognitive_nodes.pnode.PNode', node_type="PNode", space_class = None, space = None, history_size=100, space_parameters=None, **params):
         """
         Constructor for the P-Node class.
         
         Initializes a P-Node with the given name and registers it in the LTM.
-        It also creates a service for adding points to the node.
+        It also creates the services for adding points, loading and sending the space, checking if the space contains
+        another one and saving the model of the space, all under ``pnode/<name>/``, and the publisher of the success rate.
         
         :param name: The name of the P-Node.
         :type name: str
@@ -34,12 +53,16 @@ class PNode(CognitiveNode):
         :type class_name: str
         :param node_type: The type of the node, defaults to "PNode".
         :type node_type: str
-        :param space_class: The class of the space used to define the P-Node.
+        :param space_class: Full name of the class of the space used to define the P-Node (e.g. ``cognitive_nodes.space.SVMSpace``). It is only used if no space is given.
         :type space_class: str
-        :param space: The space used to define the P-Node.
-        :type space: cognitive_nodes.space
-        :param history_size: The size of the history of the P-Node.
+        :param space: The space used to define the P-Node. If given, it is used instead of creating one from space_class.
+        :type space: cognitive_nodes.space.PointBasedSpace
+        :param history_size: The size of the history of the P-Node, which is also the denominator of the success rate. Defaults to 100.
         :type history_size: int
+        :param space_parameters: Keyword arguments for the constructor of the space class, in addition to ``ident`` (``"<name> space"``). If it does not have ``random_seed``, the random seed of the node is used (0 if it has none). They are registered so that duplicates of the node are created with them.
+        :type space_parameters: dict
+        :param params: Additional parameters for :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)
         # Forward the node's random_seed to the space so a configured seed makes
@@ -82,11 +105,11 @@ class PNode(CognitiveNode):
         Callback that sends the space of the P-Node.
 
         :param request: Empty request.
-        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :type request: cognitive_node_interfaces.srv.SendSpace.Request
         :param response: Response that contains the space of the P-Node.
-        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :type response: cognitive_node_interfaces.srv.SendSpace.Response
         :return: Response that contains the space of the P-Node.
-        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :rtype: cognitive_node_interfaces.srv.SendSpace.Response
         """
         if self.space:
             response.space = self.space.to_msg()
@@ -95,6 +118,9 @@ class PNode(CognitiveNode):
     def contains_space_callback(self, request, response):
         """
         Callback that checks if the space contains a given space.
+
+        ``contained`` is False if the node has no space or the received data is None; otherwise it is the result of ``contains``
+        of the space (see :meth:`cognitive_nodes.space.PointBasedSpace.contains`).
 
         :param request: Request that contains the space to check.
         :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
@@ -114,10 +140,12 @@ class PNode(CognitiveNode):
         """
         Callback method for adding a point (or anti-point) to a specific P-Node.
 
+        The points are rejected (``added`` is False) if the request has none or if their number differs from the number of confidences.
+
         :param request: The request that contains the list of points that are added and their confidence.
         :type request: cognitive_node_interfaces.srv.AddPoints.Request
         :param response: The response indicating if the points were added to the P-Node.
-        :type respone: core_interfaces.srv.AddPoints.Response
+        :type response: cognitive_node_interfaces.srv.AddPoints.Response
         :return: The response indicating if the points were added to the P-Node.
         :rtype: cognitive_node_interfaces.srv.AddPoints.Response
         """
@@ -139,10 +167,14 @@ class PNode(CognitiveNode):
         """
         Callback method for loading a complete space into a specific P-Node.
 
+        If the space of the P-Node has no data yet, the loaded container becomes its data. Otherwise the loaded feature labels
+        must be equal to those of the P-Node's space (else nothing is loaded and ``loaded`` is False); the data is then
+        cleared and replaced by the loaded points. In both cases, the activation cache is emptied.
+
         :param request: The request that contains the space to be loaded.
         :type request: cognitive_node_interfaces.srv.LoadSpace.Request
         :param response: The response indicating if the space was loaded into the P-Node.
-        :type respone: core_interfaces.srv.LoadSpace.Response
+        :type response: cognitive_node_interfaces.srv.LoadSpace.Response
         :return: The response indicating if the space was loaded into the P-Node.
         :rtype: cognitive_node_interfaces.srv.LoadSpace.Response
         """
@@ -177,10 +209,16 @@ class PNode(CognitiveNode):
         """
         Add new points (or anti-points) to the P-Node.
 
+        The points are passed to ``add_point`` of the space (which may discard antipoints, and may train its model), the
+        activation cache is emptied, the confidence of every received point is added to the history (including
+        those that the space discarded) and the success rate is published.
+
         :param points: The points that are added to the P-Node.
         :type points: core.container.Container
         :param confidences: The confidences associated with each point.
         :type confidences: numpy.ndarray
+        :return: True after adding the points; None (with an error log) if the node has no space.
+        :rtype: bool | None
         """
         if not self.space:
             self.get_logger().error("No space defined for the P-Node. Cannot add points.")
@@ -198,13 +236,20 @@ class PNode(CognitiveNode):
         """
         Calculate the new activation value for a given perception.
 
+        There are three cases:
+
+        - ``activation_list`` is given with perceptions: the data of every input is consolidated into ``self.perception`` (created the first time and rewritten in place afterwards, until an input is added or deleted), and the activations of the space for it are obtained with :meth:`cached_probability`. The activation of the node is the first value, or 0.0 if it is negative, and its timestamp comes from the last timestamp of the perception. The node's ``Activation`` message is returned. If the node has no space, the activation is 0.
+        - ``activation_list`` is given but contains no data (it may be empty while the node is initializing): the activation is 0.0 with the current time, and the ``Activation`` message is returned.
+        - ``activation_list`` is None and ``perception`` is given: the activations of the space for all the rows of that perception are returned as a list, without clipping them (or zeros if there is no space). This is used when the activation is requested from outside.
+
+        If neither is given, None is returned.
+
         :param perception: The perception for which P-Node activation is calculated.
-        :type perception: container.Container
-        :param activation_list: The list of activations to be used for the calculation.
-        :type activation_list: list
-        :return: If there is space, returns the activation of the P-Node. If not, returns 0. 
-            It also returs the timestamp.
-        :rtype: cognitive_node_interfaces.msg.Activation
+        :type perception: core.container.Container
+        :param activation_list: Dictionary of the activation inputs, with the data of each input (``activation_list[name]['data']``).
+        :type activation_list: dict
+        :return: The ``Activation`` message of the node in the first two cases; a list of floats in the third; None if neither argument is given.
+        :rtype: cognitive_node_interfaces.msg.Activation | list[float] | None
         """
         confidences = None
         if activation_list!=None:
@@ -238,6 +283,11 @@ class PNode(CognitiveNode):
         same perception asked by several goals). The timestamps of the perception are not part of the key:
         they change with every reading, even when the values don't.
 
+        Used by :meth:`calculate_activation`. The key is the tuple of the feature labels, the shape of the values and their
+        bytes. On a miss, the activations are calculated with ``get_probability`` of the space and stored; if the cache then
+        has more than ``ACTIVATION_CACHE_SIZE`` entries, the oldest one is discarded. The array returned on a hit is the one
+        stored in the cache, so it must not be modified. The node must have a space.
+
         :param perception: The perception.
         :type perception: core.container.Container
         :return: The activation of each row of the perception.
@@ -256,16 +306,14 @@ class PNode(CognitiveNode):
     def space_changed(self):
         """
         Discards the cached activations. Called whenever the space of the P-Node changes (points added,
-        which may also train its model, or space loaded).
+        which may also train its model, or space loaded), in :meth:`add_points` and :meth:`load_space_callback`.
         """
         self.activation_cache.clear()
 
     def calculate_metacognitive_params(self):
         """
-        Calculate the metacognitive parameters of the P-Node.
-
-        :return: The metacognitive parameters of the P-Node.
-        :rtype: cognitive_node_interfaces.msg.MetacognitiveParams
+        Calculate the metacognitive parameters of the P-Node and store them in metacognitive_params: its
+        confidence is its success rate (the last value calculated by :meth:`update_history`).
         """
         self.metacognitive_params["confidence"] = self.success_rate
     
@@ -303,8 +351,8 @@ class PNode(CognitiveNode):
         """
         Callback method that reads a perception and stores it in the activation inputs list.
 
-        :param msg: PerceptionStamped message that contains the perception and its timestamp.
-        :type msg: cognitive_node_interfaces.msg.PerceptionStamped
+        :param msg: Container message that contains the perception and its timestamps.
+        :type msg: core_interfaces.msg.Container
         """        
         if msg.max_size>1:
             self.get_logger().error(f'Received perception with multiple readings: ({msg.name}). Perception messages should (currently) include only one reading!')
@@ -414,8 +462,12 @@ class PNode(CognitiveNode):
         """
         Updates the history of the P-Node with the new confidence value (point or anti-point).
 
-        :param confidence: Confidence value of the new point or anti-point.
-        :type confidence: int
+        The entry is True if ``confidence`` is greater than 0 and the space is configured, and False otherwise. The success
+        rate is the number of True entries divided by ``history_size`` (also while the history is not full), and the
+        metacognitive parameters are updated.
+
+        :param confidence: Confidence value of the new point or anti-point (a number such as 1.0, 0.0 or -1.0; only its sign matters).
+        :type confidence: float
         """        
         if confidence>0 and self.space.configured:
             self.history.appendleft(True)
@@ -431,11 +483,24 @@ class PNode(CognitiveNode):
         """
         Create a duplicate of this node through the commander. P-Nodes include the space model in the duplication process.
 
+        This is a coroutine: it has to be awaited.
+
+        If the space can save a model (``save_model``, as the ANN space), the model is saved to a temporary ``.pth`` file and its path is
+        passed to the duplicate as ``model_file`` in its ``space_parameters``, which also merge those of this node with the
+        ones in ``parameters`` (the latter prevail). Once the duplicate has been created by
+        :meth:`core.cognitive_node.CognitiveNode.duplicate_node`, if the space has points they are sent to the duplicate with
+        its ``pnode/<duplicate name>/load_space`` service. The temporary file is deleted at the end.
+
         :param name: Optional name for the duplicate. If omitted, a unique
             ``<name>_dup_<count>`` name is generated.
+        :type name: str
         :param parameters: Optional constructor parameters that override the
             node's duplicate defaults.
+        :type parameters: dict
+        :param include_neighbors: Include the neighbors of this node in the duplicate, defaults to True.
+        :type include_neighbors: bool
         :return: The duplicate name, or ``None`` when creation fails.
+        :rtype: str | None
         """
         parameters = dict(parameters or {})
 

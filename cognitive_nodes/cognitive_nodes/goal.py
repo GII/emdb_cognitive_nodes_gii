@@ -24,7 +24,19 @@ from builtin_interfaces.msg import Time as TimeMsg
 
 class Goal(CognitiveNode):
     """
-    Goal class.
+    Base class for Goal nodes.
+
+    A Goal describes a state the agent wants to reach. Subclasses implement
+    :meth:`get_reward`, which gives the reward obtained for a transition between two perceptions.
+    The base class cannot calculate rewards (its :meth:`get_reward` raises ``NotImplementedError``).
+
+    Services:
+
+    - ``goal/<name>/set_activation``: :class:`cognitive_node_interfaces.srv.SetActivation`.
+    - ``goal/<name>/is_reached``: :class:`cognitive_node_interfaces.srv.IsReached`. It is true when the value returned by :meth:`get_reward` is close to 1.0.
+    - ``goal/<name>/get_reward``: :class:`cognitive_node_interfaces.srv.GetReward`.
+    - ``goal/<name>/add_points``: :class:`cognitive_node_interfaces.srv.AddPoints`.
+    - ``goal/<name>/send_space``: :class:`cognitive_node_interfaces.srv.SendSpace`. The base class returns an empty message.
     """
     def __init__(self, name='goal', class_name = 'cognitive_nodes.goal.Goal', node_type="Goal", duplicate_from=None, **params):
         """
@@ -38,6 +50,10 @@ class Goal(CognitiveNode):
         :type class_name: str
         :param node_type: The type of the node, defaults to "Goal".
         :type node_type: str
+        :param duplicate_from: Name of the Goal this one is a duplicate of (kept as an attribute; it is not passed to the base class).
+        :type duplicate_from: str or None
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`. They are also stored to be included in duplicates.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, duplicate_from=None, **params)
         self.reward = 0.0
@@ -86,7 +102,14 @@ class Goal(CognitiveNode):
         )
 
     def get_duplicate_parameters(self, include_neighbors=True):
-        """Include the mutable Goal constructor parameters in a duplicate."""
+        """
+        Include the mutable Goal constructor parameters in a duplicate.
+
+        :param include_neighbors: If False, ``neighbors`` is removed from the parameters returned.
+        :type include_neighbors: bool
+        :return: Parameters of the base class updated with the constructor parameters of the Goal.
+        :rtype: dict
+        """
         parameters = super().get_duplicate_parameters(include_neighbors)
         base_params = copy(self.base_params)
         if not include_neighbors:
@@ -114,9 +137,10 @@ class Goal(CognitiveNode):
     
     def add_points_callback(self, request, response):
         """
-        Callback method for adding a point (or anti-point) to a specific Goal.
+        Callback method for adding points (or anti-points) to a specific Goal. The points are added with :meth:`update_space`.
+        The response is False if the request has no points or if the number of points and confidences differ.
 
-        :param request: The request that contains the point that is added and its confidence.
+        :param request: The request that contains the points (a :class:`core_interfaces.msg.Container`) that are added and their confidences.
         :type request: cognitive_node_interfaces.srv.AddPoints.Request
         :param response: The response indicating if the point was added to the Goal.
         :type response: cognitive_node_interfaces.srv.AddPoints.Response
@@ -155,9 +179,10 @@ class Goal(CognitiveNode):
 
     async def is_reached_callback(self, request, response):
         """
-        Check if the goal has been reached.
+        Check if the goal has been reached. This is a coroutine and must be awaited if called directly.
+        The goal is reached if the reward returned by :meth:`get_reward` for the perceptions of the request is close to 1.0.
 
-        :param request: Request that includes the new perception to check.
+        :param request: Request that includes the previous and the new perceptions (:class:`core_interfaces.msg.Container`).
         :type request: cognitive_node_interfaces.srv.IsReached.Request
         :param response: Response that indicates if the goal is reached or not.
         :type response: cognitive_node_interfaces.srv.IsReached.Response
@@ -179,9 +204,11 @@ class Goal(CognitiveNode):
     
     async def get_reward_callback(self, request, response):
         """
-        Callback method to calculate the reward obtained. 
+        Callback method to calculate the reward obtained. This is a coroutine and must be awaited if called directly.
+        It calls :meth:`get_reward` (awaiting it if it is a coroutine), which must return a
+        ``(reward, timestamp)`` tuple. ``updated`` is True if that timestamp is newer than ``request.timestamp``.
 
-        :param request: Request that includes the new perception to check the reward.
+        :param request: Request that includes the previous and the new perceptions (:class:`core_interfaces.msg.Container`), the ``update_space`` flag and the ``timestamp`` of the last reward the caller has already seen.
         :type request: cognitive_node_interfaces.srv.GetReward.Request
         :param response: Response that contais the reward.
         :type response: cognitive_node_interfaces.srv.GetReward.Response
@@ -210,12 +237,18 @@ class Goal(CognitiveNode):
 
         This is a placeholder for the get reward method that must be implemented according
         to the required experiment/application. It is a asyncio corrutine so that service
-        calls can be awaited.  
+        calls can be awaited; subclasses may override it with a plain method, as the callers
+        check it.
+
+        The contract expected by :meth:`get_reward_callback` is a ``(reward, timestamp)`` tuple
+        (:class:`builtin_interfaces.msg.Time` timestamp), as returned by :class:`GoalMotiven` and :class:`GoalLearnedSpace`.
 
         :param old_perception: The previous perception data. Defaults to None.
-        :type old_perception: Any
+        :type old_perception: core.container.Container or None
         :param perception: The current perception data. Defaults to None.
-        :type perception: Any
+        :type perception: core.container.Container or None
+        :param update_space: Whether the space of the goal may be updated with the result. Defaults to False.
+        :type update_space: bool
         :raises NotImplementedError: If the method is not overridden in a subclass.
         """
         raise NotImplementedError
@@ -223,12 +256,14 @@ class Goal(CognitiveNode):
     
     def update_space(self, points, confidences):
         """
-        Placeholder method in base goals. To be implemented in derived classes.
+        Placeholder method in base goals. To be implemented in derived classes. It does nothing and returns False.
         
         :param points: The points that are added to the Goal.
         :type points: core.container.Container
-        :param confidences: Indicates if the perception added is a point or an antipoint.
-        :type confidences: float
+        :param confidences: Indicates if the perceptions added are points or antipoints.
+        :type confidences: numpy.ndarray
+        :return: Always False in the base class.
+        :rtype: bool
         """
         return False
     
@@ -237,6 +272,10 @@ class GoalObjectInBoxStandalone(Goal):
     Goal representing the desire of putting an object in a box.
     
     --DEPRECATED, Use the GoalMotiven class--
+
+    This class cannot be instantiated: its constructor raises ``DeprecationWarning``
+    (after calling the base constructor). The methods below are legacy code, left for
+    reference, and work on the old dictionary-based perceptions.
     """
 
     def __init__(self, name='goal', data=None, class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, robot_service='simulator', normalize_data=None, **params):
@@ -258,7 +297,9 @@ class GoalObjectInBoxStandalone(Goal):
         :param normalize_data: Normalization data for sensor values
         :type normalize_data: dict
 
-        raises DeprecationWarning: This class is deprecated, use GoalMotiven instead.
+        :param params: Additional parameters passed to :class:`Goal`.
+        :type params: dict
+        :raises DeprecationWarning: Always: this class is deprecated, use GoalMotiven instead.
         """
         super().__init__(name, class_name, **params)
         raise DeprecationWarning("GoalObjectInBoxStandalone is deprecated, use GoalMotiven instead")
@@ -337,12 +378,12 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Check of an object is pickable with the two hands of the robot.
 
-        :param angle: The distance of the object relative to the robot.
+        :param distance: The distance of the object relative to the robot (normalized; it is denormalized before calling the service).
+        :type distance: float
+        :param angle: The angle of the object relative to the robot (normalized; it is denormalized before calling the service).
         :type angle: float
-        :param angle: The angle of the object relative to the robot.
-        :type angle: float
-        :return: A value that indicates if the object is pickable or not.
-        :rtype: bool
+        :return: The result of the asynchronous request to the ``<robot_service>/object_pickable_with_two_hands`` service, which indicates if the object is pickable or not.
+        :rtype: object
         """
         pickable = self.pickable_client.send_request_async(distance = self.denormalize('distance', distance), angle = self.denormalize('angle', angle))
         return pickable
@@ -548,6 +589,7 @@ class GoalObjectInBoxStandalone(Goal):
     def sensorial_changes(self):
         """
         Return false if all perceptions have the same value as the previous step. True otherwise.
+        Legacy code, for the old dictionary-based perceptions.
 
         :return: Value that indicates if the percepction values changed or not.
         :rtype: bool
@@ -572,7 +614,7 @@ class GoalObjectInBoxStandalone(Goal):
         Returns the the activation value of the goal.
 
         :param perception: Perception does not influence the activation.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activations. Not used.
         :type activation_list: list
         :return: The activation of the goal and its timestamp.
@@ -593,11 +635,13 @@ class GoalObjectInBoxStandalone(Goal):
         """
         Calculate the reward for the current sensor values.
 
-        :param old_perception: The previous perception. Not used.
-        :type old_perception: Any
+        :param old_perception: The previous perception. Not used (``self.perception`` and ``self.old_perception`` are used instead).
+        :type old_perception: core.container.Container or None
         :param perception: The current perception. Not used.
-        :type perception: Any
-        :return: The reward obtained.
+        :type perception: core.container.Container or None
+        :param update_space: Not used.
+        :type update_space: bool
+        :return: The reward obtained (a float, not a tuple).
         :rtype: float
         """
         self.reward = 0.0
@@ -664,7 +708,12 @@ class GoalObjectInBoxStandalone(Goal):
 
 class GoalMotiven(Goal):
     """
-    Class that implements a Goal that aims at minimizing a drive.
+    Goal that aims at minimizing the evaluation of the Drives it is connected to.
+
+    The node subscribes to the evaluation of its neighbor Drives. When the evaluation of a Drive
+    decreases the reward of the goal becomes 1.0, and when it increases it becomes -1.0.
+    The reward is returned (and reset to 0.0) by :meth:`get_reward`.
+    Its activation is calculated from the activation of the neighbor Drives and Goals (see :meth:`calculate_activation`).
     """    
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', attenuation=0.7, **params):
         """
@@ -676,6 +725,8 @@ class GoalMotiven(Goal):
         :type class_name: str
         :param attenuation: The attenuation factor for subgoals, defaults to 0.7.
         :type attenuation: float
+        :param params: Additional parameters passed to :class:`Goal`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
         self.attenuation = attenuation
@@ -726,7 +777,7 @@ class GoalMotiven(Goal):
         """
         Deletes the drive input and its associated subscription.
 
-        :param drive: The drive input to be deleted.
+        :param drive: Dictionary with the ``name`` of the drive input to be deleted.
         :type drive: dict
         """        
         name = drive['name']
@@ -785,7 +836,7 @@ class GoalMotiven(Goal):
 
     def read_evaluation_callback(self, msg: Evaluation):
         """
-        Callback that reads the evaluation of a Drive node. It updates the reward of the goal.
+        Callback that reads the evaluation of a Drive node. If the evaluation is newer than the last one stored, it keeps the previous one and updates the reward of the goal (see :meth:`calculate_reward`).
 
         :param msg: Message containing the evaluation of the Drive node
         :type msg: cognitive_node_interfaces.msg.Evaluation
@@ -805,10 +856,16 @@ class GoalMotiven(Goal):
         """
         Calculates the activation of the goal based on the activations of the neighboring drives and goals.
 
+        The activation is the maximum of the activations of the neighbor Drives and the activations of
+        the neighbor Goals multiplied by ``attenuation``; its timestamp is that of the node that gives the maximum.
+        Without Drive and Goal neighbors it is 0.0. If the neighbors include World Models and the maximum
+        of their activations is 0.0, the activation is set to -1.0, meaning that the goal does not belong to the current domain.
+        The result is stored in ``self.activation``; nothing is returned.
+
         :param perception: Unused perception.
-        :type perception: dict
-        :param activation_list: List of activations of the neighboring nodes.
-        :type activation_list: list
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighboring nodes, as kept in ``activation_inputs`` (``{name: {'data': Activation, ...}}``).
+        :type activation_list: dict
         """        
         goal_activations = {}
         goal_timestamps = {}
@@ -837,7 +894,8 @@ class GoalMotiven(Goal):
             
     def calculate_reward(self, drive_name):
         """
-        Calculates the reward of the goal based on the evaluation of the Drive node.
+        Calculates the reward of the goal based on the evaluation of the Drive node: 1.0 if the
+        evaluation has decreased, -1.0 if it has increased, and unchanged otherwise.
 
         :param drive_name: Name of the drive node.
         :type drive_name: str
@@ -852,13 +910,15 @@ class GoalMotiven(Goal):
 
     def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
-        Returns the reward of the goal.
+        Returns the reward of the goal and resets it to 0.0.
 
         :param old_perception: Unused perception, defaults to None.
-        :type old_perception: Any
+        :type old_perception: core.container.Container or None
         :param perception: Unused perception.
-        :type perception: Any.
-        :return: Reward of the goal and its timestamp.
+        :type perception: core.container.Container or None
+        :param update_space: Unused.
+        :type update_space: bool
+        :return: Reward of the goal and the timestamp of the Drive evaluation that produced it.
         :rtype: tuple (float, builtin_interfaces.msg.Time)
         """        
         self.get_logger().info(f"Calculating reward: {self.reward}, Drives: {self.drive_inputs}")
@@ -868,7 +928,16 @@ class GoalMotiven(Goal):
 
 class GoalLearnedSpace(GoalMotiven):
     """
-    Class that extends the functionality of the GoalMotiven class by adding a space to store goal state space.
+    Class that extends the functionality of the GoalMotiven class by adding a space that stores the perceptions in which the goal was (or was not) reached.
+
+    The perceptions that received a reward from the linked Drive are added to the space (positive rewards
+    as points and negative ones as antipoints), so that the reward can be predicted from the space
+    when the Drive is not active. A confidence is calculated from the last ``history_size`` outcomes, and the
+    space is considered learned when it exceeds ``min_confidence``. The confidence is published on ``goal/<name>/confidence``
+    (:class:`cognitive_node_interfaces.msg.SuccessRate`).
+
+    Services added: ``goal/<name>/contains_space`` (:class:`cognitive_node_interfaces.srv.ContainsSpace`);
+    ``send_space`` returns the space of the goal.
     """    
     def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, reward_threshold=0.8, reward_delta_threshold=0.5, low_reward_threshold=0.1, **params):
         """
@@ -878,9 +947,9 @@ class GoalLearnedSpace(GoalMotiven):
         :type name: str
         :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
         :type class_name: str
-        :param space_class: Class of the space.
+        :param space_class: Class of the space. If given, the space is created from it.
         :type space_class: str
-        :param space: Provided space object.
+        :param space: Provided space object. It is used if ``space_class`` is not given.
         :type space: space.Space, optional
         :param history_size: Samples to consider for confidence calculation.
         :type history_size: int
@@ -888,10 +957,18 @@ class GoalLearnedSpace(GoalMotiven):
         :type min_confidence: float
         :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
-        :param perception: Perception to add when initializing space.
+        :param perception: Perception to add (as a point with confidence 1.0) when initializing the space.
         :type perception: core.container.Container
-        :param space_parameters: Parameters for the space initialization.
+        :param space_parameters: Parameters for the space initialization. The ``random_seed`` of the node is used unless it is included here.
         :type space_parameters: dict
+        :param reward_threshold: Expected reward above which the space predicts a reward, and above which a positive reward counts as expected in the confidence history. Defaults to 0.8.
+        :type reward_threshold: float
+        :param reward_delta_threshold: Minimum increase of the expected reward between the old and the new perception to predict a reward from the space. Defaults to 0.5.
+        :type reward_delta_threshold: float
+        :param low_reward_threshold: Expected reward above which a negative reward is recorded as a failure in the confidence history. Defaults to 0.1.
+        :type low_reward_threshold: float
+        :param params: Additional parameters passed to :class:`GoalMotiven`.
+        :type params: dict
         """        
         super().__init__(
             name,
@@ -952,14 +1029,14 @@ class GoalLearnedSpace(GoalMotiven):
 
     def send_goal_space_callback(self, request, response):
         """
-        Callback that sends the space of the goal.
+        Callback that sends the space of the goal. The response is left empty if the goal has no space.
 
         :param request: Empty request
-        :type request: cognitive_node_interfaces.srv.SendGoalSpace.Request
+        :type request: cognitive_node_interfaces.srv.SendSpace.Request
         :param response: Response that contains the space of the goal.
-        :type response: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :type response: cognitive_node_interfaces.srv.SendSpace.Response
         :return: Response that contains the space of the goal.
-        :rtype: cognitive_node_interfaces.srv.SendGoalSpace.Response
+        :rtype: cognitive_node_interfaces.srv.SendSpace.Response
         """        
         if self.space:
             response.space = self.space.to_msg()
@@ -968,7 +1045,7 @@ class GoalLearnedSpace(GoalMotiven):
 
     def contains_space_callback(self, request, response):
         """
-        Callback that checks if the space contains a given space.
+        Callback that checks if the space of the goal contains a given space. The answer is False if the goal has no space.
 
         :param request: Request that contains the space to check.
         :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
@@ -990,8 +1067,8 @@ class GoalLearnedSpace(GoalMotiven):
         
         :param point: The point that is added to the Goal.
         :type point: core.container.Container
-        :param confidence: Indicates if the perception added is a point or an antipoint.
-        :type confidence: float
+        :param confidences: Indicates if each perception added is a point or an antipoint.
+        :type confidences: numpy.ndarray
         """
         if not self.space:
             self.get_logger().error("No space defined for the Goal. Cannot add points.")
@@ -1001,12 +1078,23 @@ class GoalLearnedSpace(GoalMotiven):
 
     async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
-        Calculate the reward of the goal based on the perception and the reward space or the evaluation of the drive. Updates the space acording to the reward obtained.
+        Calculate the reward of the goal based on the evaluation of the linked Drive or, if the Drive is not linked or inactive and the space is learned, on the reward predicted by the space.
+        This is a coroutine and must be awaited if called directly.
 
-        :param old_perception: First perception. Not used.
+        If both perceptions are equivalent (see :func:`core.utils.compare_perceptions`) the reward is 0.0.
+        Otherwise:
+
+        - With a linked Drive, the reward is the one accumulated from its evaluation (which is reset). If ``update_space`` is True and the reward is not 0.0, the space is updated with ``perception`` and the reward.
+        - If the space is learned, the Drive activation is 0.0 and there is no reward, the reward is 1.0 if the expected reward of ``perception`` is above ``reward_threshold`` and it has increased more than ``reward_delta_threshold`` with respect to ``old_perception``, and 0.0 otherwise.
+
+        The reward returned is never negative.
+
+        :param old_perception: Perception before the transition.
         :type old_perception: core.container.Container
-        :param perception: Second perception. Not used.
+        :param perception: Perception after the transition. It is the one added to the space.
         :type perception: core.container.Container
+        :param update_space: Whether the space is updated with the reward obtained from the Drive.
+        :type update_space: bool
         :return: The reward obtained and its timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
         """
@@ -1045,7 +1133,7 @@ class GoalLearnedSpace(GoalMotiven):
 
     def get_expected_reward(self, perception:Container):
         """
-        Calculate the expected reward of the goal based on the perception and the goal state.
+        Calculate the expected reward of the goal based on the perception and the goal state. It is 0.0 if the space is empty (no point has been added).
 
         :param perception: One or more perceptions to evaluate.
         :type perception: core.container.Container
@@ -1063,10 +1151,8 @@ class GoalLearnedSpace(GoalMotiven):
 
     def get_drive_activation(self):
         """
-        Get the activation of a specific drive.
+        Get the activation of the drive linked to the goal. If there is no linked Drive (or it is not in the activation inputs) it returns 0.0 and the current time.
 
-        :param drive_name: Name of the drive.
-        :type drive_name: str
         :return: Activation value and timestamp of the drive.
         :rtype: tuple (float, builtin_interfaces.msg.Time)
         """
@@ -1085,10 +1171,17 @@ class GoalLearnedSpace(GoalMotiven):
         Update the space of the goal based on the reward obtained and the expected reward.
         Accepts either a single perception and reward or a batch of perceptions and rewards.
 
+        Positively rewarded perceptions are added as points (confidence 1.0) and negatively rewarded ones as antipoints
+        (confidence -1.0); perceptions with reward 0.0 are not added. Then the confidence history is updated
+        and the goal is marked as learned if ``min_confidence`` is exceeded. The confidence is halved while the space is not configured.
+        The success rate is published at the end. Note that when the goal receives points through the ``add_points`` service
+        the confidences of the request are used as rewards here.
+
         :param perceptions: Perception(s) that correspond to the reward(s) obtained.
         :type perceptions: core.container.Container
         :param rewards: Real reward(s) (from a Drive) obtained.
         :type rewards: float | list[float] | numpy.ndarray
+        :raises ValueError: If the number of perceptions and rewards differ.
         """
         if not self.space:
             self.get_logger().error("No space defined for the Goal. Cannot add points.")
@@ -1156,7 +1249,7 @@ class GoalLearnedSpace(GoalMotiven):
 
     def publish_success_rate(self):
         """
-        Publish the success rate of the goal.
+        Publish the confidence of the goal (``success_rate``) and whether it is learned (``flag``) on ``goal/<name>/confidence``.
         """        
         msg = SuccessRate()
         msg.node_name=self.name
@@ -1179,9 +1272,9 @@ class GoalLearnedSpace(GoalMotiven):
 
     def get_drive(self):
         """
-        Returns the name of the linked drive.
+        Returns the name of the linked drive (the first Drive among the neighbors).
 
-        :return: Drive name.
+        :return: Drive name, or None if there is none.
         :rtype: str
         """        
         for neighbor in self.neighbors:

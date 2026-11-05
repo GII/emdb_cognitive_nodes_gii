@@ -16,7 +16,8 @@ from cognitive_node_interfaces.srv import Execute
 
 class DriveNovelty(Drive):
     """
-    DriveNovelty Class, represents a drive to explore the environment. 
+    DriveNovelty Class, represents a drive to explore the environment.
+    Its evaluation is constant (1.0), so the drive is never satisfied.
     """    
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
@@ -26,15 +27,17 @@ class DriveNovelty(Drive):
         :type name: str
         :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
         :type class_name: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
 
     def evaluate(self, perception=None):
         """
-        Evaluation that always returns 1.0, as the drive is always .
+        Evaluation that always returns 1.0, as the drive is always active.
 
         :param perception: Unused perception.
-        :type perception: dict or Any.
+        :type perception: core.container.Container or None
         :return: Evaluation of the Drive.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
@@ -44,7 +47,13 @@ class DriveNovelty(Drive):
     
 class PolicyNovelty(Policy):
     """
-    PolicyNovelty Class, represents a policy that selects a random policy from the LTM and executes it.
+    PolicyNovelty Class, represents a policy that selects a policy from the LTM and executes it.
+
+    The eligible policies (all the Policies in the LTM except those in ``exclude_list`` and the node itself)
+    are kept in a queue that is shuffled with a random generator seeded from ``random_seed``.
+    Each execution takes the next policy of the queue, and the queue is shuffled again after all of them have been selected.
+    The queue is updated when the LTM changes (``/state`` topic). If no change has been received when the first execution
+    arrives, the LTM is requested through its ``get_node`` service.
     """    
     def __init__(self, name='policy_novelty', exclude_list=[], ltm_id=None, **params):
         """
@@ -56,6 +65,8 @@ class PolicyNovelty(Policy):
         :type exclude_list: list
         :param ltm_id: Id of the LTM that includes the nodes.
         :type ltm_id: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
         """        
         super().__init__(name, **params)
         self.policies = PolicyQueue()
@@ -137,9 +148,10 @@ class PolicyNovelty(Policy):
 
     async def execute_callback(self, request, response):
         """
-        Callback that selects a policy and then executes it.
+        Callback that selects a policy and then executes it. This is a coroutine and must be awaited if called directly:
+        it waits for the execution of the selected policy (``policy/<name>/execute``) before answering.
 
-        :param request: Execution request
+        :param request: Execution request, whose perception is passed to the selected policy
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: Response of the execution. Includes the name of the selected policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response

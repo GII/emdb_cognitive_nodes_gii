@@ -1,4 +1,16 @@
-"""Knowledge-reuse intrinsic motivation and its ROS-free test harness."""
+"""Knowledge-reuse intrinsic motivation and its ROS-free test harness.
+
+The motivation detects goals whose context could reuse knowledge already learned in another domain, and copies it:
+
+- :class:`DriveKnowledgeReuse` analyzes the LTM, looks for pairs of goals of the same Drive that share a Policy and belong to different domains
+  (World Models), where one of them heads a deep chain of goals and the other has none. It compares the P-Nodes of both with the activations of the
+  mature one on the points of the other, and publishes, through a service, the instructions to copy the chain (YAML).
+- :class:`PolicyKnowledgeReuse` reads those instructions and duplicates and reconnects the nodes of the chain.
+
+Outside of ROS (when ``rclpy`` or the interfaces cannot be imported) the module defines empty base classes, so that the LTM analysis
+(:func:`build_goal_chains`) and the test harness at the end of the file (:class:`DummyKnowledgeReuseNode`, :class:`KnowledgeReuseComparisonTest`,
+``main`` and ``comparison_main``) can be run without ROS.
+"""
 
 import argparse
 import asyncio
@@ -98,9 +110,16 @@ def _goal_depth(goal_name, downstream_goals, active_path=None):
 def build_goal_chains(ltm_dump):
     """Build the public knowledge-reuse schema from an LTM state dump.
 
-    Each field in a drive's schema is aligned by index: ``goals``,
-    ``domains``, ``policies``, ``pnodes``, and ``depth`` describe the same
-    contextual chain entry.
+    For each Drive that is a neighbor of a Goal, the schema lists the contexts (C-Nodes) of those Goals. Each field in a drive's schema is aligned by
+    index: ``goals``, ``domains``, ``policies``, ``pnodes``, and ``depth`` describe the same
+    contextual chain entry. There is one entry for each combination of Goal, World Model and Policy of a C-Node (``None`` where the C-Node has none).
+    The Policies are the ones that are neighbors of the C-Node or that have the C-Node as neighbor, the P-Node is the first one of the C-Node and the depth of an entry is the length
+    of the longest chain of Goals that start from its Goal, i.e. that have it as neighbor directly or indirectly, counting the Goal itself (1 if there are none).
+
+    :param ltm_dump: LTM state, with a section for each node type, either as ``{name: data}`` or as a list of nodes with a ``name``.
+    :type ltm_dump: dict
+    :return: For each Drive name, a dictionary with the aligned lists ``goals``, ``domains``, ``policies``, ``pnodes`` and ``depth``.
+    :rtype: dict
     """
     goals = _nodes(ltm_dump, "Goal")
     cnodes = _nodes(ltm_dump, "CNode")
@@ -214,7 +233,23 @@ def _find_candidates(goal_chains, new_goals, depth_threshold):
 # ---------------------------------------------------------------------------
 
 class DriveKnowledgeReuse(Drive, LTMSubscription):
-    """Drive activated when a newly observed goal can reuse a deep chain."""
+    """
+    Drive activated when a newly observed goal can reuse a deep chain.
+
+    The node follows the LTM (``read_ltm``) and, each time the relevant topology changes, looks for reuse candidates: pairs of Goals of the same Drive that
+    share a Policy and have different domains, where the source Goal heads a chain at least ``depth_threshold`` deeper than the target Goal, which must have depth 1.
+    Only the complete chain can be copied for now.
+
+    For each candidate it requests the space of the P-Node of the target (``pnode/<name>/send_space``); if it has fewer than ``min_points`` points the
+    candidate waits until the P-Node reports a new success rate. Otherwise, the activations that the P-Node of the source gives to the points of the target are compared
+    with their confidences (mean squared error), and for each target Goal the source with the lowest error is selected. For the selected candidates the
+    instructions to copy the chain of the source are generated.
+
+    The instructions can be requested with the ``drive/<name>/get_reusable_knowledge`` service
+    (:class:`cognitive_node_interfaces.srv.GetReusableKnowledge`), which returns a YAML string with two keys: ``instructions``
+    (a list with, for each selection, ``source_goal``, ``target_goal``, ``aliases`` and the ``nodes`` to copy: Goals, C-Nodes, P-Nodes and Policies, each with its name, class
+    and neighbors) and ``candidates``. The evaluation of the drive is 1.0 while there are selected candidates and 0.0 otherwise.
+    """
 
     def __init__(
         self,
@@ -225,6 +260,23 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         min_points=1,
         **params,
     ):
+        """
+        Constructor of the DriveKnowledgeReuse class.
+
+        :param name: Name of the node.
+        :type name: str
+        :param class_name: The name of the base Drive class, defaults to "cognitive_nodes.drive.Drive".
+        :type class_name: str
+        :param ltm_id: Id of the LTM that includes the nodes. It is required.
+        :type ltm_id: str
+        :param depth_threshold: Minimum difference between the depth of the source chain and the depth of the target for a pair of Goals to be a candidate. Defaults to 3.
+        :type depth_threshold: int
+        :param min_points: Minimum number of points that the space of the target P-Node must have to evaluate a candidate. Defaults to 1.
+        :type min_points: int
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
+        :raises ValueError: If ``ltm_id`` is not provided, ``depth_threshold`` is negative or ``min_points`` is less than 1.
+        """
         super().__init__(name, class_name, **params)
         if ltm_id is None:
             raise ValueError("No LTM input was provided.")
@@ -256,7 +308,15 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         self.configure_ltm_subscription(ltm_id, self.cbgroup_activation)
 
     async def read_ltm(self, ltm_dump):
-        """Refresh the schema and identify newly eligible reuse candidates."""
+        """Refresh the schema and identify newly eligible reuse candidates.
+
+        Nothing is done if the topology that matters for reuse (Goals, C-Nodes, Policies, World Models and P-Nodes) has not changed. Otherwise,
+        the chains are rebuilt, the candidates are searched among all the Goals and the instructions are regenerated.
+        This is a coroutine and must be awaited if called directly.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        """
         goal_chains = build_goal_chains(ltm_dump)
         signature = self._knowledge_signature(ltm_dump, goal_chains)
         if signature == self._ltm_signature:
@@ -612,6 +672,16 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         )
 
     def get_reusable_knowledge_callback(self, request, response):
+        """
+        Callback that provides the reusable knowledge found.
+
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.GetReusableKnowledge.Request
+        :param response: Response with the instructions: a YAML string with the keys ``instructions`` and ``candidates``.
+        :type response: cognitive_node_interfaces.srv.GetReusableKnowledge.Response
+        :return: Response with the instructions.
+        :rtype: cognitive_node_interfaces.srv.GetReusableKnowledge.Response
+        """
         response.instructions = yaml.safe_dump(
             self.reusable_knowledge,
             default_flow_style=False,
@@ -627,7 +697,13 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         )
 
     def evaluate(self, perception=None):
-        """Activate the drive when at least one reuse candidate is available."""
+        """Activate the drive when at least one reuse candidate is available: the evaluation is 1.0 if there is any and 0.0 otherwise.
+
+        :param perception: Not used.
+        :type perception: core.container.Container or None
+        :return: The evaluation and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """
         self.evaluation.evaluation = float(bool(self.reuse_candidates))
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
@@ -643,7 +719,15 @@ KnowledgeReuseDrive = DriveKnowledgeReuse
 # ---------------------------------------------------------------------------
 
 class PolicyKnowledgeReuse(Policy):
-    """Duplicate and reconnect the node chain returned by the reuse drive."""
+    """
+    Duplicate and reconnect the node chain returned by the reuse drive.
+
+    When executed, it requests the instructions from the drive and, for each entry, duplicates the Goals, P-Nodes and C-Nodes of the source chain
+    (``cognitive_node/<name>/duplicate_node`` service, without neighbors) and then reconnects the copies: the neighbors of each copy are those of the original,
+    replaced by their copies or by the ``aliases`` of the entry (which attach the copies to the target Goal, P-Node and domain). The Policies of the chain are not duplicated:
+    the copies of their C-Nodes are added as neighbors. While the nodes are copied, the changes topic of the LTM is disabled (``<ltm_id>/set_changes_topic``) so
+    that the rest of the nodes do not see the intermediate state, and it is enabled again afterwards, also if the copy fails.
+    """
 
     def __init__(
         self,
@@ -653,6 +737,21 @@ class PolicyKnowledgeReuse(Policy):
         drive_name=None,
         **params,
     ):
+        """
+        Constructor of the PolicyKnowledgeReuse class.
+
+        :param name: Name of the node.
+        :type name: str
+        :param class_name: The name of the base Policy class, defaults to "cognitive_nodes.policy.Policy".
+        :type class_name: str
+        :param ltm_id: Id of the LTM that includes the nodes. It is required.
+        :type ltm_id: str
+        :param drive_name: Name of the :class:`DriveKnowledgeReuse` that provides the instructions. It is required.
+        :type drive_name: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
+        :raises ValueError: If ``ltm_id`` or ``drive_name`` are not provided.
+        """
         if ltm_id is None:
             raise ValueError("No LTM input was provided.")
         if drive_name is None:
@@ -674,7 +773,19 @@ class PolicyKnowledgeReuse(Policy):
         )
 
     async def execute_callback(self, request, response):
-        """Duplicate the reusable chain and restore its aliased neighbors."""
+        """Duplicate the reusable chain and restore its aliased neighbors.
+        This is a coroutine and must be awaited if called directly.
+
+        If the instructions are not valid YAML or do not have the expected structure, an error is logged and nothing is copied.
+        The response only contains the name of the policy.
+
+        :param request: Execution request.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Execution response.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Execution response, with the name of the policy.
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
+        """
         self.get_logger().info(f"Executing policy: {self.name}...")
         knowledge_response = await self.knowledge_client.send_request_async()
         try:

@@ -14,7 +14,26 @@ import random
 
 class Perception(CognitiveNode):
     """
-    Perception class
+    Base class for Perception nodes.
+
+    A Perception node subscribes to a sensor topic, normalizes the values
+    received and publishes them as a :class:`core.container.Container` message
+    (:class:`core_interfaces.msg.Container`) with a single row on
+    ``perception/<name>/value``. The processing is done by
+    :meth:`process_and_send_reading`, which subclasses must implement. Readings are only
+    processed while the activation of the node is above ``threshold``; the activation can be
+    changed through the ``set_activation`` service.
+
+    Services:
+
+    - ``perception/<name>/set_activation``: sets the activation of the node
+      (:class:`cognitive_node_interfaces.srv.SetActivation`).
+    - ``perception/<name>/set_inputs``: adds subscriptions to the node
+      (:class:`cognitive_node_interfaces.srv.SetInputs`). Not implemented yet.
+
+    Topics:
+
+    - ``perception/<name>/value``: published, :class:`core_interfaces.msg.Container`.
     """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', node_type="Perception", default_msg = None, default_topic = None, normalize_data = None, threshold=0.9, **params):
         """
@@ -28,14 +47,16 @@ class Perception(CognitiveNode):
         :type class_name: str
         :param node_type: The type of the node, defaults to "Perception".
         :type node_type: str
-        :param default_msg: The msg of the default subscription.
+        :param default_msg: Class name of the message of the default subscription (resolved with :func:`core.utils.class_from_classname`). It is required in practice, as the subscription is always created.
         :type default_msg: str
         :param default_topic: The topic of the default subscription.
         :type default_topic: str
-        :param normalize_data: Values in order to normalize values.
+        :param normalize_data: Normalization limits (``<label>_min`` / ``<label>_max`` keys, depending on the subclass) used to scale the readings. It is not used by the base class.
         :type normalize_data: dict
-        :param threshold: The activation threshold for processing.
+        :param threshold: Activation threshold for processing: readings are ignored unless the activation is strictly above it. Defaults to 0.9.
         :type threshold: float
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)       
         # We set 1.0 as the default activation value
@@ -72,7 +93,7 @@ class Perception(CognitiveNode):
         Returns the the activation value of the instance.
 
         :param perception: Perception does not influence the activation of the instance.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activations. Not used in this case.
         :type activation_list: list
         :return: The activation of the instance and its timestamp.
@@ -101,15 +122,14 @@ class Perception(CognitiveNode):
     
     def set_inputs_callback(self, request, response):
         """
-        Set inputs for the perception.
-        This method is not working yet.
+        Set inputs for the perception. Not implemented yet.
 
         :param request: The request that contains the inputs data.
-        :type request: cognitive_node_interfaces.SetInputs.Request
+        :type request: cognitive_node_interfaces.srv.SetInputs.Request
         :param response: The response that indicates if the inputs were set.
-        :type response: cognitive_node_interfaces.SetInputs.Response
+        :type response: cognitive_node_interfaces.srv.SetInputs.Response
         :return: The response that indicates if the inputs were set.
-        :rtype: cognitive_node_interfaces.SetInputs.Response
+        :rtype: cognitive_node_interfaces.srv.SetInputs.Response
         """
         input_topics = request.input_topics
         input_msgs = request.input_msgs
@@ -124,10 +144,12 @@ class Perception(CognitiveNode):
     
     def read_perception_callback(self, reading): 
         """
-        Callback to process the sensor values.
+        Callback of the default subscription. Stores the reading and calls
+        :meth:`process_and_send_reading` if the activation of the node is above ``threshold``;
+        otherwise the reading is ignored.
 
-        :param reading: The sensor values.
-        :type reading: cognitive_node_interfaces.msg.Perception
+        :param reading: The sensor values. Its ``data`` field is either a list of readings or a single value.
+        :type reading: Message of the class given by ``default_msg``
         """
         if self.activation.activation > self.threshold:
             # The debug texts are built only if they are going to be logged: perceptions arrive every period
@@ -140,15 +162,22 @@ class Perception(CognitiveNode):
 
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received.
-        :raise NotImplementedError: This method should be implemented in subclasses.
+        Method that processes the sensor values received in ``self.reading`` and publishes them.
+
+        :raises NotImplementedError: This method should be implemented in subclasses.
         """
         raise NotImplementedError
 
    
 class DiscreteEventSimulatorPerception(Perception):
     """
-    DiscreteEventSimulatorPerception class
+    Perception of the Discrete Event Simulator.
+
+    If the reading is a list, only its first element is processed: its ``distance``,
+    ``angle`` and ``diameter`` are normalized to [0, 1] using ``normalize_data``
+    (keys ``distance_min/max``, ``angle_min/max``, ``diameter_min/max``) and published
+    with those labels. An empty list is ignored with a warning. If the reading is not a list, its ``data`` is
+    published with the label ``data``, without normalization.
     """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
@@ -165,12 +194,16 @@ class DiscreteEventSimulatorPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
      
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received.
+        Normalizes the sensor values in ``self.reading`` and publishes them as a one-row
+        :class:`core.container.Container` message on ``perception/<name>/value``.
+        See the class documentation for the processed fields.
         """
         if isinstance(self.reading.data, list):
             if len(self.reading.data) == 0:
@@ -211,7 +244,19 @@ class DiscreteEventSimulatorPerception(Perception):
         self.perception_publisher.publish(sensor_msg)
 
 class FruitShopPerception(Perception):
-    """Fruit Shop Perception class"""
+    """
+    Perception of the Fruit Shop scenario.
+
+    If the reading is a list, only its first element is processed. The node name selects the format:
+
+    - Names containing ``scales``: ``distance``, ``angle``, ``state`` (scaled with ``n_states``;
+      a value of 1.0 is set to 0.98) and ``active``.
+    - Names containing ``fruits``: ``distance``, ``angle`` and ``dim_max`` (scaled with
+      ``dim_min`` / ``dim_max``).
+
+    Distance and angle are normalized with ``distance_min/max`` and ``angle_min/max`` from
+    ``normalize_data``. If the reading is not a list, its ``data`` is published with the label ``data``.
+    """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
         Constructor for the Perception class.
@@ -227,12 +272,16 @@ class FruitShopPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received.
+        Normalizes the sensor values in ``self.reading`` and publishes them as a one-row
+        :class:`core.container.Container` message on ``perception/<name>/value``.
+        See the class documentation for the processed fields.
         """
         if isinstance(self.reading.data, list):
             if len(self.reading.data) == 0:
@@ -295,7 +344,17 @@ class FruitShopPerception(Perception):
 
 
 class OscarLLMPerception(Perception):
-    """Oscar LLM Perception class"""
+    """
+    Perception of the Oscar LLM scenario.
+
+    If the reading is a list, only its first element is processed. The node name selects the format:
+
+    - Names containing ``object``: ``label``, ``x_position``, ``y_position`` (normalized with
+      ``x_min/max``, ``y_min/max``), ``diameter`` (normalized with ``diameter_min/max``), ``color`` and ``state``.
+    - Names containing ``robot_hand``: ``x_position``, ``y_position`` (normalized) and ``state``.
+
+    If the reading is not a list, its ``data`` is published with the label ``data``.
+    """
     def __init__(self, name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         """
         Constructor for the OscarLLMPerception class.
@@ -311,12 +370,16 @@ class OscarLLMPerception(Perception):
         :type default_topic: str
         :param normalize_data: Values in order to normalize values.
         :type normalize_data: dict
+        :param params: Additional parameters passed to :class:`Perception`.
+        :type params: dict
         """
         super().__init__(name, class_name, default_msg=default_msg, default_topic=default_topic, normalize_data=normalize_data, **params)
 
     def process_and_send_reading(self):
         """
-        Method that processes the sensor values received.
+        Normalizes the sensor values in ``self.reading`` and publishes them as a one-row
+        :class:`core.container.Container` message on ``perception/<name>/value``.
+        See the class documentation for the processed fields.
         """
         if isinstance(self.reading.data, list):
             if len(self.reading.data) == 0:

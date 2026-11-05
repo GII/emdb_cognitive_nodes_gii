@@ -12,9 +12,10 @@ Space
 Python script to implement a space used by P-Nodes and Goals, which discretizes a continuous perceptual domain. 
 Different types of spaces have been implemented, depending on the system used to determine whether a new perception belongs to an existing perceptual class:
 
-- **PointBased Space**: Uses rules that relate the position of the new perceptionto the closest old ones contained in the space.
+- **Rule-based Spaces**: Use rules that relate the position of the new perception to the closest old ones contained in the space (ExactClosestPointBasedSpace, ClosestPointBasedSpace, CentroidPointBasedSpace, NormalCentroidPointBasedSpace).
 - **SVM Space**: Uses Support Vector Machines (SVMs), with Scikit-learn.
-- **ANN Space**: Uses Artificial Neural Networks (ANNs), with Tensorflow.
+- **ANN Space**: Uses Artificial Neural Networks (ANNs), with PyTorch.
+- **Activated Dummy Space**: Always returns an activation of 1.0.
 
 .. automodule:: cognitive_nodes.space
     :members:
