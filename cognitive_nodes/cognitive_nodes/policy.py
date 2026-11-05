@@ -54,9 +54,12 @@ class Policy(CognitiveNode):
             callback_group=self.cbgroup_server
         )
 
-        episodes_topic = getattr(self, "Control", {}).get("episodes_topic", "")
-        episodes_msg = getattr(self, "Control", {}).get("episodes_msg", "")
-        self.episode_publisher = self.create_publisher(class_from_classname(episodes_msg), episodes_topic, 0)
+        # Without these entries in the Control block, the policy does not publish episodes
+        episodes_topic = getattr(self, "Control", {}).get("episodes_topic")
+        episodes_msg = getattr(self, "Control", {}).get("episodes_msg")
+        self.episode_publisher = None
+        if episodes_topic and episodes_msg:
+            self.episode_publisher = self.create_publisher(class_from_classname(episodes_msg), episodes_topic, 0)
         
         self.configure_activation_inputs(self.neighbors) 
 
