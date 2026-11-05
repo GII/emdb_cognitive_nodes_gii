@@ -19,7 +19,20 @@ from cognitive_nodes.episodic_buffer import TraceBuffer
 
 class Policy(CognitiveNode):
     """
-    Policy class.
+    Base class for Policy nodes.
+
+    A Policy represents an action (or a sequence of actions) that the agent can execute. Subclasses implement
+    :meth:`execute_callback`. The activation of a Policy is the maximum of the activations of its
+    neighbor C-Nodes.
+
+    Services:
+
+    - ``policy/<name>/set_activation``: :class:`cognitive_node_interfaces.srv.SetActivation`.
+    - ``policy/<name>/execute``: :class:`cognitive_node_interfaces.srv.Execute`.
+
+    The node also creates a publisher for the episodes, using the ``episodes_topic`` and ``episodes_msg``
+    entries of the ``Control`` block of its configuration (typically :class:`core_interfaces.msg.Container`).
+    That block is required.
     """
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', node_type="Policy", **params):
         """
@@ -32,6 +45,10 @@ class Policy(CognitiveNode):
         :type name: str
         :param class_name: The name of the Policy class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "Policy".
+        :type node_type: str
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         
         super().__init__(name, class_name, node_type=node_type, **params)
@@ -60,13 +77,19 @@ class Policy(CognitiveNode):
         """
         Calculate the activation level of the policy by obtaining that of its neighboring CNodes
         As in CNodes, an arbitrary perception can be propagated, calculating the final policy activation for that perception.
+        This is a coroutine and must be awaited.
 
-        :param perception: Arbitrary perception.
-        :type perception: core_interfaces.msg.Container
-        :param activation_list: List of activations of the neighbors.
-        :type activation_list: list
-        :return: The activation of the Policy and its timestamp.
-        :rtype: cognitive_node_interfaces.msg.Activation
+        Two cases:
+
+        - ``activation_list`` is None: the activation of each neighbor C-Node is requested for ``perception`` (which is then required), and the maximum is stored in ``self.activation`` (0.0 if there are no C-Nodes). In this case nothing is returned (the method returns None).
+        - ``activation_list`` is given: the activation is the maximum of those in the list (0.0 if it is empty), and ``self.activation`` is returned.
+
+        :param perception: Perception to propagate to the C-Nodes.
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighbors, as kept in ``activation_inputs``.
+        :type activation_list: dict or None
+        :return: The activation of the Policy and its timestamp, only when ``activation_list`` is given.
+        :rtype: cognitive_node_interfaces.msg.Activation or None
         """
         if activation_list==None:
             cnodes = [neighbor["name"] for neighbor in self.neighbors if neighbor["node_type"] == "CNode"]
@@ -95,13 +118,13 @@ class Policy(CognitiveNode):
     
     def execute_callback(self, request, response):
         """
-        Placeholder for the execution of the policy.
+        Placeholder for the execution of the policy. Subclasses may implement it as a plain method or as a coroutine.
 
         :param request: The request to execute the policy.
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :raise NotImplementedError: This method should be implemented in subclasses.
+        :raises NotImplementedError: This method should be implemented in subclasses.
         """
         raise NotImplementedError
     
@@ -127,7 +150,8 @@ class Policy(CognitiveNode):
 
 class PolicyAsync(Policy):
     """
-    PolicyAsync class. Represents a policy that does not wait for completion of the execution.
+    PolicyAsync class. Represents a policy that does not wait for completion of the execution:
+    executing it publishes the name of the policy and answers immediately.
     """    
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', publisher_msg=None, publisher_topic=None, **params):
         """
@@ -137,10 +161,12 @@ class PolicyAsync(Policy):
         :type name: str
         :param class_name: The name of the base Policy class.
         :type class_name: str
-        :param publisher_msg: The publisher message to publicate the execution of the policy.
-        :type publisher: str
-        :param publisher_topic: The publisher topic to publicate the execution of the policy.
-        :type publisher: str
+        :param publisher_msg: Class name of the message used to publish the execution of the policy. It must have a ``data`` field that accepts a string (e.g. ``std_msgs.msg.String``).
+        :type publisher_msg: str
+        :param publisher_topic: The topic where the execution of the policy is published.
+        :type publisher_topic: str
+        :param params: Additional parameters passed to :class:`Policy`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
         self.publisher_msg = publisher_msg
@@ -150,6 +176,7 @@ class PolicyAsync(Policy):
 
         """
         Method that publishes the policy that must be exectuted, there should be a node that reads this message and executes the actual policy.
+        It does not wait for the execution.
         It logs the execution and returns the policy name in the response.
 
         :param request: The request to execute the policy.
@@ -168,7 +195,8 @@ class PolicyAsync(Policy):
 
 class PolicyBlocking(Policy):
     """
-    PolicyBlocking class. Represents a policy that waits for completion of the execution.
+    PolicyBlocking class. Represents a policy that waits for completion of the execution:
+    executing it calls an external service that executes the policy and waits for its answer.
     """    
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', service_msg=None, service_name=None, **params):
         """
@@ -182,6 +210,8 @@ class PolicyBlocking(Policy):
         :type service_msg: ROS2 message type. Typically cognitive_node_interfaces.srv.Policy
         :param service_name: Name of the service that executes the policy.
         :type service_name: str
+        :param params: Additional parameters passed to :class:`Policy`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
         self.service_msg=service_msg
@@ -191,7 +221,8 @@ class PolicyBlocking(Policy):
     async def execute_callback(self, request, response):
 
         """
-        Makes a service call to the server that handles the execution of the policy.
+        Makes a service call to the server that handles the execution of the policy, sending the name of the policy.
+        This is a coroutine and must be awaited if called directly: it waits for the end of the execution.
 
         :param request: The request to execute the policy.
         :type request: cognitive_node_interfaces.srv.Execute.Request
@@ -208,58 +239,28 @@ class PolicyBlocking(Policy):
 
 class PolicyLearned(Policy, EpisodeSubscription):
     """
-    Online learning policy using Soft Actor-Critic (stable-baselines3).
+    Online learning policy using Soft Actor-Critic (SAC, from stable-baselines3).
 
-    Subscribes to an episodes topic and stores every (obs, action, reward,
-    next_obs, done) transition directly into SB3's replay buffer. A background
-    daemon thread runs gradient updates every ``train_every`` episodes once
-    ``min_buffer_size`` samples have been collected.
+    The node subscribes to an episodes topic and stores the episodes in a
+    :class:`cognitive_nodes.episodic_buffer.TraceBuffer`. A trace is stored when an episode
+    with a positive reward closes it. When ``min_traces`` traces have been collected and
+    ``train_every`` new traces have arrived, a daemon thread copies the transitions of the traces into
+    the replay buffer of SAC (using the utility evaluated on the trace as reward) and runs
+    ``gradient_steps`` gradient updates.
 
-    When selected by the cognitive architecture, ``execute_callback`` delegates
-    control to a ``Reaction`` cognitive process (analogous to how
-    ``UtilityModel.execute_callback`` delegates to ``Deliberation``).
-    ``Reaction`` runs the closed-loop execution: it reads perceptions via LTM,
-    calls ``self.node._sac.predict()`` at each step, executes the action,
-    queries Goal nodes for rewards, and publishes Episode messages.  The loop
-    stops early when any linked goal reward exceeds ``reward_threshold``.
+    When the policy is selected, :meth:`execute_callback` delegates the control to a
+    ``Reaction`` cognitive process (:class:`cognitive_processes.reaction.Reaction`), which runs
+    in its own node and thread. ``Reaction`` runs a closed loop: it reads the perception, calls
+    ``self._sac.predict()`` at each step, executes the action, asks the linked Goals for the reward and publishes
+    the episodes. The loop stops after ``max_steps`` steps or when the reward of an active Goal exceeds the
+    ``reward_threshold`` of the ``Reaction`` (an extra parameter that can be passed through ``params``).
 
-    Maturity is controlled via ``_is_ready_to_control``: the policy returns
-    activation 0.0 until the replay buffer has at least ``min_buffer_size``
-    transitions.
+    Maturity is controlled by :meth:`calculate_activation`: the activation is 0.0 until the buffer has at least
+    ``min_traces`` traces. Afterwards the activation of the base :class:`Policy` is scaled by the recent
+    success rate of the policy (see :meth:`calculate_metacognitive_parameters`).
 
-    Parameters
-    ----------
-    episodes_topic : str
-        ROS 2 topic for Episode messages (subscribe + publish).
-    episodes_msg : str
-        Fully qualified message class of the episodes topic, usually ``core_interfaces.msg.Container``.
-    actuation_config : dict
-        Actuator structure, e.g. ``{"left_arm": ["dist", "angle"]}``.
-    obs_dim : int
-        Dimensionality of the flattened observation vector.
-    buffer_size : int
-        Maximum capacity of the SAC replay buffer.
-    train_every : int
-        Episodes between successive training calls.
-    gradient_steps : int
-        Gradient update steps per training call.
-    batch_size : int
-        Mini-batch size for each gradient step.
-    min_traces : int
-        Minimum number of successful episodes required before the policy becomes
-        active and before training is first triggered (mirrors ``UtilityModel``'s
-        ``min_traces`` parameter).
-    train_every : int
-        Number of new successful episodes between successive training calls.
-    max_steps : int
-        Maximum steps per reaction cycle (forwarded to ``Reaction`` as
-        ``iterations``, default: 50).
-    ltm_id : str
-        Identifier of the LTM node; forwarded to ``Reaction`` so it can read
-        perceptions and goals automatically from the LTM (default: ``''``).
-    target_reward : str or None
-        If set, only episodes that contain this key in their reward_list are
-        used for training.
+    The node needs stable-baselines3 and gymnasium (``ImportError`` otherwise), and writes
+    CSV logs to ``/ros2_ws/results/logs/<name>``.
     """
 
     def __init__(
@@ -283,6 +284,47 @@ class PolicyLearned(Policy, EpisodeSubscription):
         outcome_window=20,
         **params,
     ):
+        """
+        Constructor of the PolicyLearned class.
+
+        :param name: The name of the policy.
+        :type name: str
+        :param class_name: The name of the Policy class.
+        :type class_name: str
+        :param episodes_topic: Topic of the episodes to learn from. If not given, the ``episodes_topic`` of the ``Control`` block is used; without a topic the node does not subscribe to episodes.
+        :type episodes_topic: str or None
+        :param episodes_msg: Class name of the message of the episodes topic.
+        :type episodes_msg: str
+        :param actuation_config: Structure of the actuators, e.g. ``{"left_arm": ["dist", "angle"]}``. Its total number of attributes is the dimension of the action. If not given, ``globals['actuation_config']`` is used.
+        :type actuation_config: dict or None
+        :param obs_dim: Dimension of the flattened observation vector. Defaults to 7.
+        :type obs_dim: int
+        :param buffer_size: Maximum capacity of the SAC replay buffer. Defaults to 100000.
+        :type buffer_size: int
+        :param train_every: Number of new traces between successive training calls. Defaults to 10.
+        :type train_every: int
+        :param gradient_steps: Gradient update steps per training call. Defaults to 50.
+        :type gradient_steps: int
+        :param batch_size: Mini-batch size of each gradient step. Training is skipped while the replay buffer has fewer samples. Defaults to 128.
+        :type batch_size: int
+        :param min_traces: Minimum number of complete traces required before the policy becomes active and before training is first triggered. Defaults to 20.
+        :type min_traces: int
+        :param max_steps: Maximum number of steps of a reaction cycle (the ``iterations`` of ``Reaction``). Defaults to 50.
+        :type max_steps: int
+        :param target_reward: If set, only this key of the reward list of the episodes is used as reward (otherwise the sum of all rewards is used).
+        :type target_reward: str or None
+        :param ltm_id: Id of the LTM, forwarded to ``Reaction`` so that it can read perceptions and goals. Defaults to ''.
+        :type ltm_id: str
+        :param learning_rate: Learning rate of SAC. Defaults to 0.0001.
+        :type learning_rate: float
+        :param ent_coef: Entropy coefficient of SAC. Defaults to 'auto'.
+        :type ent_coef: str or float
+        :param outcome_window: Number of recent own executions used to calculate the success rate. Defaults to 20.
+        :type outcome_window: int
+        :param params: Additional parameters passed to :class:`Policy`; they are also forwarded to ``Reaction``.
+        :type params: dict
+        :raises ImportError: If stable-baselines3 or gymnasium are not installed.
+        """
         super().__init__(name, class_name, **params)
 
         # Lazy imports: SB3 is optional and should not break other Policy users.
@@ -474,7 +516,17 @@ class PolicyLearned(Policy, EpisodeSubscription):
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """Return 0.0 until at least ``min_traces`` complete successful traces have
-        been collected. Once mature, delegates to the parent Policy activation logic."""
+        been collected. Once mature, delegates to the parent Policy activation logic
+        and scales the activation by ``max(0.1, 2 * confidence)``, where the confidence is the recent success rate.
+        This is a coroutine and must be awaited.
+
+        :param perception: Perception to propagate to the neighbors.
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighbors.
+        :type activation_list: dict or None
+        :return: The activation of the policy and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Activation
+        """
         if self.episodic_buffer.n_traces < self.min_traces:
             self._is_ready_to_control = False
             self.activation.activation = 0.0
@@ -507,7 +559,7 @@ class PolicyLearned(Policy, EpisodeSubscription):
         return base
     
     def calculate_metacognitive_parameters(self):
-        """Update the confidence of the policy based on its recent success rate."""
+        """Update the confidence of the policy based on its recent success rate: the mean of the last ``outcome_window`` outcomes (1.0 if the reward of a cycle was positive, 0.0 otherwise), or 0.5 if there are none."""
         n = len(self._recent_outcomes)
         if n == 0:
             success_rate = 0.5  # neutral until first own episode
@@ -524,12 +576,20 @@ class PolicyLearned(Policy, EpisodeSubscription):
 
     async def execute_callback(self, request, response):
         """Delegate execution to the Reaction process.
+        This is a coroutine and must be awaited if called directly.
 
         Runs a reaction cycle in the process thread, suspended until it
         completes (see ``CognitiveProcess.run_cycle``), then returns the
         ``summary_episode`` built by the reaction cycle.
 
         Mirrors ``UtilityModel.execute_callback`` with ``Deliberation``.
+
+        :param request: The request to execute the policy.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: The response, filled with the name of the policy and the summary episode.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: The response with the name of the policy and the summary episode as a :class:`core_interfaces.msg.Container`.
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info(f'Executing PolicyLearned: {self.name}')
         await self.reaction.run_cycle(self)
@@ -554,6 +614,9 @@ class PolicyLearned(Policy, EpisodeSubscription):
         utilities backwards across the trace and store it.  On reset_world the
         incomplete trace is discarded.  Once ``min_traces`` complete traces exist
         and ``train_every`` new traces have arrived, a training thread is spawned.
+
+        :param msg: Flattened episode.
+        :type msg: core_interfaces.msg.Container
         """
         try:
             episode = container_msg_to_episode(msg)
