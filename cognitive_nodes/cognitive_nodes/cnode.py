@@ -12,6 +12,12 @@ class CNode(CognitiveNode):
     C-Node class.
     It represents a context, i.e. a link between nodes that were activated together in the past.
     It is assumed that there is only one element of each type connected to the C-Node.
+
+    The activation of a C-Node is the product of the activations of its neighbors, except Policies.
+    A C-Node also keeps a history of the success of its executions, reported through the
+    ``cnode/<name>/log_execution`` service (:class:`cognitive_node_interfaces.srv.LogExecution`), from which
+    it calculates its competence (mean of the history) and delta competence (mean of the newer half minus mean of the older half).
+    These are published as metacognitive parameters in its activation; ``confidence`` is fixed to 1.0.
     """
 
     def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", node_type="CNode", history_size=40, track_competence=True, default_competence=1.0, **params):
@@ -25,8 +31,14 @@ class CNode(CognitiveNode):
         :type class_name: str
         :param node_type: The type of the C-Node.
         :type node_type: str
-        :param history_size: The size of the history of the C-Node.
+        :param history_size: The size of the history of the C-Node. The history starts filled with zeros.
         :type history_size: int
+        :param track_competence: If True the competence is calculated from the history. If False, competence is always ``default_competence`` and the delta competence is 0.0. Defaults to True.
+        :type track_competence: bool
+        :param default_competence: Competence used when ``track_competence`` is False. Defaults to 1.0.
+        :type default_competence: float
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)
         self.configure_activation_inputs(self.neighbors)
@@ -51,7 +63,8 @@ class CNode(CognitiveNode):
     def log_execution_callback(self, request, response):
         """
         Callback to log the execution of a C-Node.
-        It receives a request with the execution data and logs it in the C-Node's history.
+        It receives a request with the execution data and logs it in the C-Node's history (``request.success``),
+        and then recalculates the metacognitive parameters. The response is returned empty.
 
         :param request: LogExecution request message.
         :type request: cognitive_node_interfaces.srv.LogExecution.Request
@@ -68,7 +81,8 @@ class CNode(CognitiveNode):
     def calculate_metacognitive_parameters(self):
         """
         Calculate the metacognitive parameters of the C-Node.
-        It calculates the competence and delta competence of the C-Node based on its history.
+        It calculates the competence and delta competence of the C-Node based on its history
+        and stores them in ``metacognitive_params``. If ``track_competence`` is False, the competence is ``default_competence`` and the delta competence is 0.0.
         """
         if not self.track_competence:
             self.metacognitive_params["competence"] = self.default_competence
@@ -100,7 +114,7 @@ class CNode(CognitiveNode):
 
     async def calculate_activation(self, perception=None, activation_list=None):
         """
-        Calculate the new activation value.
+        Calculate the new activation value. This is a coroutine and must be awaited.
 
         If activation_list is None:
           - Request the activation of all neighbors (except Policies) for the given perception.
@@ -108,8 +122,8 @@ class CNode(CognitiveNode):
         If activation_list is provided:
           - Delegate to calculate_activation_prod to use the cached activations.
 
-        :param perception: Arbitrary perception to propagate to neighbors.
-        :type perception: core.container.Container
+        :param perception: Perception to propagate to neighbors. It is only used (and required) when ``activation_list`` is None.
+        :type perception: core.container.Container or None
         :param activation_list: Dictionary with the activation of multiple nodes.
         :type activation_list: dict
         :return: The activation of the C-Node and its timestamp.
@@ -146,6 +160,13 @@ class CNode(CognitiveNode):
 
 
 class CNodeWorldPreactive(CNode):
+    """
+    C-Node whose World Model neighbor can be inactive without nullifying the activation.
+
+    When the activation of a World Model neighbor is 0.0, the activation of the C-Node is the product
+    of the activations of its P-Node neighbors multiplied by ``preactive_factor`` (or just ``preactive_factor`` if there are no P-Node neighbors).
+    Otherwise it behaves as a :class:`CNode`.
+    """
 
     def __init__(
         self,
@@ -158,6 +179,12 @@ class CNodeWorldPreactive(CNode):
         preactive_factor=0.5,
         **params,
     ):
+        """
+        Constructor of the CNodeWorldPreactive class. See :class:`CNode` for the common parameters.
+
+        :param preactive_factor: Activation factor used for the World Model when it is inactive. Defaults to 0.5.
+        :type preactive_factor: float
+        """
         super().__init__(
             name,
             class_name,
@@ -178,6 +205,11 @@ class CNodeWorldPreactive(CNode):
         When it is inactive, use ``preactive_factor`` for that factor instead
         of zero so the remaining activation inputs can still activate the
         C-Node.
+
+        The result is stored in ``self.activation``; nothing is returned.
+
+        :param activation_list: Activations of the neighbors, as kept in ``activation_inputs`` (``{name: {'node_type': ..., 'data': Activation}}``).
+        :type activation_list: dict
         """
         node_activations = []
         pnode_activations = []

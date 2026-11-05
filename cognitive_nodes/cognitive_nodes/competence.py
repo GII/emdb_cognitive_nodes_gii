@@ -15,9 +15,27 @@ def _clamp(value, lower, upper):
 class Competence(RobotPurpose, LTMSubscription):
     """
     Intrinsic motivation that tracks the competence of the robot in achieving its goals and drives it to improve them.
+
+    The node listens to the LTM and adds every C-Node as a neighbor. From the activations of the C-Nodes it reads their
+    ``competence`` and ``delta_competence`` metacognitive parameters. It gives each C-Node a score that is higher when its competence
+    is lower and its delta competence is higher in absolute value, scales the scores to the interval
+    [``min_activation``, activation of the node] (C-Nodes with a score of 0 keep 0), and publishes the result for each Goal
+    connected to the C-Node on ``cognitive_node/<goal>/override_activation``
+    (:class:`cognitive_node_interfaces.msg.Activation`).
+
+    The node is satisfied when the competence of all the C-Nodes is 1.0 (this is also true if there is no C-Node).
     """
 
     def __init__(self, name='robot_purpose', class_name='cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight=1, drive_id=None, purpose_type="Need", terminal=False, min_activation=0, ltm_id="", **params):
+        """
+        Constructor of the Competence class. See :class:`cognitive_nodes.robot_purpose.RobotPurpose` for the parameters
+        not described here. Unlike it, ``purpose_type`` defaults to "Need".
+
+        :param min_activation: Lower bound of the override activations given to the goals with a positive score. Defaults to 0.
+        :type min_activation: float
+        :param ltm_id: Id of the LTM whose state the node follows.
+        :type ltm_id: str
+        """
         super().__init__(name, class_name, node_type, weight, drive_id, purpose_type, terminal, **params)
         self.configure_ltm_subscription(ltm_id, self.cbgroup_activation)
         self.cnode_metacognitive_params = {}
@@ -135,9 +153,12 @@ class Competence(RobotPurpose, LTMSubscription):
 
     async def read_ltm(self, ltm_dump):
         """
-        Method that processes the LTM data and configures all available goals as neighbors.
+        Method that processes the LTM data. It adds as neighbors the C-Nodes that are new in the LTM and
+        deletes those that are no longer there, and rebuilds the mapping from each Goal to its C-Node.
+        This is a coroutine and must be awaited.
+
         :param ltm_dump: Dictionary with the data from the LTM.
-        :type ltm_dump: str
+        :type ltm_dump: dict
         """
         # Read existing goals
         previous_cnode_names = set(self.cnode_metacognitive_params.keys())
@@ -164,10 +185,11 @@ class Competence(RobotPurpose, LTMSubscription):
 
     def calculate_override_activations(self, activation_list=None):
         """
-        Calculate the override activations for each goal based on the competence of the robot in achieving them.
+        Calculate the override activations for each goal based on the competence of the robot in achieving them,
+        and publish them on ``cognitive_node/<goal>/override_activation``. The activation of a Goal is that of its C-Node.
 
-        :param activation_list: List of activations from other nodes.
-        :type activation_list: list
+        :param activation_list: Not used.
+        :type activation_list: dict
         """
         cnode_scores = {}
 
@@ -200,10 +222,12 @@ class Competence(RobotPurpose, LTMSubscription):
         """
         Calculate the activation of the Competence node based on the competence of the robot in achieving its goals.
         Publishes override activations for each goal based on their competence and delta competence.
-        :param perception: The current perception of the robot.
+        The activation of the node itself is not changed. Nothing is returned.
+
+        :param perception: Not used.
         :type perception: core.container.Container or None
-        :param activation_list: List of activations from other nodes.
-        :type activation_list: list
+        :param activation_list: Activations of the neighbor nodes (as kept in ``activation_inputs``), from which the metacognitive parameters of the C-Nodes are read. It is required in practice.
+        :type activation_list: dict
         """
         super().calculate_activation(perception, activation_list)
         self._extract_cnode_metacognitive_params(activation_list)
@@ -211,9 +235,9 @@ class Competence(RobotPurpose, LTMSubscription):
 
     def get_satisfaction_callback(self, request:IsSatisfied.Request, response:IsSatisfied.Response):
         """
-        Check if the robot purpose has been satisfied.
+        Check if the robot purpose has been satisfied. Unlike :class:`cognitive_nodes.robot_purpose.RobotPurpose`, ``updated`` is always True.
 
-        :param request: Empty request.
+        :param request: Request. Its timestamp is not used.
         :type request: cognitive_node_interfaces.srv.IsSatisfied.Request
         :param response: Response that indicates if the robot purpose is satisfied or not.
         :type response: cognitive_node_interfaces.srv.IsSatisfied.Response
@@ -229,7 +253,7 @@ class Competence(RobotPurpose, LTMSubscription):
 
     def calculate_satisfaction(self):
         """
-        Calculate whether the robot purpose is satisfied.
+        Calculate whether the robot purpose is satisfied: the competence of every C-Node must be 1.0.
 
         :return: True if the robot purpose is satisfied, False otherwise.
         :rtype: bool

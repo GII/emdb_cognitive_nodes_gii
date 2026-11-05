@@ -11,7 +11,19 @@ from math import isclose
 
 class RobotPurpose(CognitiveNode):
     """
-    Robot Purpose Class.
+    Robot Purpose class.
+
+    A Robot Purpose (a Need or a Mission) is satisfied when the evaluation of its associated Drive
+    allows it. It subscribes to ``drive/<drive_id>/evaluation`` and keeps the most recent
+    evaluation received. Its activation is the ``weight`` given at construction, and can be
+    changed through a service.
+
+    Services:
+
+    - ``robot_purpose/<name>/set_activation``: :class:`cognitive_node_interfaces.srv.SetActivation`.
+    - ``robot_purpose/<name>/get_satisfaction``: :class:`cognitive_node_interfaces.srv.IsSatisfied`.
+
+    The satisfaction is calculated from the evaluation of the Drive given in ``drive_id``, which is required for it.
     """
     def __init__(self, name='robot_purpose', class_name = 'cognitive_nodes.robot_purpose.RobotPurpose', node_type="RobotPurpose", weight = 1.0, drive_id = None, purpose_type= None, terminal=False, **params):
         """
@@ -31,6 +43,10 @@ class RobotPurpose(CognitiveNode):
         :type drive_id: str
         :param purpose_type: The type of the RobotPurpose (Need or Mission).
         :type purpose_type: str
+        :param terminal: Whether the purpose is terminal; it is returned as is in the ``get_satisfaction`` response. Defaults to False.
+        :type terminal: bool
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
+        :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)
 
@@ -99,11 +115,11 @@ class RobotPurpose(CognitiveNode):
         """
         Check if the robot purpose has been satisfied.
 
-        :param request: Empty request.
+        :param request: Request with a ``timestamp``: the time of the last evaluation the caller has already seen.
         :type request: cognitive_node_interfaces.srv.IsSatisfied.Request
-        :param response: Response that indicates if the robot purpose is satisfied or not.
+        :param response: Response to fill in. ``satisfied`` is the result of :meth:`calculate_satisfaction`, ``purpose_type`` and ``terminal`` are those of the node, and ``updated`` is True if the last Drive evaluation received is newer than ``request.timestamp``.
         :type response: cognitive_node_interfaces.srv.IsSatisfied.Response
-        :return: Response that indicates if the robot purpose is satisfied or not.
+        :return: The filled response.
         :rtype: cognitive_node_interfaces.srv.IsSatisfied.Response
         """
         self.get_logger().debug('Calculating satisfaction..')
@@ -118,7 +134,7 @@ class RobotPurpose(CognitiveNode):
 
     def calculate_satisfaction(self):
         """
-        Calculate whether the robot purpose is satisfied.
+        Calculate whether the robot purpose is satisfied: the last evaluation of the Drive must be (numerically close to) 0.
 
         :return: True if the robot purpose is satisfied, False otherwise.
         :rtype: bool
@@ -145,13 +161,13 @@ class RobotPurpose(CognitiveNode):
     
 class AlignmentMission(RobotPurpose):
     """
-    Need Class for Alignment purposes.
+    Robot Purpose for alignment. It differs from :class:`RobotPurpose` only in the satisfaction criterion.
     """
     def calculate_satisfaction(self):
         """
-        Calculate whether the need is satisfied.
+        Calculate whether the purpose is satisfied: the last evaluation of the Drive must be below 0.01.
 
-        :return: True if the need is satisfied, False otherwise.
+        :return: True if the purpose is satisfied, False otherwise.
         :rtype: bool
         """
         satisfied = self.drive_evaluation.evaluation<0.01 # the need is satisfied when the drive evaluation is less than 0.1

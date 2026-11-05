@@ -36,8 +36,10 @@ class DriveEffectanceInternal(Drive, PNodeSuccess):
         :type ltm_id: str
         :param min_confidence: Confidence level where P-Nodes are considered learned.
         :type min_confidence: float
-        :param limit_depth: If true, excludes from analysis P-Nodes that have resulted from a sub-goal related to another P-Node.
+        :param limit_depth: If true, excludes from analysis P-Nodes that have resulted from a sub-goal related to another P-Node (those with ``reach_pnode_`` in their name).
         :type limit_depth: bool
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
         :raises Exception: Raises an exception if no LTM name is provided.
         """        
         super().__init__(name, class_name, **params)
@@ -76,7 +78,7 @@ class DriveEffectanceInternal(Drive, PNodeSuccess):
 
     def evaluate(self):
         """
-        Calculates drive evaluation. If any P-Node is above the minimum confidence, drive evaluation is 1.0.
+        Calculates drive evaluation. If any P-Node is above the minimum confidence, drive evaluation is 1.0. The success rate of a P-Node that is already linked to a Goal counts as 0.0.
 
         :return: Drive evaluation and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Evaluation
@@ -93,6 +95,10 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
     """
     Drive that detects effects in the environment. In this case, changes from 0 to 1 in a sensor. 
 
+    The effects found are kept until they are requested through the ``drive/<name>/get_effects`` service
+    (:class:`cognitive_node_interfaces.srv.GetEffects`), which returns the sensor, the attribute and the episode of each new effect and forgets them.
+    An effect is identified by (sensor, attribute, domain) and only reported once.
+
     This class inherits from the general Drive class and EpisodeSubscription class, which provides helper methods to subscribe to the episodes topic of a cognitive process.
     """
     def __init__(self, name="drive_effectance", class_name="cognitive_nodes.drive.Drive", episodes_topic=None, episodes_msg=None, **params):
@@ -107,6 +113,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
         :type episodes_topic: str
         :param episodes_msg: Message type of the episodes topic (most cases: core_interfaces.msg.Container).
         :type episodes_msg: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
         :raises Exception: Raises exception if no episode topic was provided.
         """        
         super().__init__(name, class_name, **params)
@@ -133,7 +141,8 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
 
     def find_effects(self, episode):
         """
-        Checks consecutive perceptions if effects were generated.
+        Checks consecutive perceptions if effects were generated. An effect is a feature (labeled ``<sensor>:<attribute>``) whose value goes from 0 to 1
+        between the old perception and the perception (only the last row is compared). New effects are stored with their episode.
 
         :param episode: Episode whose consecutive perceptions are checked.
         :type episode: cognitive_nodes.episode.Episode
@@ -206,8 +215,10 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
 
     def evaluate(self, perception=None):
         """
-        Calculates drive evaluation. If any new effect has been found, drive evaluation is 1.0.
+        Calculates drive evaluation. If any new effect has been found (and not requested yet), drive evaluation is 1.0, and 0.0 otherwise.
 
+        :param perception: Not used.
+        :type perception: core.container.Container or None
         :return: Drive evaluation and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """   
@@ -218,6 +229,9 @@ class DriveEffectanceExternal(Drive, EpisodeSubscription):
 class PolicyEffectanceInternal(Policy, PNodeSuccess):
     """
     Policy that creates a goal that aims to reach a consolidated P-Node. 
+
+    When executed, it selects the P-Node with the highest success rate (not linked to a Goal yet) and, if it exceeds ``confidence``, creates a Goal
+    linked to the P-Node, to the Goals the P-Node already depends on and to its World Models.
 
     This class inherits from the general Policy class and PNodeSuccess class, which provides helper methods to subscribe to P-Nodes success rate.
     """    
@@ -236,8 +250,10 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         :type confidence: float
         :param threshold_delta: Parameter passed to the created goal, defaults to 0.2.
         :type threshold_delta: float,
-        :param limit_depth: If true, excludes from analysis P-Nodes that have resulted from a sub-goal related to another P-Node.
+        :param limit_depth: If true, excludes from analysis P-Nodes that have resulted from a sub-goal related to another P-Node (those with ``reach_pnode_`` in their name).
         :type limit_depth: bool
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
         :raises Exception: Raises an exception if no LTM name is provided.
         """        
         super().__init__(name, class_name, **params)
@@ -281,6 +297,7 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         """
         This method proccesses the effectance policy. Selects the higher confidence P-Node.
         and creates a goal linked to it if the confidence threshold is exceeded.
+        This is a coroutine and must be awaited.
         Until some P-Node has reported its success rate there is nothing to select: no goal is created.
         """
         if not self.pnode_evaluation:
@@ -295,6 +312,10 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
     def select_pnode(self):
         """
         Selects the P-Node with the highest confidence.
+
+        :return: Name of the P-Node.
+        :rtype: str
+        :raises ValueError: If no success rate of any P-Node has been received yet.
         """
         self.get_logger().info(f"DEBUG: PNode Success Rates: {self.pnode_evaluation}")
         return max(zip(self.pnode_evaluation.values(), self.pnode_evaluation.keys()))[1]
@@ -366,7 +387,9 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
         
     async def create_goal(self, pnode_name):
         """
-        Method that creates the Goal linked to a P-Node and registers it in the LTM.
+        Method that creates the Goal linked to a P-Node and registers it in the LTM. This is a coroutine and must be awaited.
+        The Goal is named ``reach_pnode_<index>``; its neighbors are the P-Node, the Goals upstream of the P-Node and its World Models, and
+        the P-Node receives the Goal as a neighbor.
 
         :param pnode_name: P-Node related to goal.
         :type pnode_name: str
@@ -412,7 +435,7 @@ class PolicyEffectanceInternal(Policy, PNodeSuccess):
     
     async def execute_callback(self, request, response):
         """
-        Callback that executes the policy.
+        Callback that executes the policy. This is a coroutine and must be awaited if called directly.
 
         :param request: Execution request.
         :type request: cognitive_node_interfaces.srv.Execute.Request
@@ -430,6 +453,10 @@ class PolicyEffectanceExternal(Policy):
     """
     Policy that creates a goal that aims to recreate an effect in the environment. 
 
+    When executed, it requests the new effects from a :class:`DriveEffectanceExternal` and, for each one, creates a Goal that gives reward when the effect
+    is recreated, a P-Node initialized with the perception before the effect, and a C-Node that links the World Model, the P-Node and the Goal.
+    The C-Node is added as a neighbor of the policy that generated the effect and its execution is logged as successful.
+
     This class inherits from the general Policy class.
     """  
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', drive_name=None, ltm_id=None, goal_class=None, goal_params={}, space_class=None, space_params={}, pnode_class=None, pnode_params={}, **params):
@@ -446,12 +473,23 @@ class PolicyEffectanceExternal(Policy):
         :type ltm_id: str
         :param goal_class: Class of the goal to be created.
         :type goal_class: str
-        :param space_class: Class of the space that will be passed to the Goal.
+        :param goal_params: Parameters passed to the created Goals, defaults to {}.
+        :type goal_params: dict
+        :param space_class: Class of the space that will be passed to the Goal. If not given, the one of the ``Space`` connector is used.
         :type space_class: str
+        :param space_params: Parameters of the space, used with ``space_class``, defaults to {}.
+        :type space_params: dict
+        :param pnode_class: Class of the P-Nodes to create. If not given, the one of the ``PNode`` connector is used.
+        :type pnode_class: str
+        :param pnode_params: Parameters of the P-Nodes, used with ``pnode_class``, defaults to {}.
+        :type pnode_params: dict
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
         :raises Exception: Raises an exception if no LTM name is provided.
         :raises RuntimeError: Raises an exception if no effects drive name is provided.
         :raises RuntimeError: Raises an exception if no goal class name is provided.
-        :raises RuntimeError: Raises an exception if no space class name is provided.
+        :raises RuntimeError: Raises an exception if no space class name is provided, neither as a parameter nor in the connectors.
+        :raises RuntimeError: Raises an exception if no P-Node class or no C-Node class is available, neither as a parameter nor in the connectors.
         """        
         super().__init__(name, class_name, **params)
         if ltm_id is None:
@@ -501,7 +539,7 @@ class PolicyEffectanceExternal(Policy):
 
     async def execute_callback(self, request, response):
         """
-        Callback that executes the policy.
+        Callback that executes the policy. This is a coroutine and must be awaited if called directly.
 
         :param request: Execution request.
         :type request: cognitive_node_interfaces.srv.Execute.Request
@@ -520,12 +558,14 @@ class PolicyEffectanceExternal(Policy):
     
     async def log_cnode_execution(self, cnode_name, success):
         """
-        This method logs the execution of a C-Node.
+        This method logs the execution of a C-Node, through its ``log_execution`` service. This is a coroutine and must be awaited.
 
         :param cnode_name: Name of the C-Node that was executed.
         :type cnode_name: str
         :param success: Boolean indicating whether the execution was successful.
         :type success: bool
+        :return: Whether the execution was added to the history of the C-Node.
+        :rtype: bool
         """
         logging_service = f"cnode/{cnode_name}/log_execution"
         if logging_service not in self.node_clients:
@@ -535,7 +575,7 @@ class PolicyEffectanceExternal(Policy):
     
     async def create_goal(self, sensor, attribute, domain):
         """
-        Method that creates a goal related to an effect and registers it in the LTM.
+        Method that creates a goal related to an effect and registers it in the LTM. This is a coroutine and must be awaited.
 
         :param sensor: Name of the sensor to which the effect is related.
         :type sensor: str
@@ -543,6 +583,9 @@ class PolicyEffectanceExternal(Policy):
         :type attribute: str
         :param domain: Domain to which the effect belongs.
         :type domain: str
+        :return: Name of the Goal (``effect_<sensor>_<attribute>_<domain>``).
+        :rtype: str
+        :raises RuntimeError: If the Goal could not be created.
         """        
         self.get_logger().info(f"Creating goal linked to effect in sensor {sensor}, attribute {attribute}")
         goal_name=f"effect_{sensor}_{attribute}_{domain}"
@@ -558,12 +601,16 @@ class PolicyEffectanceExternal(Policy):
     
     async def create_pnode(self, ident, point):
         """
-        Method that creates a P-Node related to an effect and registers it in the LTM.
+        Method that creates a P-Node related to an effect and registers it in the LTM. This is a coroutine and must be awaited.
+        The point is added to the P-Node with confidence 1.0.
 
         :param ident: Identifier for the P-Node.
         :type ident: str
         :param point: Point in the space that represents the effect.
         :type point: core.container.Container
+        :return: Name of the P-Node (``pnode_<ident>``).
+        :rtype: str
+        :raises RuntimeError: If the P-Node could not be created or the point could not be added.
         """
         pnode_name=f"pnode_{ident}"
         pnode_params = dict(self.pnode_params)
@@ -587,7 +634,7 @@ class PolicyEffectanceExternal(Policy):
 
     async def create_cnode(self, sensor, attribute, episode):
         """
-        Method that creates all the nodes that correspond to a detected effect: a Goal, a P-Node and a C-Node.
+        Method that creates all the nodes that correspond to a detected effect: a Goal, a P-Node and a C-Node. This is a coroutine and must be awaited.
 
         :param sensor: Name of the sensor to which the effect is related.
         :type sensor: str
@@ -595,6 +642,7 @@ class PolicyEffectanceExternal(Policy):
         :type attribute: str
         :param episode: Episode that generated the effect.
         :type episode: cognitive_nodes.episode.Episode
+        :raises RuntimeError: If any of the nodes could not be created or the C-Node could not be added to the policy that generated the effect.
         """
         # Load the parameters for the C-Node, P-Node, and Goal from the connectors or defaults.
         cnode_class = self.cnode_class
@@ -641,6 +689,8 @@ class GoalActivatePNode(GoalLearnedSpace):
         :type class_name: str
         :param threshold_delta: Minimum change in activation that triggers a reward, defaults to 0.2.
         :type threshold_delta: float
+        :param params: Additional parameters passed to :class:`cognitive_nodes.goal.GoalLearnedSpace`.
+        :type params: dict
         """        
         super().__init__(name, class_name, threshold_delta=threshold_delta, **params)
         self.threshold_delta=threshold_delta
@@ -649,7 +699,8 @@ class GoalActivatePNode(GoalLearnedSpace):
 
     def setup_pnode(self):
         """
-        Creates the required service clients and subscriptions.
+        Creates the required service clients and subscriptions for the P-Node that is a neighbor of the goal (the first one if there are several).
+        If there is no P-Node neighbor, a warning is logged and the goal is not configured.
         """
         pnode_neighbors = [node["name"] for node in self.neighbors if node["node_type"] == "PNode"]
         if len(pnode_neighbors) == 0:
@@ -671,10 +722,14 @@ class GoalActivatePNode(GoalLearnedSpace):
         """
         Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
 
+        As in :meth:`cognitive_nodes.goal.GoalMotiven.calculate_activation`, it is the maximum of the activations of the neighbor Goals multiplied by
+        ``attenuation`` (0.0 if there are none), and -1.0 if the World Models are inactive. It is also -1.0 if the P-Node is already active,
+        i.e. when ``1 - activation`` of the P-Node is below ``threshold_delta``. The result is stored in ``self.activation``; nothing is returned.
+
         :param perception: Unused perception.
-        :type perception: core.container.Container
-        :param activation_list: List of activations of the neighboring nodes.
-        :type activation_list: list
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighboring nodes, as kept in ``activation_inputs``.
+        :type activation_list: dict
         """        
         goal_activations = {}
         goal_timestamps = {}
@@ -709,7 +764,11 @@ class GoalActivatePNode(GoalLearnedSpace):
 
     def calculate_reward(self, drive_name = None):
         """
-        This goal does not take into account a drive to obtain reward. This method overrides the default behavior.
+        This goal does not take into account a drive to obtain reward. This method overrides the default behavior and does nothing.
+
+        :param drive_name: Not used.
+        :type drive_name: str or None
+        :return: None
         """        
         return None
     
@@ -738,6 +797,7 @@ class GoalActivatePNode(GoalLearnedSpace):
     async def send_goal_space_callback(self, request, response):
         """
         This method overrides the default behavior of the send space service. Obtains the space from the P-Node and sends it as response.
+        This is a coroutine and must be awaited if called directly.
 
         :param request: Empty request.
         :type request: cognitive_node_interfaces.srv.SendSpace.Request
@@ -752,6 +812,7 @@ class GoalActivatePNode(GoalLearnedSpace):
     async def contains_space_callback(self, request, response):
         """
         This method overrides the default behavior of the contains space service. Obtains checks if the space is contained in the P-Node and sends it as response.
+        This is a coroutine and must be awaited if called directly.
 
         :param request: Data of the space.
         :type request: cognitive_node_interfaces.srv.ContainsSpace.Request
@@ -766,7 +827,7 @@ class GoalActivatePNode(GoalLearnedSpace):
     def add_points_callback(self, request, response):
         """
         Callback method for adding a point (or anti-point) to a specific Goal.
-        This type of goal is surrogate and does not have its own space. It ignores the points added to it.
+        This type of goal is surrogate and does not have its own space. It ignores the points added to it; the response is True if the request has points.
 
         :param request: The request that contains the point that is added and its confidence.
         :type request: cognitive_node_interfaces.srv.AddPoints.Request
@@ -784,9 +845,11 @@ class GoalActivatePNode(GoalLearnedSpace):
 
     async def get_reward_callback(self, request, response):
         """
-        Callback method to calculate the reward obtained. 
+        Callback method to calculate the reward obtained. This is a coroutine and must be awaited if called directly.
+        The reward is 1.0 if the activation of the P-Node increases by more than ``threshold_delta`` between the old perception and the perception of the request, and
+        0.0 otherwise. Unlike the base class, ``updated`` is always True and the timestamp and ``update_space`` of the request are not used.
 
-        :param request: Request that includes the new perception to check the reward.
+        :param request: Request that includes the old and the new perception to check the reward.
         :type request: cognitive_node_interfaces.srv.GetReward.Request
         :param response: Response that contais the reward.
         :type response: cognitive_node_interfaces.srv.GetReward.Response
@@ -838,10 +901,11 @@ class GoalActivatePNode(GoalLearnedSpace):
     async def get_reward(self, old_perception=None, perception=None):
         """
         Method that obtains the reward for the goal. It recieves two consecutive perceptions, calculates the related P-Node activation for each and detects if the P-Node was activated.
+        This is a coroutine and must be awaited. It also publishes the success rate.
 
-        :param old_perception: First state perception dictionary.
+        :param old_perception: First state perception.
         :type old_perception: core.container.Container
-        :param perception: Second state perception dictionary.
+        :param perception: Second state perception.
         :type perception: core.container.Container
         :return: Reward and current timestamp.
         :rtype: Tuple (float, builtin_interfaces.msg.Time)
@@ -854,7 +918,11 @@ class GoalActivatePNode(GoalLearnedSpace):
     
 class GoalRecreateEffect(GoalLearnedSpace):
     """
-    Goal that provides reward when the related P-Nodes goes from not activated to activated.
+    Goal that provides reward when an effect in the environment is recreated, i.e. when a feature of a sensor goes from not active (0) to active (1).
+
+    The effect is defined by a sensor and an attribute (the feature ``<sensor>:<attribute>`` of the perceptions). Its space (:class:`SpaceEffectActive`) is defined by
+    the effect itself, so it is considered learned from the beginning with a confidence of 1.0, and the points added to the goal are ignored. The
+    goal receives the perception of the sensor as an activation input and its activation is -1.0 when the effect is already active.
 
     This class inherits from the GoalLearnedSpace class.
     """    
@@ -864,12 +932,16 @@ class GoalRecreateEffect(GoalLearnedSpace):
 
         :param name: Name of the node.
         :type name: str
-        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.policy.Policy'.
+        :param class_name: The name of the base Goal class, defaults to 'cognitive_nodes.goal.Goal'.
         :type class_name: str
         :param sensor: Name of the related sensor.
         :type sensor: str
         :param attribute: Name of the related attribute of the sensor.
         :type attribute: str
+        :param space_parameters: Parameters passed to the space (:class:`SpaceEffectActive`).
+        :type space_parameters: dict
+        :param params: Additional parameters passed to :class:`cognitive_nodes.goal.GoalLearnedSpace`.
+        :type params: dict
         :raises Exception: Raises exeption if the sensor or the attribute are missing.
         """
         if not sensor or not attribute:
@@ -896,7 +968,8 @@ class GoalRecreateEffect(GoalLearnedSpace):
 
     def create_activation_input(self, node: dict):
         """
-        Adds a node to the activation inputs list.
+        Adds a node to the activation inputs list. Nodes of type Perception are subscribed to their value topic (``perception/<name>/value``),
+        the rest to their activation topic.
 
         :param node: Dictionary with the information of the node {'name': <name>, 'node_type': <node_type>}.
         :type node: dict
@@ -923,7 +996,7 @@ class GoalRecreateEffect(GoalLearnedSpace):
 
     def read_perception_callback(self, msg: ContainerMsg):
         """
-        Callback method that reads a perception and stores it in the activation inputs list.
+        Callback method that reads a perception and stores it in the activation inputs list. Messages with more than one reading are rejected.
 
         :param msg: Container message that contains the perception and its timestamps.
         :type msg: core_interfaces.msg.Container
@@ -947,12 +1020,17 @@ class GoalRecreateEffect(GoalLearnedSpace):
 
     def calculate_activation(self, perception, activation_list):
         """
-        Calculates the activation of the goal based on the activations of the neighboring goals and P-Node.
+        Calculates the activation of the goal based on the activations of the neighboring goals and the perceptions.
+
+        As in :meth:`cognitive_nodes.goal.GoalMotiven.calculate_activation`, it is the maximum of the activations of the neighbor Goals multiplied by
+        ``attenuation`` (0.0 if there are none), and -1.0 if the World Models are inactive. It is also -1.0 if the effect is already active in the perception received
+        (when ``1 - probability`` of the space is below ``reward_delta_threshold``). The result is stored in ``self.activation``; nothing is returned.
+        This definition replaces the one above it in the class, which only calls the base class.
 
         :param perception: Unused perception.
-        :type perception: core.container.Container
-        :param activation_list: List of activations of the neighboring nodes.
-        :type activation_list: list
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighboring nodes and perceptions, as kept in ``activation_inputs``.
+        :type activation_list: dict
         """        
         goal_activations = {}
         goal_timestamps = {}
@@ -1033,6 +1111,15 @@ class SpaceEffectActive(PointBasedSpace):
         return True if self.effect_label is not None else False
 
     def get_probability(self, perceptions):
+        """
+        Calculates whether the effect is active in the given perceptions: 1.0 if the feature of the effect is 1, and 0.0 otherwise.
+        If the space has a parent space, the minimum of both is returned.
+
+        :param perceptions: The perceptions to evaluate.
+        :type perceptions: core.container.Container
+        :return: Array with one value per row of the perceptions.
+        :rtype: numpy.ndarray
+        """
         # Obtain the datapoint from the given perception (selects the appropriate features)
         points = self.data_from_perception(perceptions)
         # Calculate the activation value
