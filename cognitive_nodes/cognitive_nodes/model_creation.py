@@ -269,7 +269,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
     async def create_models(self):
         created_world_model = None
         created_goal = None
-        drive = None
+        created_goal_drive = None
         if self.missing_world_model:
             self.get_logger().info("Missing World Model. Creating new World Model...")
             created_world_model = await self.create_world_model()
@@ -278,13 +278,15 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             for node in self.node_data:
                 node_type = node["node_type"]
                 if node_type == "Goal":
-                    drive = node["drive"]
-                    self.get_logger().info("Creating Goal: " + drive)
-                    created_goal = await self.create_goal(drive)
+                    created_goal_drive = node["drive"]
+                    self.get_logger().info("Creating Goal: " + created_goal_drive)
+                    created_goal = await self.create_goal(created_goal_drive)
                 elif node_type == "UtilityModel":
                     goal = node.get("goal", None)
+                    drive = None # Only the goal just created has a drive here; it names the policy of the model
                     if not goal and created_goal:
                         goal = created_goal
+                        drive = created_goal_drive
                     elif goal is None:
                         raise ValueError("Goal is required for UtilityModel creation.")
                     if created_world_model:
