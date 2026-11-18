@@ -900,6 +900,13 @@ class GoalActivatePNode(GoalLearnedSpace):
         :return: The reward.
         :rtype: float
         """        
+        # A transition reward (P-Node inactive -> active) needs BOTH states. On the first cycle of a
+        # Deliberation old_perception is None and get_goals_reward() sends an empty Container msg:
+        # forwarded to the P-Node, its get_activation returns None and the response assignment
+        # raises, which leaves this request unanswered (and the process waiting forever).
+        if any(msg is None or len(msg.data_bytes) == 0 or len(msg.timestamps) == 0 or len(msg.feature_labels) == 0
+               for msg in (old_perception_msg, perception_msg)):
+            return 0.0
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
         self.get_logger().info(f"DEBUG: {self.pnode} Old Activation: {old_activation:<.4g}, New Activation: {activation:<.4g}, Delta: {activation-old_activation:<.4g} (Min: {self.threshold_delta})")
