@@ -856,19 +856,21 @@ class TraceBuffer(EpisodicBuffer):
             buffer, utilities = self._shuffle_dataset(buffer, utilities)
         return buffer, utilities
     
-    def get_flattened_traces(self, traces_buffer: MultiContainer):
-        """Rebuild a single Episode from all the stored traces of a MultiContainer.
+    def get_flattened_traces(self, traces_buffer: MultiContainer, trace_index=None):
+        """Rebuild a single Episode from the stored traces of a MultiContainer.
 
-        All the traces are flattened, in order, into one Episode whose rows are the episodes of the traces. The traces_buffer
+        The selected traces are flattened, in order, into one Episode whose rows are the episodes of the traces. The traces_buffer
         argument is required: pass ``self.traces_buffer`` or ``self.antitraces_buffer``, which are None until the labels
         are configured.
 
         :param traces_buffer: MultiContainer holding the stored traces.
         :type traces_buffer: MultiContainer
+        :param trace_index: Traces to read (int, slice or list of buffer indexes, see ``MultiContainer.read_flattened``); None reads all of them.
+        :type trace_index: int | slice | list | None
         :return: Tuple (episode, utilities): an Episode with all the episodes of the traces as rows, and a 1D array with the utility of each row.
         :rtype: tuple[Episode, numpy.ndarray]
         """
-        flattened_traces = traces_buffer.read_flattened(None)
+        flattened_traces = traces_buffer.read_flattened(trace_index)
         buffer = flattened_traces.drop_sel(features=["utility"])
         utilities = flattened_traces.sel(features="utility").values.reshape(-1)
         episodes_container = Container.from_dataarray(buffer, name="TracesContainer", container_type="buffer")
