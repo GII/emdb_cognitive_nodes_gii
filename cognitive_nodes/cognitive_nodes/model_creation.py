@@ -393,14 +393,13 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.create_models()
         # The published episode will keep the last perception and action, but with rewards set to 0
-        if self.last_episode.perception is not None:
+        if self.last_episode.perception is not None and self.last_episode.old_perception is not None:
             self.last_episode.old_perception.push(self.last_episode.perception)
             episode = Episode(old_perception=self.last_episode.old_perception, perception=self.last_episode.perception, parent_policy=self.name)
             if self.last_episode.action is not None:
+                # Rewards are not read: this policy's own episode (the last one if it runs twice in a row) has none
                 last_action = self.last_episode.action.read()
-                last_rewards = self.last_episode.rewards.read()
                 last_action.data = np.zeros_like(last_action.data)
-                last_rewards.data = np.zeros_like(last_rewards.data)
                 episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
             episode_msg = episode_obj_to_msg(episode)
             self.episode_publisher.publish(episode_msg)
