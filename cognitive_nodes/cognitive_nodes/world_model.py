@@ -176,7 +176,12 @@ class WorldModelLearned(WorldModel):
             :type msg: core_interfaces.msg.Container
             """
             episode = container_msg_to_episode(msg)
-            if episode.parent_policy != "reset_world":
+            if episode.old_perception is None or episode.action is None or episode.perception is None:
+                # Not a transition (e.g. ModelCreationPolicy's episode when the last episode had no
+                # action): add_episode would raise "Missing source labels" in this subscription
+                # callback, which stops the executor and destroys every node of this execution node.
+                self.get_logger().debug(f"Incomplete episode from [{episode.parent_policy}] not added to buffer.")
+            elif episode.parent_policy != "reset_world":
                 self.episodic_buffer.add_episode(episode)
                 self.get_logger().info(f"Episode added to buffer \n New train samples: {self.episodic_buffer.new_sample_count_main}, New test samples: {self.episodic_buffer.new_sample_count_secondary}")
 
