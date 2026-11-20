@@ -113,6 +113,9 @@ class PNode(CognitiveNode):
         """
         if self.space:
             response.space = self.space.to_msg()
+            self.get_logger().info(f"Sending space of size {self.space.size} from P-Node {self.name}.")
+        else:
+            self.get_logger().error(f"P-Node {self.name} has no space to send.")
         return response
     
     def contains_space_callback(self, request, response):
@@ -169,7 +172,8 @@ class PNode(CognitiveNode):
 
         If the space of the P-Node has no data yet, the loaded container becomes its data. Otherwise the loaded feature labels
         must be equal to those of the P-Node's space (else nothing is loaded and ``loaded`` is False); the data is then
-        cleared and replaced by the loaded points. In both cases, the activation cache is emptied.
+        cleared and replaced by the loaded points. Existing models are not
+        retrained, and the activation cache is emptied.
 
         :param request: The request that contains the space to be loaded.
         :type request: cognitive_node_interfaces.srv.LoadSpace.Request
@@ -183,6 +187,31 @@ class PNode(CognitiveNode):
             self.get_logger().error(f"Failed to load space into P-Node {self.name}. Space data provided is empty or invalid.")
             response.loaded=False
             return response
+        space_values = space_data.read(ordered=True)
+        if "confidence" not in space_data.feature_labels:
+            self.get_logger().error(
+                f"Failed to load space into P-Node {self.name}: "
+                "space data has no confidence feature."
+            )
+            response.loaded = False
+            return response
+        feature_labels = [
+            label for label in space_data.feature_labels if label != "confidence"
+        ]
+        perceptions = Container(
+            name=f"{space_data.name}_perceptions",
+            max_size=len(space_data),
+            container_type="perception",
+            labels=feature_labels,
+        )
+        perceptions.push(
+            space_values.sel(features=feature_labels).values,
+            timestamps=space_values.coords["timestamp"].values,
+            src_labels=feature_labels,
+        )
+        space_confidences = (
+            space_values.sel(features=["confidence"]).values.reshape(-1)
+        )
         if self.space and self.space._data is None:
             space_data.name = self.space.ident + "_data"
             self.space._data = space_data
@@ -195,8 +224,8 @@ class PNode(CognitiveNode):
                 self.get_logger().error(f"Feature labels of the loaded space do not match the P-Node's space. P-Node feature labels: {self.space._data.feature_labels}, Loaded space feature labels: {space_data.feature_labels}")
                 response.loaded=False
                 return response
-            self.space._data.clear()
-            self.space._data.push(space_data)
+            # self.space._data.clear() Keep original points in the space, just add new ones.  
+            self.space.add_point(perceptions, space_confidences)
             self.space_changed()
             self.get_logger().info(f"Loaded space into P-Node {self.name}.")
             response.loaded=True
@@ -204,7 +233,7 @@ class PNode(CognitiveNode):
             self.get_logger().error(f"Failed to load space into P-Node {self.name}.")
             response.loaded=False
         return response
-    
+
     def add_points(self, points, confidences):
         """
         Add new points (or anti-points) to the P-Node.

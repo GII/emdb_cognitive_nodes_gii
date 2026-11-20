@@ -33,7 +33,9 @@ try:
         DuplicateNode,
         GetReusableKnowledge,
         SendSpace,
+        LoadSpace,
     )
+    from core_interfaces.srv import DeleteNode
 except ModuleNotFoundError as error:
     if error.name not in {"rclpy", "cognitive_node_interfaces"}:
         raise
@@ -51,6 +53,7 @@ except ModuleNotFoundError as error:
     ServiceClientAsync = None
     GetReusableKnowledge = None
     SendSpace = None
+    LoadSpace = None
     GetActivation = None
     DuplicateNode = None
     SetChangesTopic = None
@@ -92,6 +95,23 @@ def _neighbor_names(node_data, node_type=None):
         and neighbor.get("name")
         and (node_type is None or neighbor.get("node_type") == node_type)
     ]
+
+
+def _resolve_alias(name, aliases, replacement_aliases=None):
+    """Resolve duplicate and replacement aliases without losing chain hops."""
+    aliases = aliases or {}
+    replacement_aliases = replacement_aliases or {}
+    resolved = name
+    visited = set()
+    while resolved not in visited:
+        visited.add(resolved)
+        next_name = replacement_aliases.get(resolved)
+        if next_name is None:
+            next_name = aliases.get(resolved)
+        if next_name is None or next_name == resolved:
+            break
+        resolved = next_name
+    return resolved
 
 
 def _goal_depth(goal_name, downstream_goals, active_path=None):
@@ -240,15 +260,20 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
     share a Policy and have different domains, where the source Goal heads a chain at least ``depth_threshold`` deeper than the target Goal, which must have depth 1.
     Only the complete chain can be copied for now.
 
-    For each candidate it requests the space of the P-Node of the target (``pnode/<name>/send_space``); if it has fewer than ``min_points`` points the
-    candidate waits until the P-Node reports a new success rate. Otherwise, the activations that the P-Node of the source gives to the points of the target are compared
-    with their confidences (mean squared error), and for each target Goal the source with the lowest error is selected. For the selected candidates the
-    instructions to copy the chain of the source are generated.
+    For each candidate it requests the space of the P-Node of the target (``pnode/<name>/send_space``); if it has fewer than ``min_points`` positive or
+    negative points the candidate waits until the P-Node reports a new success rate. Otherwise, the activations that the P-Node of the source gives to the
+    points of the target are compared with their confidences (mean squared error), and for each target Goal the source with the lowest error is selected.
+    For the selected candidates the instructions to copy the chain of the source are generated, including replacement of the target P-Node space with the
+    selected source P-Node is cloned, then adapted with the target P-Node's
+    data and connected in place of the target P-Node.
 
     The instructions can be requested with the ``drive/<name>/get_reusable_knowledge`` service
     (:class:`cognitive_node_interfaces.srv.GetReusableKnowledge`), which returns a YAML string with two keys: ``instructions``
-    (a list with, for each selection, ``source_goal``, ``target_goal``, ``aliases`` and the ``nodes`` to copy: Goals, C-Nodes, P-Nodes and Policies, each with its name, class
-    and neighbors) and ``candidates``. The evaluation of the drive is 1.0 while there are selected candidates and 0.0 otherwise.
+    (a list with, for each selection, ``source_goal``, ``target_goal``, ``aliases``,
+    ``pnode_replacements``, ``root_neighbors`` and the ``nodes`` to copy: Goals,
+    C-Nodes, P-Nodes and Policies, each with its name, class and neighbors) and
+    ``candidates``. The evaluation of the drive is 1.0 while there are selected
+    candidates and 0.0 otherwise.
     """
 
     def __init__(
@@ -257,7 +282,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         class_name="cognitive_nodes.drive.Drive",
         ltm_id=None,
         depth_threshold=CHAIN_DEPTH_THRESHOLD,
-        min_points=1,
+        min_points=4,
         **params,
     ):
         """
@@ -271,7 +296,7 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         :type ltm_id: str
         :param depth_threshold: Minimum difference between the depth of the source chain and the depth of the target for a pair of Goals to be a candidate. Defaults to 3.
         :type depth_threshold: int
-        :param min_points: Minimum number of points that the space of the target P-Node must have to evaluate a candidate. Defaults to 1.
+        :param min_points: Minimum number of positive and negative points that the space of the target P-Node must have to evaluate a candidate. Defaults to 4.
         :type min_points: int
         :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
         :type params: dict
@@ -486,10 +511,17 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 continue
             if target_space_data is None:
                 continue
-            if target_space_data.size < self.min_points:
+            positive_points, negative_points = self._space_class_counts(
+                target_space_data
+            )
+            if (
+                positive_points < self.min_points
+                or negative_points < self.min_points
+            ):
                 self.get_logger().info(
                     f"Knowledge reuse: candidate P-Node {target} has "
-                    f"{target_space_data.size}/{self.min_points} points."
+                    f"{positive_points}/{self.min_points} positive and "
+                    f"{negative_points}/{self.min_points} negative points."
                 )
                 self._pending_pnode_candidates.add(target)
                 self._subscribe_pending_pnode(target)
@@ -564,6 +596,19 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
             data,
         )
 
+    @staticmethod
+    def _space_class_counts(space_data: Container):
+        """Return the positive and negative sample counts in a P-Node space."""
+        confidences = (
+            space_data.read()
+            .sel(features=["confidence"])
+            .values.reshape(-1)
+        )
+        return (
+            int(np.count_nonzero(confidences > 0)),
+            int(np.count_nonzero(confidences < 0)),
+        )
+
     def _build_instructions(self, selected_candidates):
         """Serialize selected source chains using experiment YAML conventions.
 
@@ -572,7 +617,9 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
         source goal itself is not copied: its ``aliases`` map the source goal,
         its P-Node and its domain (WorldModel) to the target goal, P-Node and
         domain, so the copied nodes are attached to the target context instead
-        of the source one.
+        of the source one. The candidate P-Node is replaced by a duplicate of the
+        mature P-Node, and ``root_neighbors`` records the link from that replacement
+        to the first copied Goal.
         """
         instructions = []
         policies = _nodes(self._ltm_dump, "Policy")
@@ -584,7 +631,8 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 f"{candidate['candidate_goal']}."
             )
             nodes = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
-            for goal_name in self._downstream_chain(candidate["goal"])[1:]:
+            duplicated_goals = self._downstream_chain(candidate["goal"])[1:]
+            for goal_name in duplicated_goals:
                 goal_data = _nodes(self._ltm_dump, "Goal").get(goal_name, {})
                 self._add_instruction(nodes, "Goal", goal_name, goal_data)
                 for cnode_name, cnode_data in self._context_cnodes(goal_name):
@@ -608,11 +656,49 @@ class DriveKnowledgeReuse(Drive, LTMSubscription):
                 aliases[candidate["domain"]] = candidate["candidate_domain"]
             if candidate["pnode"] and candidate["candidate_pnode"]:
                 aliases[candidate["pnode"]] = candidate["candidate_pnode"]
+            pnode_replacements = []
+            if candidate["pnode"] and candidate["candidate_pnode"]:
+                candidate_data = _nodes(self._ltm_dump, "PNode").get(
+                    candidate["candidate_pnode"], {}
+                )
+                incoming = []
+                for node_type in ("Goal", "CNode", "PNode", "Policy"):
+                    for node_name, node_data in _nodes(
+                        self._ltm_dump, node_type
+                    ).items():
+                        if candidate["candidate_pnode"] in _neighbor_names(node_data):
+                            incoming.append(
+                                {"name": node_name, "node_type": node_type}
+                            )
+                pnode_replacements.append(
+                    {
+                        "source": candidate["pnode"],
+                        "candidate": candidate["candidate_pnode"],
+                        "incoming": incoming,
+                        "outgoing": candidate_data.get("neighbors", []),
+                    }
+                )
+            root_neighbors = []
+            if duplicated_goals and candidate["candidate_pnode"]:
+                root_neighbors.append(
+                    {
+                        "source": {
+                            "name": candidate["candidate_pnode"],
+                            "node_type": "PNode",
+                        },
+                        "neighbor": {
+                            "name": duplicated_goals[0],
+                            "node_type": "Goal",
+                        },
+                    }
+                )
             instructions.append(
                 {
                     "source_goal": candidate["goal"],
                     "target_goal": candidate["candidate_goal"],
                     "aliases": aliases,
+                    "pnode_replacements": pnode_replacements,
+                    "root_neighbors": root_neighbors,
                     "nodes": nodes,
                 }
             )
@@ -725,8 +811,9 @@ class PolicyKnowledgeReuse(Policy):
     When executed, it requests the instructions from the drive and, for each entry, duplicates the Goals, P-Nodes and C-Nodes of the source chain
     (``cognitive_node/<name>/duplicate_node`` service, without neighbors) and then reconnects the copies: the neighbors of each copy are those of the original,
     replaced by their copies or by the ``aliases`` of the entry (which attach the copies to the target Goal, P-Node and domain). The Policies of the chain are not duplicated:
-    the copies of their C-Nodes are added as neighbors. While the nodes are copied, the changes topic of the LTM is disabled (``<ltm_id>/set_changes_topic``) so
-    that the rest of the nodes do not see the intermediate state, and it is enabled again afterwards, also if the copy fails.
+    the copies of their C-Nodes are added as neighbors. The selected mature P-Node is duplicated, then adapted with the candidate P-Node data. While the nodes are copied,
+    the changes topic of the LTM is disabled (``<ltm_id>/set_changes_topic``) so that the rest of the nodes do not see the intermediate state, and it is enabled again
+    afterwards, also if the copy fails.
     """
 
     def __init__(
@@ -823,14 +910,168 @@ class PolicyKnowledgeReuse(Policy):
                 # Seed the aliases with the source-to-target root context, so the
                 # copied subgoals are attached to the target goal and P-Node.
                 aliases = dict(entry.get("aliases", {}))
+                replacements = entry.get("pnode_replacements", [])
+                if not isinstance(replacements, list):
+                    self.get_logger().error(
+                        "Knowledge reuse pnode_replacements must be a list."
+                    )
+                    replacements = []
+                replacement_aliases = await self._replace_pnode_spaces(
+                    replacements
+                )
+                aliases.update(replacement_aliases)
                 aliases.update(await self._duplicate_nodes(nodes))
-                await self._restore_neighbors(nodes, aliases)
+                root_neighbors = entry.get("root_neighbors", [])
+                if not isinstance(root_neighbors, list):
+                    self.get_logger().error(
+                        "Knowledge reuse root_neighbors must be a list."
+                    )
+                    root_neighbors = []
+                await self._restore_neighbors(
+                    nodes,
+                    aliases,
+                    root_neighbors,
+                    replacement_aliases,
+                )
         finally:
             # Re-enable the topic even if copying fails halfway; otherwise the
             # cognitive processes would stop receiving LTM changes.
             await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
         response.policy = self.name
         return response
+
+    async def _replace_pnode_spaces(self, replacements):
+        """Clone mature P-Nodes and adapt them with candidate-domain data."""
+        replacement_aliases = {}
+        for replacement in replacements:
+            if not isinstance(replacement, dict):
+                self.get_logger().error(
+                    "Invalid knowledge reuse P-Node replacement."
+                )
+                continue
+            source = replacement.get("source")
+            candidate = replacement.get("candidate")
+            if not source or not candidate:
+                self.get_logger().error(
+                    "Incomplete knowledge reuse P-Node replacement."
+                )
+                continue
+            source_service = f"pnode/{candidate}/send_space"
+            try:
+                if source_service not in self.node_clients:
+                    self.node_clients[source_service] = ServiceClientAsync(
+                        self,
+                        SendSpace,
+                        source_service,
+                        self.cbgroup_client,
+                    )
+                duplicate_service = f"cognitive_node/{source}/duplicate_node"
+                if duplicate_service not in self.node_clients:
+                    self.node_clients[duplicate_service] = ServiceClientAsync(
+                        self,
+                        DuplicateNode,
+                        duplicate_service,
+                        self.cbgroup_client,
+                    )
+                source_response = await self.node_clients[
+                    source_service
+                ].send_request_async()
+                candidate_space = getattr(source_response, "space", None)
+                if candidate_space is None:
+                    raise ValueError(f"P-Node {candidate} returned no space.")
+                duplicate_response = await self.node_clients[
+                    duplicate_service
+                ].send_request_async(name="", include_neighbors=False)
+                if not getattr(duplicate_response, "duplicated", False):
+                    raise RuntimeError(
+                        f"Failed to duplicate mature P-Node {source}."
+                    )
+                duplicate = duplicate_response.duplicate_node_name
+                target_service = f"pnode/{duplicate}/load_space"
+                if target_service not in self.node_clients:
+                    self.node_clients[target_service] = ServiceClientAsync(
+                        self,
+                        LoadSpace,
+                        target_service,
+                        self.cbgroup_client,
+                    )
+                target_response = await self.node_clients[
+                    target_service
+                ].send_request_async(space=candidate_space)
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to replace candidate P-Node {candidate} "
+                    f"with a clone of P-Node {source}: {error}"
+                )
+                continue
+            if not getattr(target_response, "loaded", False):
+                self.get_logger().error(
+                    f"Failed to adapt cloned P-Node {duplicate} "
+                    f"with data from P-Node {candidate}."
+                )
+                continue
+            replacement_aliases[candidate] = duplicate
+            await self._rewire_pnode(
+                candidate,
+                duplicate,
+                replacement.get("incoming", []),
+                replacement.get("outgoing", []),
+            )
+        return replacement_aliases
+
+    async def _rewire_pnode(self, candidate, replacement, incoming, outgoing):
+        """Move the candidate P-Node graph connections to its replacement."""
+        rewired = True
+        for neighbor in outgoing:
+            if not isinstance(neighbor, dict) or not neighbor.get("name"):
+                continue
+            if neighbor.get("node_type") == "Perception":
+                continue
+            result = await self.add_neighbor_client(
+                replacement, neighbor["name"]
+            )
+            if not result.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to copy neighbor {neighbor['name']} to "
+                    f"replacement P-Node {replacement}."
+                )
+        for neighbor in incoming:
+            if not isinstance(neighbor, dict) or not neighbor.get("name"):
+                continue
+            source = neighbor["name"]
+            removed = await self.delete_neighbor_client(source, candidate)
+            if not removed.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to remove {candidate} from neighbors of {source}."
+                )
+                continue
+            result = await self.add_neighbor_client(source, replacement)
+            if not result.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to add {replacement} to neighbors of {source}."
+                )
+        if not rewired:
+            self.get_logger().error(
+                f"Keeping candidate P-Node {candidate}: "
+                f"rewiring to {replacement} was incomplete."
+            )
+            return
+        delete_service = "commander/delete"
+        if delete_service not in self.node_clients:
+            self.node_clients[delete_service] = ServiceClientAsync(
+                self, DeleteNode, delete_service, self.cbgroup_client
+            )
+        deleted = await self.node_clients[delete_service].send_request_async(
+            name=candidate
+        )
+        if not getattr(deleted, "deleted", False):
+            self.get_logger().warning(
+                f"Replacement P-Node {replacement} is active, but candidate "
+                f"P-Node {candidate} could not be deleted."
+            )
 
     async def _duplicate_nodes(self, instructions):
         aliases = {}
@@ -870,7 +1111,14 @@ class PolicyKnowledgeReuse(Policy):
                 aliases[source_name] = result.duplicate_node_name
         return aliases
 
-    async def _restore_neighbors(self, instructions, aliases):
+    async def _restore_neighbors(
+        self,
+        instructions,
+        aliases,
+        root_neighbors=(),
+        replacement_aliases=None,
+    ):
+        replacement_aliases = replacement_aliases or {}
         for node_type in ("Goal", "PNode", "CNode"):
             for instruction in instructions.get(node_type, []):
                 source_name = instruction.get("name")
@@ -892,13 +1140,61 @@ class PolicyKnowledgeReuse(Policy):
                             f"Incomplete neighbor in instruction for {source_name}."
                         )
                         continue
-                    aliased_neighbor = aliases.get(neighbor_name, neighbor_name)
+                    if node_type == "PNode" and neighbor_type == "Perception":
+                        # P-Nodes receive perception inputs automatically when
+                        # created.
+                        continue
+                    aliased_neighbor = _resolve_alias(
+                        neighbor_name,
+                        aliases,
+                        replacement_aliases,
+                    )
                     result = await self.add_neighbor_client(duplicate_name, aliased_neighbor)
                     if not result.success:
                         self.get_logger().error(
                             f"Failed to link {duplicate_name} to "
                             f"{aliased_neighbor}."
                         )
+        for connection in root_neighbors:
+            if not isinstance(connection, dict):
+                self.get_logger().error("Invalid root neighbor connection.")
+                continue
+            source = connection.get("source", {})
+            neighbor = connection.get("neighbor", {})
+            source_name = source.get("name") if isinstance(source, dict) else None
+            neighbor_name = (
+                neighbor.get("name") if isinstance(neighbor, dict) else None
+            )
+            if not source_name or not neighbor_name:
+                self.get_logger().error(
+                    "Incomplete root neighbor connection."
+                )
+                continue
+            aliased_neighbor = _resolve_alias(
+                neighbor_name,
+                aliases,
+                replacement_aliases,
+            )
+            aliased_source = _resolve_alias(
+                source_name,
+                aliases,
+                replacement_aliases,
+            )
+            result = await self.add_neighbor_client(
+                aliased_source, aliased_neighbor
+            )
+            if not result.success:
+                self.get_logger().error(
+                    f"Failed to link {aliased_source} to {aliased_neighbor}."
+                )
+            reverse_result = await self.add_neighbor_client(
+                aliased_neighbor, aliased_source
+            )
+            if not reverse_result.success:
+                self.get_logger().error(
+                    f"Failed to link first subgoal {aliased_neighbor} "
+                    f"to replacement P-Node {aliased_source}."
+                )
         for instruction in instructions.get("Policy", []):
             source_name = instruction.get("name")
             parameters = instruction.get("parameters", {})
@@ -916,7 +1212,15 @@ class PolicyKnowledgeReuse(Policy):
                         f"Incomplete neighbor in instruction for {source_name}."
                     )
                     continue
-                aliased_neighbor = aliases.get(neighbor_name, None)
+                if neighbor_type == "Perception":
+                    # Policies receive perception inputs automatically when
+                    # they are created.
+                    continue
+                aliased_neighbor = _resolve_alias(
+                    neighbor_name,
+                    aliases,
+                    replacement_aliases,
+                )
                 if aliased_neighbor:
                     result = await self.add_neighbor_client(source_name, aliased_neighbor)
                     if not result.success:
@@ -979,7 +1283,7 @@ class DummyNode:
 class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
     """Run production knowledge-reuse logic against real P-Node models."""
 
-    def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=1):
+    def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=4):
         self._ltm_dump = ltm_dump
         self._spaces = pnode_spaces
         self._mature_pnodes = mature_pnodes
@@ -1069,7 +1373,7 @@ def _load_mature_pnodes(fixture_dir, logger):
     return models
 
 
-async def comparison_main_async(fixture_dir, max_points=25):
+async def comparison_main_async(fixture_dir, max_points=25, min_points=4):
     """Run the ROS-free P-Node comparison and instruction-generation test."""
     fixture_dir = Path(fixture_dir)
     with (fixture_dir / "neighbors_full_test.yaml").open(encoding="utf-8") as fixture:
@@ -1092,7 +1396,7 @@ async def comparison_main_async(fixture_dir, max_points=25):
         ltm_dump,
         spaces,
         mature_pnodes,
-        min_points=max_points,
+        min_points=min_points,
     )
     candidate_goals = {
         goal
@@ -1118,8 +1422,180 @@ def comparison_main():
         default=Path(__file__).parents[1] / "test" / "fixtures",
     )
     parser.add_argument("--max-points", type=int, default=25)
+    parser.add_argument("--min-points", type=int, default=4)
     args = parser.parse_args()
-    asyncio.run(comparison_main_async(args.fixture_dir, args.max_points))
+    asyncio.run(comparison_main_async(args.fixture_dir, args.max_points, args.min_points))
+
+
+async def policy_execution_dry_run_async(instructions_path, output_path=None):
+    """Dry-run knowledge-reuse neighbor restoration without ROS services."""
+    instructions_path = Path(instructions_path)
+    with instructions_path.open(encoding="utf-8") as source:
+        reusable_knowledge = yaml.safe_load(source)
+
+    entries = reusable_knowledge.get("instructions", [])
+    print(f"Loaded reusable knowledge: {instructions_path}")
+    print(f"Instruction entries: {len(entries)}")
+
+    final_operations = []
+    entry_results = []
+
+    class DryRunPolicy:
+        def __init__(self):
+            self.operations = []
+
+        async def add_neighbor_client(self, source, neighbor):
+            self.operations.append(
+                {"source": source, "neighbor": neighbor}
+            )
+
+            class Result:
+                success = True
+
+            return Result()
+
+    for entry_index, entry in enumerate(entries):
+        instructions = entry.get("nodes", {})
+        aliases = dict(entry.get("aliases", {}))
+
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                if source_name:
+                    aliases[source_name] = f"{source_name}_dup_{entry_index}"
+
+        replacement_aliases = {}
+        replacement_results = []
+        for replacement in entry.get("pnode_replacements", []):
+            candidate = replacement.get("candidate")
+            source = replacement.get("source")
+            if candidate and source:
+                replacement_name = f"{source}_dup_replaced_{entry_index}"
+                replacement_aliases[candidate] = replacement_name
+                replacement_results.append(
+                    {
+                        "candidate": candidate,
+                        "replacement": replacement_name,
+                        "incoming": replacement.get("incoming", []),
+                        "outgoing": replacement.get("outgoing", []),
+                    }
+                )
+
+        policy = DryRunPolicy()
+        await PolicyKnowledgeReuse._restore_neighbors(
+            policy,
+            instructions,
+            aliases,
+            entry.get("root_neighbors", []),
+            replacement_aliases,
+        )
+
+        root_neighbor_operations = []
+        root_neighbors = entry.get("root_neighbors", [])
+        for connection in root_neighbors:
+            if not isinstance(connection, dict):
+                continue
+            source = connection.get("source", {})
+            neighbor = connection.get("neighbor", {})
+            source_name = (
+                source.get("name") if isinstance(source, dict) else None
+            )
+            neighbor_name = (
+                neighbor.get("name") if isinstance(neighbor, dict) else None
+            )
+            if not source_name or not neighbor_name:
+                continue
+            resolved_source = _resolve_alias(
+                source_name,
+                aliases,
+                replacement_aliases,
+            )
+            resolved_neighbor = _resolve_alias(
+                neighbor_name,
+                aliases,
+                replacement_aliases,
+            )
+            root_neighbor_operations.append(
+                {
+                    "replacement_pnode": resolved_source,
+                    "first_subgoal": resolved_neighbor,
+                    "replacement_to_subgoal": (
+                        resolved_source,
+                        resolved_neighbor,
+                    ),
+                    "subgoal_to_replacement": (
+                        resolved_neighbor,
+                        resolved_source,
+                    ),
+                }
+            )
+
+        result = {
+            "source_goal": entry.get("source_goal"),
+            "target_goal": entry.get("target_goal"),
+            "duplicate_aliases": aliases,
+            "replacement_aliases": replacement_aliases,
+            "pnode_replacements": replacement_results,
+            "root_neighbor_results": root_neighbor_operations,
+            "neighbor_operations": policy.operations,
+        }
+        entry_results.append(result)
+        final_operations.extend(policy.operations)
+
+        print(
+            f"\nEntry {entry_index}: "
+            f"{entry.get('source_goal')} -> {entry.get('target_goal')}"
+        )
+        print("Replacement aliases:")
+        for candidate, replacement in replacement_aliases.items():
+            print(f"  {candidate} -> {replacement}")
+        print("Root/bidirectional links:")
+        for root_link in root_neighbor_operations:
+            print(
+                f"  {root_link['replacement_pnode']} -> "
+                f"{root_link['first_subgoal']}"
+            )
+            print(
+                f"  {root_link['first_subgoal']} -> "
+                f"{root_link['replacement_pnode']}"
+            )
+        print("Neighbor operations:")
+        for operation in policy.operations:
+            print(
+                f"  {operation['source']} -> "
+                f"{operation['neighbor']}"
+            )
+
+    report = {
+        "input": str(instructions_path),
+        "entries": entry_results,
+    }
+    output_path = (
+        Path(output_path)
+        if output_path
+        else instructions_path.with_name(
+            f"{instructions_path.stem}_dry_run.yaml"
+        )
+    )
+    with output_path.open("w", encoding="utf-8") as output:
+        yaml.safe_dump(report, output, default_flow_style=False, sort_keys=False)
+    print(f"\nDry-run report written to: {output_path}")
+    print(f"Neighbor operations: {len(final_operations)}")
+
+
+def policy_execution_main():
+    parser = argparse.ArgumentParser(
+        description="Dry-run applied knowledge-reuse instructions."
+    )
+    parser.add_argument("instructions")
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    asyncio.run(
+        policy_execution_dry_run_async(
+            args.instructions,
+            args.output,
+        )
+    )
 
 
 def main():
@@ -1131,7 +1607,26 @@ def main():
         default=Path(__file__).parents[1] / "test" / "fixtures" / "neighbors_full_0.yaml",
         help="LTM-shaped YAML fixture",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Apply reusable-knowledge instructions without contacting ROS.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="YAML report destination for --dry-run.",
+    )
     args = parser.parse_args()
+
+    if args.dry_run:
+        asyncio.run(
+            policy_execution_dry_run_async(
+                args.fixture,
+                args.output,
+            )
+        )
+        return
 
     with args.fixture.open(encoding="utf-8") as fixture:
         ltm_dump = yaml.safe_load(fixture)
