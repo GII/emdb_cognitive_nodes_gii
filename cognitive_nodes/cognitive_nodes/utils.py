@@ -94,7 +94,7 @@ class EpisodeSubscription:
     """
     EpisodeSubscription is a mixin class that provides a method to configure a subscription to the episodes.
     """    
-    def configure_episode_subscription(self, episode_topic, episode_msg, callback_group):
+    def configure_episode_subscription(self, episode_topic, episode_msg, callback_group, depth=0):
         """
         Configure the subscription to the episodes. Messages are passed to ``episode_callback``.
 
@@ -104,9 +104,14 @@ class EpisodeSubscription:
         :type episode_msg: str
         :param callback_group: Callback group of the subscription.
         :type callback_group: rclpy.callback_groups.CallbackGroup
-        """        
+        :param depth: Queue depth of the subscription. The default, 0, is the middleware's default, which keeps only
+            the latest episode: the episodes that arrive while the callback group is busy are dropped. A node that
+            needs every episode (e.g. :class:`cognitive_nodes.policy.PolicyLearned`, which learns from every
+            transition) passes a larger depth.
+        :type depth: int
+        """
         msg_obj=class_from_classname(episode_msg)
-        self.episode_subscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, 0, callback_group=callback_group)
+        self.episode_subscription = self.create_subscription(msg_obj, episode_topic, self.episode_callback, depth, callback_group=callback_group)
 
     def episode_callback(self, msg):
         """

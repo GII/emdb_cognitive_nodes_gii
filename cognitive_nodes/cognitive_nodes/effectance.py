@@ -900,6 +900,13 @@ class GoalActivatePNode(GoalLearnedSpace):
         :return: The reward.
         :rtype: float
         """        
+        if not hasattr(self, "pnode_activation_client"):
+            self.setup_pnode()
+        if not hasattr(self, "pnode_activation_client"):
+            raise RuntimeError(
+                f"{self.name}: no P-Node neighbor is configured for reward "
+                "calculation."
+            )
         # A transition reward (P-Node inactive -> active) needs BOTH states. On the first cycle of a
         # Deliberation old_perception is None and get_goals_reward() sends an empty Container msg:
         # forwarded to the P-Node, its get_activation returns None and the response assignment
@@ -1169,6 +1176,5 @@ class SpaceEffectActive(PointBasedSpace):
         data = perception.read(ordered=True)
         filtered_features = data.sel(features=self.effect_label)
         return filtered_features.values
-
 
 
