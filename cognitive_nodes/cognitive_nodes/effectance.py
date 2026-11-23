@@ -900,6 +900,13 @@ class GoalActivatePNode(GoalLearnedSpace):
         :return: The reward.
         :rtype: float
         """        
+        if not hasattr(self, "pnode_activation_client"):
+            self.setup_pnode()
+        if not hasattr(self, "pnode_activation_client"):
+            raise RuntimeError(
+                f"{self.name}: no P-Node neighbor is configured for reward "
+                "calculation."
+            )
         old_activation = (await self.pnode_activation_client.send_request_async(perception=old_perception_msg)).activation[0]
         activation = (await self.pnode_activation_client.send_request_async(perception=perception_msg)).activation[0]
         self.get_logger().info(f"DEBUG: {self.pnode} Old Activation: {old_activation:<.4g}, New Activation: {activation:<.4g}, Delta: {activation-old_activation:<.4g} (Min: {self.threshold_delta})")
@@ -1162,6 +1169,5 @@ class SpaceEffectActive(PointBasedSpace):
         data = perception.read(ordered=True)
         filtered_features = data.sel(features=self.effect_label)
         return filtered_features.values
-
 
 
