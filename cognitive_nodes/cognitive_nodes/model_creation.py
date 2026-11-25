@@ -302,7 +302,7 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
     with this policy as parent so that a :class:`ModelCreationDrive` is reset.
     Its activation is the maximum of the activations of its neighbors except World Models.
     """
-    def __init__(self, name="model_creation", class_name="cognitive_nodes.drive.Policy", max_iterations=20, episodes_topic=None, episodes_msg=None, **params):
+    def __init__(self, name="model_creation", class_name="cognitive_nodes.drive.Policy", max_iterations=20, episodes_topic=None, episodes_msg=None, spawn_utility_model=True, spawn_policy=True, **params):
         """
         Constructor of the ModelCreationPolicy class.
 
@@ -316,10 +316,19 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         :type episodes_topic: str
         :param episodes_msg: Class name of the message type of the episodes.
         :type episodes_msg: str
+        :param spawn_utility_model: Whether a Utility Model is created for each new Goal (ablation switch), defaults to True.
+        :type spawn_utility_model: bool
+        :param spawn_policy: Whether a learned Policy is created for each new Goal (ablation switch), defaults to True.
+        :type spawn_policy: bool
         :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`. They must include ``LTM_id``.
         :type params: dict
+        :raises ValueError: If both spawn_utility_model and spawn_policy are False.
         """
         super().__init__(name, class_name, **params)
+        if not (spawn_utility_model or spawn_policy):
+            raise ValueError("At least one of spawn_utility_model or spawn_policy must be True.")
+        self.spawn_utility_model = spawn_utility_model
+        self.spawn_policy = spawn_policy
         self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception"], main_size=max_iterations, secondary_size=0, random_seed=getattr(self, "random_seed", 0))
         self.node_data = []
         self.configure_model_creation(episodes_topic, episodes_msg)
@@ -393,14 +402,13 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.create_models()
         # The published episode will keep the last perception and action, but with rewards set to 0
-        if self.last_episode.perception is not None:
+        if self.last_episode.perception is not None and self.last_episode.old_perception is not None:
             self.last_episode.old_perception.push(self.last_episode.perception)
             episode = Episode(old_perception=self.last_episode.old_perception, perception=self.last_episode.perception, parent_policy=self.name)
             if self.last_episode.action is not None:
+                # Rewards are not read: this policy's own episode (the last one if it runs twice in a row) has none
                 last_action = self.last_episode.action.read()
-                last_rewards = self.last_episode.rewards.read()
                 last_action.data = np.zeros_like(last_action.data)
-                last_rewards.data = np.zeros_like(last_rewards.data)
                 episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
             episode_msg = episode_obj_to_msg(episode)
             self.episode_publisher.publish(episode_msg)
@@ -542,19 +550,25 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             self.get_logger().error(f"Failed to create C-Node: {cnode_name}")
 
         # Create Utility Model
-        neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
-        creation_response = await self.create_node_client(name=utility_model_name, class_name=utility_model_class, parameters={**utility_model_parameters, **neighbors})
-        if not creation_response.created:
-            self.get_logger().error(f"Failed to create UtilityModel: {utility_model_name}")
-        utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
-        if utility_model_trace_service not in self.node_clients:
-            self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
-        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace_msg, reward=1.0)
-        if not trace_success.added:
-            self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
+        if self.spawn_utility_model:
+            neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
+            creation_response = await self.create_node_client(name=utility_model_name, class_name=utility_model_class, parameters={**utility_model_parameters, **neighbors})
+            if not creation_response.created:
+                self.get_logger().error(f"Failed to create UtilityModel: {utility_model_name}")
+            utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
+            if utility_model_trace_service not in self.node_clients:
+                self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
+            trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace_msg, reward=1.0)
+            if not trace_success.added:
+                self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
+        else:
+            self.get_logger().info(f"spawn_utility_model=False: skipping UtilityModel for goal {goal}")
 
         # Create a specialised PolicyLearned for this goal/drive.
-        await self.create_policy(goal, drive, cnode_name)
+        if self.spawn_policy:
+            await self.create_policy(goal, drive, cnode_name)
+        else:
+            self.get_logger().info(f"spawn_policy=False: skipping PolicyLearned for goal {goal}")
 
     async def create_policy(self, goal, drive, cnode_name):
         """
