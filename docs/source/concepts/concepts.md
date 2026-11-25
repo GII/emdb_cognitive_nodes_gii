@@ -140,9 +140,16 @@ To decide this, the system compares the activations that the P-Node of the matur
 
 ### Competence
 
-Competence motivates the robot to improve in the goals it is not yet able to achieve reliably. Within the e-MDB cognitive architecture, each C-Node keeps track of how competent the robot is in its context and how that competence is changing. The Competence motivation favors the goals whose competence is low and is changing, so that the robot concentrates its effort on what it is still learning, and still gives a small share of attention to goals whose competence is not changing yet.
+Competence motivates the robot to improve in the goals it is not yet able to achieve reliably. Within the e-MDB cognitive architecture, each C-Node keeps track of how competent the robot is in its context and how that competence is changing. The Competence motivation strongly favors goals with low competence and amplifies goals whose competence is improving. Negative competence change is neutral: it indicates that adaptation may be needed rather than deactivating the goal. Only top-level Goals, those with no Goal neighbors, receive an override activation.
 
-The result is expressed as an activation for each goal, which is scaled between a minimum value and the activation of the motivation itself. The motivation is satisfied when the competence in all the goals has been fully reached.
+The score is
+`(1 - effective_competence) ** competence_exponent * change_factor`, where
+`effective_competence = competence * min(sample_count / competence_sample_count, 1)`.
+`competence_exponent` controls how quickly activation grows as competence falls, and `positive_delta_weight` controls the boost for improving competence. Negative delta competence does not reduce the score. `delta_sample_count` controls how many observations are needed for full positive-delta confidence, `competence_sample_count` controls how quickly raw competence is trusted, and `minimum_activation_samples` keeps sparse, newly created C-Nodes from being deactivated too early. C-Nodes expose `minimum_delta_samples`, after which delta competence can begin to affect the score.
+
+C-Nodes with `track_competence: False` do not participate in competence motivation or satisfaction. Their `track_competence` metacognitive parameter is published as false, allowing Competence to exclude them without an experiment-specific exclusion list.
+
+The result is expressed as an absolute activation for each eligible top-level goal, scaled by the activation of the motivation itself. This prevents a nearly mastered goal from receiving a strong activation merely because it has the highest score relative to other goals. The motivation is satisfied when the competence in all eligible goals has been fully reached.
 
 
 ## Purpose alignment

@@ -20,7 +20,17 @@ class CNode(CognitiveNode):
     These are published as metacognitive parameters in its activation; ``confidence`` is fixed to 1.0.
     """
 
-    def __init__(self, name="cnode", class_name="cognitive_nodes.cnode.CNode", node_type="CNode", history_size=40, track_competence=True, default_competence=1.0, **params):
+    def __init__(
+        self,
+        name="cnode",
+        class_name="cognitive_nodes.cnode.CNode",
+        node_type="CNode",
+        history_size=40,
+        track_competence=True,
+        default_competence=1.0,
+        minimum_delta_samples=4,
+        **params,
+    ):
         """
         Constructor of the C-Node class.
         Initializes a C-Node with the given name and registers it in the LTM.
@@ -31,24 +41,28 @@ class CNode(CognitiveNode):
         :type class_name: str
         :param node_type: The type of the C-Node.
         :type node_type: str
-        :param history_size: The size of the history of the C-Node. The history starts filled with zeros.
+        :param history_size: Maximum number of execution observations retained by the C-Node.
         :type history_size: int
         :param track_competence: If True the competence is calculated from the history. If False, competence is always ``default_competence`` and the delta competence is 0.0. Defaults to True.
         :type track_competence: bool
         :param default_competence: Competence used when ``track_competence`` is False. Defaults to 1.0.
         :type default_competence: float
+        :param minimum_delta_samples: Minimum observations before delta competence is calculated.
+        :type minimum_delta_samples: int
         :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
         :type params: dict
         """
         super().__init__(name, class_name, node_type=node_type, **params)
         self.configure_activation_inputs(self.neighbors)
-        self.history = deque(np.zeros(history_size), maxlen=history_size)
+        self.history = deque(maxlen=history_size)
         self.track_competence = track_competence
         self.default_competence = default_competence
+        self.minimum_delta_samples = max(2, int(minimum_delta_samples))
         self.register_duplicate_parameters(
             history_size=history_size,
             track_competence=track_competence,
             default_competence=default_competence,
+            minimum_delta_samples=self.minimum_delta_samples,
         )
         self.calculate_metacognitive_parameters()
         self.metacognitive_params["confidence"] = 1.0
@@ -87,7 +101,9 @@ class CNode(CognitiveNode):
         if not self.track_competence:
             self.metacognitive_params["competence"] = self.default_competence
             self.metacognitive_params["delta_competence"] = 0.0
+            self.metacognitive_params["track_competence"] = False
         else:
+            self.metacognitive_params["track_competence"] = True
             self.get_logger().info(
                 f"Calculating metacognitive parameters for {self.node_type} {self.name}..."
             )
@@ -95,17 +111,28 @@ class CNode(CognitiveNode):
             history = np.asarray(self.history, dtype=float)
             sample_count = history.size
 
+            if sample_count == 0:
+                old_competence = 0.0
+                new_competence = 0.0
+                overall_competence = 0.0
+                delta_competence = 0.0
+            else:
+                if sample_count < self.minimum_delta_samples:
+                    delta_competence = 0.0
+                else:
+                    midpoint = sample_count // 2
+                    old_history = history[:midpoint]
+                    new_history = history[midpoint:]
 
-            midpoint = sample_count // 2
-            old_history = history[:midpoint]
-            new_history = history[midpoint:]
+                    old_competence = np.mean(old_history)
+                    new_competence = np.mean(new_history)
+                    delta_competence = new_competence - old_competence
 
-            old_competence = np.mean(old_history) if old_history.size > 0 else 0.0
-            new_competence = np.mean(new_history) if new_history.size > 0 else 0.0
-            overall_competence = np.mean(history)
-            delta_competence = (new_competence - old_competence)
+                overall_competence = np.mean(history)
+
             self.metacognitive_params["competence"] = overall_competence
             self.metacognitive_params["delta_competence"] = delta_competence
+            self.metacognitive_params["sample_count"] = int(sample_count)
 
             self.get_logger().info(
                 f"Competence: {overall_competence}, Delta Competence: {delta_competence} "
@@ -188,7 +215,7 @@ class CNodeWorldPreactive(CNode):
         :type class_name: str
         :param node_type: The type of the C-Node.
         :type node_type: str
-        :param history_size: The size of the history of the C-Node. The history starts filled with zeros.
+        :param history_size: Maximum number of execution observations retained by the C-Node.
         :type history_size: int
         :param track_competence: If True the competence is calculated from the history. If False, competence is always ``default_competence`` and the delta competence is 0.0. Defaults to True.
         :type track_competence: bool

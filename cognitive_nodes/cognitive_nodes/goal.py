@@ -939,7 +939,7 @@ class GoalLearnedSpace(GoalMotiven):
     Services added: ``goal/<name>/contains_space`` (:class:`cognitive_node_interfaces.srv.ContainsSpace`);
     ``send_space`` returns the space of the goal.
     """    
-    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, reward_threshold=0.8, reward_delta_threshold=0.5, low_reward_threshold=0.1, **params):
+    def __init__(self, name='goal', class_name='cognitive_nodes.goal.Goal', space_class=None, space=None, history_size=50, min_confidence=0.85, ltm_id=None, perception=None, space_parameters=None, reward_threshold=0.8, reward_delta_threshold=0.5, low_reward_threshold=0.1, hard_negative_threshold=0.1, hard_negative_radius=None, hard_negative_radius_fraction=0.5, **params):
         """
         Constructor of the GoalLearnedSpace class.
 
@@ -967,6 +967,12 @@ class GoalLearnedSpace(GoalMotiven):
         :type reward_delta_threshold: float
         :param low_reward_threshold: Expected reward above which a negative reward is recorded as a failure in the confidence history. Defaults to 0.1.
         :type low_reward_threshold: float
+        :param hard_negative_threshold: Minimum predicted Goal membership for a zero-reward state to be considered a contradictory hard negative. Defaults to 0.5.
+        :type hard_negative_threshold: float
+        :param hard_negative_radius: Optional fixed minimum distance from a confirmed positive before a zero-reward state is considered a hard negative. If None, derive it from stored data.
+        :type hard_negative_radius: float
+        :param hard_negative_radius_fraction: Fraction of the minimum positive-negative distance used as the hard-negative radius. Used only when hard_negative_radius is None. Defaults to 0.5.
+        :type hard_negative_radius_fraction: float
         :param params: Additional parameters passed to :class:`GoalMotiven`.
         :type params: dict
         """        
@@ -991,6 +997,9 @@ class GoalLearnedSpace(GoalMotiven):
             reward_threshold=reward_threshold,
             reward_delta_threshold=reward_delta_threshold,
             low_reward_threshold=low_reward_threshold,
+            hard_negative_threshold=hard_negative_threshold,
+            hard_negative_radius=hard_negative_radius,
+            hard_negative_radius_fraction=hard_negative_radius_fraction,
         )
         if space_class:
             # Forward the node's random_seed to the space (explicit
@@ -1026,6 +1035,9 @@ class GoalLearnedSpace(GoalMotiven):
         self.reward_threshold = reward_threshold
         self.reward_delta_threshold = reward_delta_threshold
         self.low_reward_threshold = low_reward_threshold
+        self.hard_negative_threshold = hard_negative_threshold
+        self.hard_negative_radius = hard_negative_radius
+        self.hard_negative_radius_fraction = hard_negative_radius_fraction
 
     def send_goal_space_callback(self, request, response):
         """
@@ -1069,12 +1081,14 @@ class GoalLearnedSpace(GoalMotiven):
         :type point: core.container.Container
         :param confidences: Indicates if each perception added is a point or an antipoint.
         :type confidences: numpy.ndarray
+        :return: Insertion positions returned by the space, or None if no space is defined.
         """
         if not self.space:
             self.get_logger().error("No space defined for the Goal. Cannot add points.")
             return
-        self.space.add_point(point, confidences)
+        added_positions = self.space.add_point(point, confidences)
         self.added_point = True
+        return added_positions
 
     async def get_reward(self, old_perception=None, perception=None, update_space=False):
         """
@@ -1107,7 +1121,10 @@ class GoalLearnedSpace(GoalMotiven):
             if self.linked_drive(): # If drive is linked, reward is obtained from the drive evaluation
                 reward = drive_reward
                 timestamp=self.reward_timestamp
-                if update_space and not isclose(reward, 0.0): # If there is a reward or the drive is activated, we can update the space with the perception and the reward
+                if update_space:
+                    # Update on zero reward too: a high-confidence state that is
+                    # reached without reward is useful evidence if it is outside
+                    # the confirmed positive region.
                     self.update_space(perception, reward)
                 # return reward, timestamp
 
@@ -1166,6 +1183,109 @@ class GoalLearnedSpace(GoalMotiven):
             self.get_logger().error(f"Drive {drive_name} not found in activation inputs.")
             return 0.0, self.get_clock().now().to_msg()
 
+    def _nearest_positive_distance(self, perceptions):
+        """
+        Return the minimum normalized distance from each perception to a confirmed
+        positive point in this Goal's space.
+        """
+        if not isinstance(self.space, PointBasedSpace) or self.space.size == 0:
+            return np.full(perceptions.size, np.inf, dtype=float)
+
+        positive_indexes = np.flatnonzero(
+            self.space.memberships.reshape(-1) > 0.0
+        )
+        if positive_indexes.size == 0:
+            return np.full(perceptions.size, np.inf, dtype=float)
+
+        positive_members = self.space.members[positive_indexes]
+        perception_values, _ = perceptions.read_numpy()
+
+        labels = perceptions.feature_labels
+        space_labels = self.space.feature_labels
+        common_indexes = [
+            (labels.index(label), space_labels.index(label))
+            for label in labels
+            if label in space_labels
+        ]
+        if not common_indexes:
+            return np.full(perceptions.size, np.inf, dtype=float)
+
+        perception_indexes = [pair[0] for pair in common_indexes]
+        positive_indexes = [pair[1] for pair in common_indexes]
+        candidate_values = perception_values[:, perception_indexes]
+        candidate_positive = positive_members[:, positive_indexes]
+
+        differences = (
+            candidate_values[:, np.newaxis, :]
+            - candidate_positive[np.newaxis, :, :]
+        )
+        distances = np.linalg.norm(differences, axis=2)
+        return distances.min(axis=1) / np.sqrt(candidate_values.shape[1])
+
+    def _hard_negative_radius_from_data(self):
+        """
+        Derive the hard-negative radius from stored positive and negative samples.
+
+        If both classes exist, use a fraction of the minimum normalized
+        positive-negative distance. Before enough negatives exist, use a fraction
+        of the median nearest-positive spacing so rewarded states are protected
+        from being immediately mined as antipoints.
+        """
+        if self.hard_negative_radius is not None:
+            return float(self.hard_negative_radius)
+
+        if not isinstance(self.space, PointBasedSpace) or self.space.size == 0:
+            return 0.0
+
+        memberships = self.space.memberships.reshape(-1)
+        members = self.space.members
+        positive_indexes = np.flatnonzero(memberships > 0.0)
+        negative_indexes = np.flatnonzero(memberships <= 0.0)
+        if positive_indexes.size == 0:
+            return 0.0
+
+        positive_members = members[positive_indexes]
+        feature_count = positive_members.shape[1]
+        if feature_count == 0:
+            return 0.0
+
+        if positive_indexes.size > 1:
+            differences = (
+                positive_members[:, np.newaxis, :]
+                - positive_members[np.newaxis, :, :]
+            )
+            distances = np.linalg.norm(differences, axis=2)
+            np.fill_diagonal(distances, np.inf)
+            nearest_positive_spacing = distances.min(axis=1)
+            nearest_positive_spacing = nearest_positive_spacing[
+                np.isfinite(nearest_positive_spacing)
+            ]
+        else:
+            nearest_positive_spacing = np.array([], dtype=float)
+
+        fraction = max(
+            0.0,
+            min(1.0, float(self.hard_negative_radius_fraction)),
+        )
+
+        if negative_indexes.size > 0:
+            negative_members = members[negative_indexes]
+            differences = (
+                positive_members[:, np.newaxis, :]
+                - negative_members[np.newaxis, :, :]
+            )
+            cross_distances = np.linalg.norm(differences, axis=2)
+            minimum_cross_distance = float(cross_distances.min())
+            return fraction * minimum_cross_distance / np.sqrt(feature_count)
+
+        if nearest_positive_spacing.size > 0:
+            median_positive_spacing = float(
+                np.median(nearest_positive_spacing)
+            )
+            return fraction * median_positive_spacing / np.sqrt(feature_count)
+
+        return 0.0
+
     def update_space(self, perceptions, rewards):
         """
         Update the space of the goal based on the reward obtained and the expected reward.
@@ -1200,10 +1320,6 @@ class GoalLearnedSpace(GoalMotiven):
                 f"Number of perceptions ({perceptions.size}) and rewards ({rewards.size}) do not match."
             )
 
-        # The updates are performed according to the expected reward and the actual reward obtained. 
-        # All positively rewarded perceptions are added to the space
-        # Negatively rewarded perceptions are added to the space if their expected reward is above a low threshold, indicating that they were expected to be positive but were not.
-
         expected_rewards = self.get_expected_reward(perceptions)
         if np.isscalar(expected_rewards):
             expected_rewards = np.asarray([expected_rewards], dtype=float)
@@ -1219,21 +1335,82 @@ class GoalLearnedSpace(GoalMotiven):
         confidences[positive_reward] = 1.0
         confidences[negative_reward] = -1.0
 
-        # Perceptions with zero confidence correspond to the negatively rewarded perceptions that were expected to be negative, and are not added to the space.
+        # Zero reward is not a general negative. It becomes an antipoint only
+        # when the model predicts Goal membership but the state is outside the
+        # confirmed positive region. This preserves a rewarded state that remains
+        # in place: repeated observations of it receive zero reward but stay near
+        # a confirmed positive, so they are not turned into antipoints.
+        zero_reward = np.isclose(rewards, 0.0)
+        positive_distances = self._nearest_positive_distance(perceptions)
+        hard_negative_radius = self._hard_negative_radius_from_data()
+        hard_negative = (
+            zero_reward
+            & (expected_rewards >= self.hard_negative_threshold)
+            & (positive_distances > hard_negative_radius)
+        )
+        confidences[hard_negative] = -1.0
+
         nonzero_mask = ~np.isclose(confidences, 0.0)
+        for idx in range(perceptions.size):
+            if positive_reward[idx]:
+                reason = "positive reward; stored as a point"
+            elif negative_reward[idx]:
+                if expected_rewards[idx] > 0.0:
+                    reason = "negative reward; antipoint passes the space prediction filter"
+                else:
+                    reason = "negative reward; antipoint will be filtered because predicted probability is 0"
+            elif hard_negative[idx]:
+                reason = (
+                    "zero reward; predicted membership exceeds hard-negative threshold "
+                    f"and distance {positive_distances[idx]:.6g} exceeds radius "
+                    f"{hard_negative_radius:.6g}"
+                )
+            else:
+                reason = (
+                    "zero reward; not a hard negative "
+                    f"(predicted={expected_rewards[idx]:.6g}, "
+                    f"threshold={self.hard_negative_threshold:.6g}, "
+                    f"distance={positive_distances[idx]:.6g}, "
+                    f"radius={hard_negative_radius:.6g})"
+                )
+            submitted = bool(nonzero_mask[idx])
+            self.get_logger().info(
+                f"Space update for {self.name}, sample {idx}: "
+                f"{'submitted' if submitted else 'not submitted'}; "
+                f"reward={rewards[idx]:.6g}, predicted={expected_rewards[idx]:.6g}, "
+                f"confidence={confidences[idx]:.1f}; {reason}."
+            )
+
         if np.any(nonzero_mask):
             filtered_perceptions = Container.from_dataarray(
                 perceptions.read(ordered=True).isel(sample=nonzero_mask),
                 container_type=perceptions.container_type,
                 name=perceptions.name,
             )
-            self._add_points(filtered_perceptions, confidences[nonzero_mask])
+            added_positions = self._add_points(
+                filtered_perceptions,
+                confidences[nonzero_mask],
+            )
+            if isinstance(added_positions, (int, np.integer)) and added_positions == -1:
+                result = "space rejected all submitted samples"
+            elif isinstance(added_positions, np.ndarray) and added_positions.size == 0:
+                result = "space rejected all submitted samples"
+            elif np.isscalar(added_positions):
+                result = f"space returned insertion position {added_positions}"
+            else:
+                result = f"space returned insertion positions {np.asarray(added_positions).tolist()}"
+            self.get_logger().info(
+                f"Space insertion result for {self.name}: "
+                f"{int(np.count_nonzero(nonzero_mask))} sample(s) submitted; {result}."
+            )
 
         for idx in np.flatnonzero(positive_reward):
             self.history.appendleft(bool(positive_expected[idx])) # In positively rewarded cases, we consider the confidence to be True if the expected reward was also positive.
         for idx in np.flatnonzero(negative_reward):
             if negative_not_expected[idx]:
                 self.history.appendleft(False)
+        for idx in np.flatnonzero(hard_negative):
+            self.history.appendleft(False)
 
         space_configured_penalty = 1.0 if self.space.configured else 0.5
         self.confidence = (sum(self.history) / self.history.maxlen) * space_configured_penalty
