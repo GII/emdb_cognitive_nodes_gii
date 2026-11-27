@@ -1,0 +1,1657 @@
+"""Knowledge-reuse intrinsic motivation and its ROS-free test harness.
+
+The motivation detects goals whose context could reuse knowledge already learned in another domain, and copies it:
+
+- :class:`DriveKnowledgeReuse` analyzes the LTM, looks for pairs of goals of the same Drive that share a Policy and belong to different domains
+  (World Models), where one of them heads a deep chain of goals and the other has none. It compares the P-Nodes of both with the activations of the
+  mature one on the points of the other, and publishes, through a service, the instructions to copy the chain (YAML).
+- :class:`PolicyKnowledgeReuse` reads those instructions and duplicates and reconnects the nodes of the chain.
+
+Outside of ROS (when ``rclpy`` or the interfaces cannot be imported) the module defines empty base classes, so that the LTM analysis
+(:func:`build_goal_chains`) and the test harness at the end of the file (:class:`DummyKnowledgeReuseNode`, :class:`KnowledgeReuseComparisonTest`,
+``main`` and ``comparison_main``) can be run without ROS.
+"""
+
+import argparse
+import asyncio
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+try:
+    from cognitive_nodes.drive import Drive
+    from cognitive_nodes.policy import Policy
+    from cognitive_nodes.utils import LTMSubscription
+    from core.container import Container
+    from core_interfaces.srv import SetChangesTopic
+    from core.service_client import ServiceClientAsync
+    from cognitive_node_interfaces.msg import SuccessRate
+    from cognitive_node_interfaces.srv import (
+        GetActivation,
+        DuplicateNode,
+        GetReusableKnowledge,
+        SendSpace,
+        LoadSpace,
+    )
+    from core_interfaces.srv import DeleteNode
+except ModuleNotFoundError as error:
+    if error.name not in {"rclpy", "cognitive_node_interfaces"}:
+        raise
+
+    class Drive:
+        """Fallback base that keeps the schema harness ROS-free."""
+
+    class Policy:
+        """Fallback base that keeps the schema harness ROS-free."""
+
+    class LTMSubscription:
+        """Fallback mixin that keeps the schema harness ROS-free."""
+
+    Container = None
+    ServiceClientAsync = None
+    GetReusableKnowledge = None
+    SendSpace = None
+    LoadSpace = None
+    GetActivation = None
+    DuplicateNode = None
+    SetChangesTopic = None
+    SuccessRate = None
+
+
+CHAIN_DEPTH_THRESHOLD = 3
+
+
+# ---------------------------------------------------------------------------
+# LTM schema helpers
+# ---------------------------------------------------------------------------
+
+def _nodes(ltm_dump, node_type):
+    """Return a node-type section as ``{name: data}`` for either LTM shape."""
+    section = (ltm_dump or {}).get(node_type, {})
+    if isinstance(section, dict):
+        return section
+    if isinstance(section, list):
+        return {
+            node.get("name"): node
+            for node in section
+            if isinstance(node, dict) and node.get("name")
+        }
+    return {}
+
+
+def _neighbor_names(node_data, node_type=None):
+    """Extract neighbor names, optionally restricted to one node type."""
+    if not isinstance(node_data, dict):
+        return []
+    neighbors = node_data.get("neighbors", [])
+    if not isinstance(neighbors, list):
+        return []
+    return [
+        neighbor["name"]
+        for neighbor in neighbors
+        if isinstance(neighbor, dict)
+        and neighbor.get("name")
+        and (node_type is None or neighbor.get("node_type") == node_type)
+    ]
+
+
+def _resolve_alias(name, aliases, replacement_aliases=None):
+    """Resolve duplicate and replacement aliases without losing chain hops."""
+    aliases = aliases or {}
+    replacement_aliases = replacement_aliases or {}
+    resolved = name
+    visited = set()
+    while resolved not in visited:
+        visited.add(resolved)
+        next_name = replacement_aliases.get(resolved)
+        if next_name is None:
+            next_name = aliases.get(resolved)
+        if next_name is None or next_name == resolved:
+            break
+        resolved = next_name
+    return resolved
+
+
+def _goal_depth(goal_name, downstream_goals, active_path=None):
+    """Return the longest downstream goal chain rooted at ``goal_name``."""
+    active_path = set() if active_path is None else active_path
+    if goal_name in active_path:
+        return 0
+    next_path = active_path | {goal_name}
+    downstream = downstream_goals.get(goal_name, ())
+    return 1 + max(
+        (_goal_depth(goal, downstream_goals, next_path) for goal in downstream),
+        default=0,
+    )
+
+
+def build_goal_chains(ltm_dump):
+    """Build the public knowledge-reuse schema from an LTM state dump.
+
+    For each Drive that is a neighbor of a Goal, the schema lists the contexts (C-Nodes) of those Goals. Each field in a drive's schema is aligned by
+    index: ``goals``, ``domains``, ``policies``, ``pnodes``, and ``depth`` describe the same
+    contextual chain entry. There is one entry for each combination of Goal, World Model and Policy of a C-Node (``None`` where the C-Node has none).
+    The Policies are the ones that are neighbors of the C-Node or that have the C-Node as neighbor, the P-Node is the first one of the C-Node and the depth of an entry is the length
+    of the longest chain of Goals that start from its Goal, i.e. that have it as neighbor directly or indirectly, counting the Goal itself (1 if there are none).
+
+    :param ltm_dump: LTM state, with a section for each node type, either as ``{name: data}`` or as a list of nodes with a ``name``.
+    :type ltm_dump: dict
+    :return: For each Drive name, a dictionary with the aligned lists ``goals``, ``domains``, ``policies``, ``pnodes`` and ``depth``.
+    :rtype: dict
+    """
+    goals = _nodes(ltm_dump, "Goal")
+    cnodes = _nodes(ltm_dump, "CNode")
+    policies = _nodes(ltm_dump, "Policy")
+
+    upstream_goals = {
+        goal_name: _neighbor_names(goal_data, "Goal")
+        for goal_name, goal_data in goals.items()
+    }
+    downstream_goals = defaultdict(list)
+    for goal_name, upstream in upstream_goals.items():
+        for upstream_goal in upstream:
+            downstream_goals[upstream_goal].append(goal_name)
+    depths = {
+        goal_name: _goal_depth(goal_name, downstream_goals)
+        for goal_name in goals
+    }
+
+    policies_by_cnode = defaultdict(list)
+    for policy_name, policy_data in policies.items():
+        for cnode_name in _neighbor_names(policy_data, "CNode"):
+            policies_by_cnode[cnode_name].append(policy_name)
+
+    chains_by_drive = defaultdict(
+        lambda: {
+            "goals": [],
+            "domains": [],
+            "policies": [],
+            "pnodes": [],
+            "depth": [],
+        }
+    )
+    seen = set()
+    for cnode_name, cnode_data in cnodes.items():
+        cnode_goals = _neighbor_names(cnode_data, "Goal")
+        domains = _neighbor_names(cnode_data, "WorldModel")
+        pnodes = _neighbor_names(cnode_data, "PNode")
+        cnode_policies = _neighbor_names(cnode_data, "Policy")
+        cnode_policies.extend(policies_by_cnode.get(cnode_name, ()))
+
+        for goal_name in cnode_goals:
+            goal_drives = _neighbor_names(goals.get(goal_name), "Drive")
+            if not goal_drives:
+                continue
+            for drive_name in goal_drives:
+                for domain in domains or [None]:
+                    for policy_name in cnode_policies or [None]:
+                        entry_key = (drive_name, goal_name, domain, policy_name)
+                        if entry_key in seen:
+                            continue
+                        seen.add(entry_key)
+                        chains = chains_by_drive[drive_name]
+                        chains["goals"].append(goal_name)
+                        chains["domains"].append(domain)
+                        chains["policies"].append(policy_name)
+                        chains["pnodes"].append(pnodes[0] if pnodes else None)
+                        chains["depth"].append(depths.get(goal_name, 1))
+
+    return dict(chains_by_drive)
+
+
+def _find_candidates(goal_chains, new_goals, depth_threshold):
+    """Find cross-domain goal pairs sharing a policy and a deep source chain."""
+    candidates = []
+    for drive_name, chains in goal_chains.items():
+        entries = list(
+            zip(
+                chains["goals"],
+                chains["domains"],
+                chains["policies"],
+                chains["pnodes"],
+                chains["depth"],
+            )
+        )
+        for goal, domain, policy, pnode, depth in entries:
+            if goal not in new_goals or policy is None:
+                continue
+            for (
+                candidate_goal,
+                candidate_domain,
+                candidate_policy,
+                candidate_pnode,
+                candidate_depth,
+            ) in entries:
+                if (
+                    candidate_goal != goal
+                    and candidate_policy == policy
+                    and candidate_domain != domain
+                    and depth - candidate_depth >= depth_threshold
+                    and candidate_depth == 1 # TODO: Current instuctions only support copying the complete chain. If the candidate depth is greater than 1, the instructions will not be valid.
+                                             # This is a temporary restriction until the instruction generation is updated to support copying partial chains.
+                ):
+                    candidates.append(
+                        {
+                            "drive": drive_name,
+                            "goal": goal,
+                            "domain": domain,
+                            "policy": policy,
+                            "pnode": pnode,
+                            "candidate_goal": candidate_goal,
+                            "candidate_domain": candidate_domain,
+                            "candidate_pnode": candidate_pnode,
+                            "candidate_depth": candidate_depth,
+                        }
+                    )
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-reuse drive
+# ---------------------------------------------------------------------------
+
+class DriveKnowledgeReuse(Drive, LTMSubscription):
+    """
+    Drive activated when a newly observed goal can reuse a deep chain.
+
+    The node follows the LTM (``read_ltm``) and, each time the relevant topology changes, looks for reuse candidates: pairs of Goals of the same Drive that
+    share a Policy and have different domains, where the source Goal heads a chain at least ``depth_threshold`` deeper than the target Goal, which must have depth 1.
+    Only the complete chain can be copied for now.
+
+    For each candidate it requests the space of the P-Node of the target (``pnode/<name>/send_space``); if it has fewer than ``min_points`` positive or
+    negative points the candidate waits until the P-Node reports a new success rate. Otherwise, the activations that the P-Node of the source gives to the
+    points of the target are compared with their confidences (mean squared error), and for each target Goal the source with the lowest error is selected.
+    For the selected candidates the instructions to copy the chain of the source are generated, including replacement of the target P-Node space with the
+    selected source P-Node is cloned, then adapted with the target P-Node's
+    data and connected in place of the target P-Node.
+
+    The instructions can be requested with the ``drive/<name>/get_reusable_knowledge`` service
+    (:class:`cognitive_node_interfaces.srv.GetReusableKnowledge`), which returns a YAML string with two keys: ``instructions``
+    (a list with, for each selection, ``source_goal``, ``target_goal``, ``aliases``,
+    ``pnode_replacements``, ``root_neighbors`` and the ``nodes`` to copy: Goals,
+    C-Nodes, P-Nodes and Policies, each with its name, class and neighbors) and
+    ``candidates``. The evaluation of the drive is 1.0 while there are selected
+    candidates and 0.0 otherwise.
+    """
+
+    def __init__(
+        self,
+        name="knowledge_reuse_drive",
+        class_name="cognitive_nodes.drive.Drive",
+        ltm_id=None,
+        depth_threshold=CHAIN_DEPTH_THRESHOLD,
+        min_points=4,
+        **params,
+    ):
+        """
+        Constructor of the DriveKnowledgeReuse class.
+
+        :param name: Name of the node.
+        :type name: str
+        :param class_name: The name of the base Drive class, defaults to "cognitive_nodes.drive.Drive".
+        :type class_name: str
+        :param ltm_id: Id of the LTM that includes the nodes. It is required.
+        :type ltm_id: str
+        :param depth_threshold: Minimum difference between the depth of the source chain and the depth of the target for a pair of Goals to be a candidate. Defaults to 3.
+        :type depth_threshold: int
+        :param min_points: Minimum number of positive and negative points that the space of the target P-Node must have to evaluate a candidate. Defaults to 4.
+        :type min_points: int
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
+        :raises ValueError: If ``ltm_id`` is not provided, ``depth_threshold`` is negative or ``min_points`` is less than 1.
+        """
+        super().__init__(name, class_name, **params)
+        if ltm_id is None:
+            raise ValueError("No LTM input was provided.")
+        if depth_threshold < 0:
+            raise ValueError("depth_threshold must be non-negative.")
+        if min_points < 1:
+            raise ValueError("min_points must be at least one.")
+
+        self.LTM_id = ltm_id
+        self.depth_threshold = depth_threshold
+        self.min_points = min_points
+        self.goal_chains = {}
+        self.reuse_candidates = []
+        self.reusable_knowledge = {"instructions": [], "candidates": []}
+        self._ltm_dump = {}
+        self._known_goals = set()
+        self._ltm_signature = None
+        self._candidate_cache = []
+        self._space_data_cache = {}
+        self._score_cache = {}
+        self._pending_pnode_subscriptions = {}
+        self._pending_pnode_candidates = set()
+        self.get_reusable_knowledge_service = self.create_service(
+            GetReusableKnowledge,
+            f"drive/{name}/get_reusable_knowledge",
+            self.get_reusable_knowledge_callback,
+            callback_group=self.cbgroup_server,
+        )
+        self.configure_ltm_subscription(ltm_id, self.cbgroup_activation)
+
+    async def read_ltm(self, ltm_dump):
+        """Refresh the schema and identify newly eligible reuse candidates.
+
+        Nothing is done if the topology that matters for reuse (Goals, C-Nodes, Policies, World Models and P-Nodes) has not changed. Otherwise,
+        the chains are rebuilt, the candidates are searched among all the Goals and the instructions are regenerated.
+        This is a coroutine and must be awaited if called directly.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        """
+        goal_chains = build_goal_chains(ltm_dump)
+        signature = self._knowledge_signature(ltm_dump, goal_chains)
+        if signature == self._ltm_signature:
+            self.get_logger().debug("Knowledge reuse: unchanged LTM state; skipping refresh.")
+            return
+        self._ltm_signature = signature
+        self._ltm_dump = ltm_dump
+        self.goal_chains = goal_chains
+        current_goals = {
+            goal
+            for chains in self.goal_chains.values()
+            for goal in chains["goals"]
+        }
+        self._known_goals = current_goals
+        # Re-evaluate all contexts so space scores and YAML instructions stay
+        # current even when an existing chain or P-Node changes.
+        candidates = self._find_candidates(current_goals)
+        self._candidate_cache = candidates
+        self.get_logger().info(
+            f"Knowledge reuse: LTM refresh found {len(current_goals)} goals and "
+            f"{len(candidates)} reuse candidates."
+        )
+        active_targets = {
+            candidate["candidate_pnode"]
+            for candidate in candidates
+            if candidate["candidate_pnode"]
+        }
+        for pnode_name in list(self._pending_pnode_candidates - active_targets):
+            self._pending_pnode_candidates.discard(pnode_name)
+            self._unsubscribe_pending_pnode(pnode_name)
+        self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
+        self.reuse_candidates = self.reusable_knowledge["candidates"]
+        self.get_logger().info(
+            "Knowledge reuse: selected "
+            f"{len(self.reuse_candidates)} candidates and generated "
+            f"{self._instruction_count(self.reusable_knowledge)} "
+            "instructions."
+        )
+
+    @staticmethod
+    def _knowledge_signature(ltm_dump, goal_chains):
+        """Build a stable signature for topology relevant to reuse."""
+        return (
+            yaml.safe_dump(
+                {
+                    "Goal": _nodes(ltm_dump, "Goal"),
+                    "CNode": _nodes(ltm_dump, "CNode"),
+                    "Policy": _nodes(ltm_dump, "Policy"),
+                    "WorldModel": _nodes(ltm_dump, "WorldModel"),
+                    "PNode": _nodes(ltm_dump, "PNode"),
+                    "chains": goal_chains,
+                },
+                sort_keys=True,
+            )
+        )
+
+    def _subscribe_pending_pnode(self, pnode_name):
+        if pnode_name in self._pending_pnode_subscriptions:
+            return
+        self.get_logger().info(
+            f"Knowledge reuse: waiting for more points from candidate P-Node "
+            f"{pnode_name}."
+        )
+        self._pending_pnode_subscriptions[pnode_name] = self.create_subscription(
+            SuccessRate,
+            f"/pnode/{pnode_name}/success_rate",
+            self._pending_pnode_success_callback,
+            1,
+            callback_group=self.cbgroup_activation,
+        )
+
+    def _unsubscribe_pending_pnode(self, pnode_name):
+        subscription = self._pending_pnode_subscriptions.pop(pnode_name, None)
+        if subscription is not None:
+            self.destroy_subscription(subscription)
+            self.get_logger().info(
+                f"Knowledge reuse: candidate P-Node {pnode_name} reached the "
+                "minimum point requirement."
+            )
+
+    async def _pending_pnode_success_callback(self, msg):
+        pnode_name = getattr(msg, "node_name", None)
+        if pnode_name not in self._pending_pnode_candidates:
+            return
+        self.get_logger().debug(
+            f"Knowledge reuse: received success-rate update for pending "
+            f"P-Node {pnode_name}; retrying candidate selection."
+        )
+        self._space_data_cache.pop(pnode_name, None)
+        self._score_cache = {
+            key: value
+            for key, value in self._score_cache.items()
+            if key[3] != pnode_name
+        }
+        candidates = self._candidate_cache
+        self.reusable_knowledge = await self._select_reusable_knowledge(candidates)
+        self.reuse_candidates = self.reusable_knowledge["candidates"]
+        self.get_logger().info(
+            "Knowledge reuse: selected "
+            f"{len(self.reuse_candidates)} candidates and generated "
+            f"{self._instruction_count(self.reusable_knowledge)} "
+            "instructions."
+        )
+
+    async def _request_space_data(self, pnode_name):
+        service_name = f"pnode/{pnode_name}/send_space"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(
+                self, SendSpace, service_name, self.cbgroup_client
+            )
+        response = await self.node_clients[service_name].send_request_async()
+        return Container.from_msg(response.space)
+
+    async def _request_activations(self, pnode_name, space_data):
+        """Evaluate candidate points with the mature P-Node model."""
+        service_name = f"cognitive_node/{pnode_name}/get_activation"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClientAsync(
+                self, GetActivation, service_name, self.cbgroup_client
+            )
+        response = await self.node_clients[service_name].send_request_async(
+            perception=space_data.to_msg()
+        )
+        return np.asarray(response.activation, dtype=float).reshape(-1)
+
+    @staticmethod
+    def _activation_mse(activations, memberships):
+        """Compare mature-model activations with candidate memberships in [0, 1]."""
+        activations = np.asarray(activations, dtype=float).reshape(-1)
+        expected = np.clip(
+            (np.asarray(memberships, dtype=float).reshape(-1) + 1.0) / 2.0,
+            0.0,
+            1.0,
+        )
+        if activations.size == 0 or activations.size != expected.size:
+            return float("inf")
+        return float(np.mean((activations - expected) ** 2))
+
+    async def _select_reusable_knowledge(self, candidates):
+        """Return finalized instructions and the best source per target goal.
+
+        ``goal`` identifies the deeper source chain to copy, while
+        ``candidate_goal`` identifies the shallow target chain receiving the
+        duplicated knowledge.
+        """
+        selected = {}
+        for candidate in candidates:
+            target = candidate["candidate_pnode"]
+            mature = candidate["pnode"]
+            if not target or not mature:
+                continue
+            try:
+                if target not in self._space_data_cache:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: requesting space for candidate P-Node {target}."
+                    )
+                    self._space_data_cache[target] = await self._request_space_data(target)
+                else:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: using cached space for candidate P-Node {target}."
+                    )
+                target_space_data = self._space_data_cache[target]
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to read P-Node spaces for knowledge reuse: {error}"
+                )
+                continue
+            if target_space_data is None:
+                continue
+            positive_points, negative_points = self._space_class_counts(
+                target_space_data
+            )
+            if (
+                positive_points < self.min_points
+                or negative_points < self.min_points
+            ):
+                self.get_logger().info(
+                    f"Knowledge reuse: candidate P-Node {target} has "
+                    f"{positive_points}/{self.min_points} positive and "
+                    f"{negative_points}/{self.min_points} negative points."
+                )
+                self._pending_pnode_candidates.add(target)
+                self._subscribe_pending_pnode(target)
+                continue
+            self._pending_pnode_candidates.discard(target)
+            self._unsubscribe_pending_pnode(target)
+            space_data_signature = self._space_data_signature(target_space_data)
+            score_key = (
+                candidate["goal"],
+                candidate["candidate_goal"],
+                mature,
+                target,
+                space_data_signature,
+            )
+            if score_key in self._score_cache:
+                scored_candidate = self._score_cache[score_key]
+                self.get_logger().debug(
+                    f"Knowledge reuse: using cached score for mature P-Node "
+                    f"{mature} and candidate P-Node {target}: "
+                    f"{scored_candidate['error']:.6f}."
+                )
+                target_goal = scored_candidate["candidate_goal"]
+                current = selected.get(target_goal)
+                if current is None or scored_candidate["error"] < current["error"]:
+                    selected[target_goal] = scored_candidate
+                continue
+            try:
+                activations = await self._request_activations(mature, target_space_data)
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to evaluate candidate points with mature P-Node "
+                    f"{mature}: {error}"
+                )
+                continue
+            scored_candidate = dict(candidate)
+            scored_candidate["error"] = self._activation_mse(
+                activations, target_space_data.read().sel(features=["confidence"]).values.reshape(-1)
+            )
+            if not np.isfinite(scored_candidate["error"]):
+                self.get_logger().warning(
+                    f"Knowledge reuse: discarded non-finite score for mature "
+                    f"P-Node {mature} and candidate P-Node {target}."
+                )
+                continue
+            self.get_logger().info(
+                f"Knowledge reuse: compared mature P-Node {mature} with "
+                f"candidate P-Node {target}; MSE={scored_candidate['error']:.6f}."
+            )
+            self._score_cache[score_key] = scored_candidate
+            target_goal = scored_candidate["candidate_goal"]
+            current = selected.get(target_goal)
+            if current is None or scored_candidate["error"] < current["error"]:
+                if current is not None:
+                    self.get_logger().debug(
+                        f"Knowledge reuse: replacing source goal "
+                        f"{current['goal']} for target goal {target_goal}; "
+                        f"MSE improved from {current['error']:.6f} to "
+                        f"{scored_candidate['error']:.6f}."
+                    )
+                selected[target_goal] = scored_candidate
+        self.get_logger().info(
+            f"Knowledge reuse: finalized {len(selected)} target goal selections."
+        )
+        return self._build_instructions(selected.values())
+
+    @staticmethod
+    def _space_data_signature(space_data: Container):
+        """Identify the point data used for a cached mature-model score."""
+        data = space_data.read().values.tobytes()
+        return (
+            int(space_data.size),
+            data,
+        )
+
+    @staticmethod
+    def _space_class_counts(space_data: Container):
+        """Return the positive and negative sample counts in a P-Node space."""
+        confidences = (
+            space_data.read()
+            .sel(features=["confidence"])
+            .values.reshape(-1)
+        )
+        return (
+            int(np.count_nonzero(confidences > 0)),
+            int(np.count_nonzero(confidences < 0)),
+        )
+
+    def _build_instructions(self, selected_candidates):
+        """Serialize selected source chains using experiment YAML conventions.
+
+        One entry is generated per selected candidate, so a source chain
+        reused for several target goals is copied once for each of them. The
+        source goal itself is not copied: its ``aliases`` map the source goal,
+        its P-Node and its domain (WorldModel) to the target goal, P-Node and
+        domain, so the copied nodes are attached to the target context instead
+        of the source one. The candidate P-Node is replaced by a duplicate of the
+        mature P-Node, and ``root_neighbors`` records the link from that replacement
+        to the first copied Goal.
+        """
+        instructions = []
+        policies = _nodes(self._ltm_dump, "Policy")
+        selected_candidates = list(selected_candidates)
+        for candidate in selected_candidates:
+            self.get_logger().debug(
+                f"Knowledge reuse: generating instructions by copying the chain "
+                f"from source goal {candidate['goal']} to target goal "
+                f"{candidate['candidate_goal']}."
+            )
+            nodes = {"Goal": [], "CNode": [], "PNode": [], "Policy": []}
+            duplicated_goals = self._downstream_chain(candidate["goal"])[1:]
+            for goal_name in duplicated_goals:
+                goal_data = _nodes(self._ltm_dump, "Goal").get(goal_name, {})
+                self._add_instruction(nodes, "Goal", goal_name, goal_data)
+                for cnode_name, cnode_data in self._context_cnodes(goal_name):
+                    self._add_instruction(
+                        nodes, "CNode", cnode_name, cnode_data
+                    )
+                    for policy_name, policy_data in policies.items():
+                        if cnode_name in _neighbor_names(policy_data, "CNode"):
+                            self._add_instruction(
+                                nodes, "Policy", policy_name, policy_data
+                            )
+                    for pnode_name in _neighbor_names(cnode_data, "PNode"):
+                        pnode_data = _nodes(self._ltm_dump, "PNode").get(
+                            pnode_name, {}
+                        )
+                        self._add_instruction(
+                            nodes, "PNode", pnode_name, pnode_data
+                        )
+            aliases = {candidate["goal"]: candidate["candidate_goal"]}
+            if candidate["domain"] and candidate["candidate_domain"]:
+                aliases[candidate["domain"]] = candidate["candidate_domain"]
+            if candidate["pnode"] and candidate["candidate_pnode"]:
+                aliases[candidate["pnode"]] = candidate["candidate_pnode"]
+            pnode_replacements = []
+            if candidate["pnode"] and candidate["candidate_pnode"]:
+                candidate_data = _nodes(self._ltm_dump, "PNode").get(
+                    candidate["candidate_pnode"], {}
+                )
+                incoming = []
+                for node_type in ("Goal", "CNode", "PNode", "Policy"):
+                    for node_name, node_data in _nodes(
+                        self._ltm_dump, node_type
+                    ).items():
+                        if candidate["candidate_pnode"] in _neighbor_names(node_data):
+                            incoming.append(
+                                {"name": node_name, "node_type": node_type}
+                            )
+                pnode_replacements.append(
+                    {
+                        "source": candidate["pnode"],
+                        "candidate": candidate["candidate_pnode"],
+                        "incoming": incoming,
+                        "outgoing": candidate_data.get("neighbors", []),
+                    }
+                )
+            root_neighbors = []
+            if duplicated_goals and candidate["candidate_pnode"]:
+                root_neighbors.append(
+                    {
+                        "source": {
+                            "name": candidate["candidate_pnode"],
+                            "node_type": "PNode",
+                        },
+                        "neighbor": {
+                            "name": duplicated_goals[0],
+                            "node_type": "Goal",
+                        },
+                    }
+                )
+            instructions.append(
+                {
+                    "source_goal": candidate["goal"],
+                    "target_goal": candidate["candidate_goal"],
+                    "aliases": aliases,
+                    "pnode_replacements": pnode_replacements,
+                    "root_neighbors": root_neighbors,
+                    "nodes": nodes,
+                }
+            )
+        return {"instructions": instructions, "candidates": selected_candidates}
+
+    @staticmethod
+    def _instruction_count(reusable_knowledge):
+        """Return the number of node instructions over all copy entries."""
+        return sum(
+            len(nodes)
+            for entry in reusable_knowledge["instructions"]
+            for nodes in entry["nodes"].values()
+        )
+
+    def _downstream_chain(self, root_goal):
+        """Return all downstream goals, including the root, without cycles."""
+        upstream_goals = {
+            name: _neighbor_names(data, "Goal")
+            for name, data in _nodes(self._ltm_dump, "Goal").items()
+        }
+        downstream_goals = defaultdict(list)
+        for goal_name, upstream in upstream_goals.items():
+            for upstream_goal in upstream:
+                downstream_goals[upstream_goal].append(goal_name)
+
+        chain = []
+        visited = set()
+
+        def visit(goal_name):
+            if goal_name in visited:
+                return
+            visited.add(goal_name)
+            chain.append(goal_name)
+            for downstream_goal in downstream_goals.get(goal_name, ()):
+                visit(downstream_goal)
+
+        visit(root_goal)
+        return chain
+
+    def _context_cnodes(self, goal_name):
+        return [
+            (cnode_name, cnode_data)
+            for cnode_name, cnode_data in _nodes(self._ltm_dump, "CNode").items()
+            if goal_name in _neighbor_names(cnode_data, "Goal")
+        ]
+
+    @staticmethod
+    def _add_instruction(instructions, node_type, name, data):
+        if any(item["name"] == name for item in instructions[node_type]):
+            return
+        instructions[node_type].append(
+            {
+                "name": name,
+                "class_name": data.get("class_name", ""),
+                "parameters": {"neighbors": data.get("neighbors", [])},
+            }
+        )
+
+    def get_reusable_knowledge_callback(self, request, response):
+        """
+        Callback that provides the reusable knowledge found.
+
+        :param request: Empty request.
+        :type request: cognitive_node_interfaces.srv.GetReusableKnowledge.Request
+        :param response: Response with the instructions: a YAML string with the keys ``instructions`` and ``candidates``.
+        :type response: cognitive_node_interfaces.srv.GetReusableKnowledge.Response
+        :return: Response with the instructions.
+        :rtype: cognitive_node_interfaces.srv.GetReusableKnowledge.Response
+        """
+        response.instructions = yaml.safe_dump(
+            self.reusable_knowledge,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        return response
+
+    def _find_candidates(self, new_goals):
+        return _find_candidates(
+            self.goal_chains,
+            new_goals,
+            self.depth_threshold,
+        )
+
+    def evaluate(self, perception=None):
+        """Activate the drive when at least one reuse candidate is available: the evaluation is 1.0 if there is any and 0.0 otherwise.
+
+        :param perception: Not used.
+        :type perception: core.container.Container or None
+        :return: The evaluation and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """
+        self.evaluation.evaluation = float(bool(self.reuse_candidates))
+        self.evaluation.timestamp = self.get_clock().now().to_msg()
+        return self.evaluation
+
+
+# Keep the shorter name available for configurations that name drives by their
+# intrinsic motivation instead of by their implementation detail.
+KnowledgeReuseDrive = DriveKnowledgeReuse
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-reuse policy
+# ---------------------------------------------------------------------------
+
+class PolicyKnowledgeReuse(Policy):
+    """
+    Duplicate and reconnect the node chain returned by the reuse drive.
+
+    When executed, it requests the instructions from the drive and, for each entry, duplicates the Goals, P-Nodes and C-Nodes of the source chain
+    (``cognitive_node/<name>/duplicate_node`` service, without neighbors) and then reconnects the copies: the neighbors of each copy are those of the original,
+    replaced by their copies or by the ``aliases`` of the entry (which attach the copies to the target Goal, P-Node and domain). The Policies of the chain are not duplicated:
+    the copies of their C-Nodes are added as neighbors. The selected mature P-Node is duplicated, then adapted with the candidate P-Node data. While the nodes are copied,
+    the changes topic of the LTM is disabled (``<ltm_id>/set_changes_topic``) so that the rest of the nodes do not see the intermediate state, and it is enabled again
+    afterwards, also if the copy fails.
+    """
+
+    def __init__(
+        self,
+        name="policy_knowledge_reuse",
+        class_name="cognitive_nodes.policy.Policy",
+        ltm_id=None,
+        drive_name=None,
+        **params,
+    ):
+        """
+        Constructor of the PolicyKnowledgeReuse class.
+
+        :param name: Name of the node.
+        :type name: str
+        :param class_name: The name of the base Policy class, defaults to "cognitive_nodes.policy.Policy".
+        :type class_name: str
+        :param ltm_id: Id of the LTM that includes the nodes. It is required.
+        :type ltm_id: str
+        :param drive_name: Name of the :class:`DriveKnowledgeReuse` that provides the instructions. It is required.
+        :type drive_name: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
+        :raises ValueError: If ``ltm_id`` or ``drive_name`` are not provided.
+        """
+        if ltm_id is None:
+            raise ValueError("No LTM input was provided.")
+        if drive_name is None:
+            raise ValueError("No knowledge-reuse drive was provided.")
+        super().__init__(name, class_name, ltm_id=ltm_id, **params)
+        self.LTM_id = ltm_id
+        self.drive_name = drive_name
+        self.ltm_set_changes_topic_client = ServiceClientAsync(
+            self,
+            SetChangesTopic,
+            f"{ltm_id}/set_changes_topic",
+            callback_group=self.cbgroup_client,
+        )
+        self.knowledge_client = ServiceClientAsync(
+            self,
+            GetReusableKnowledge,
+            f"drive/{drive_name}/get_reusable_knowledge",
+            callback_group=self.cbgroup_client,
+        )
+
+    async def execute_callback(self, request, response):
+        """Duplicate the reusable chain and restore its aliased neighbors.
+        This is a coroutine and must be awaited if called directly.
+
+        If the instructions are not valid YAML or do not have the expected structure, an error is logged and nothing is copied.
+        The response only contains the name of the policy.
+
+        :param request: Execution request.
+        :type request: cognitive_node_interfaces.srv.Execute.Request
+        :param response: Execution response.
+        :type response: cognitive_node_interfaces.srv.Execute.Response
+        :return: Execution response, with the name of the policy.
+        :rtype: cognitive_node_interfaces.srv.Execute.Response
+        """
+        self.get_logger().info(f"Executing policy: {self.name}...")
+        knowledge_response = await self.knowledge_client.send_request_async()
+        try:
+            knowledge = yaml.safe_load(knowledge_response.instructions) or {}
+        except yaml.YAMLError as error:
+            self.get_logger().error(
+                f"Knowledge reuse instructions are not valid YAML: {error}"
+            )
+            response.policy = self.name
+            return response
+
+        if not isinstance(knowledge, dict):
+            self.get_logger().error(
+                "Knowledge reuse instructions must contain a mapping."
+            )
+            response.policy = self.name
+            return response
+        instructions = knowledge.get("instructions", [])
+        if not isinstance(instructions, list):
+            self.get_logger().error(
+                "Knowledge reuse instructions must contain a list of entries."
+            )
+            response.policy = self.name
+            return response
+        # Temporarily disable the LTM changes topic while duplicating nodes and
+        # restoring neighbors, so the other nodes in the system do not see the
+        # intermediate state of the copied chain.
+        await self.ltm_set_changes_topic_client.send_request_async(changes_topic=False)
+        try:
+            for entry in instructions:
+                if not isinstance(entry, dict):
+                    self.get_logger().error("Invalid knowledge reuse entry.")
+                    continue
+                nodes = entry.get("nodes", {})
+                # Seed the aliases with the source-to-target root context, so the
+                # copied subgoals are attached to the target goal and P-Node.
+                aliases = dict(entry.get("aliases", {}))
+                replacements = entry.get("pnode_replacements", [])
+                if not isinstance(replacements, list):
+                    self.get_logger().error(
+                        "Knowledge reuse pnode_replacements must be a list."
+                    )
+                    replacements = []
+                replacement_aliases = await self._replace_pnode_spaces(
+                    replacements
+                )
+                aliases.update(replacement_aliases)
+                aliases.update(await self._duplicate_nodes(nodes))
+                root_neighbors = entry.get("root_neighbors", [])
+                if not isinstance(root_neighbors, list):
+                    self.get_logger().error(
+                        "Knowledge reuse root_neighbors must be a list."
+                    )
+                    root_neighbors = []
+                await self._restore_neighbors(
+                    nodes,
+                    aliases,
+                    root_neighbors,
+                    replacement_aliases,
+                )
+        finally:
+            # Re-enable the topic even if copying fails halfway; otherwise the
+            # cognitive processes would stop receiving LTM changes.
+            await self.ltm_set_changes_topic_client.send_request_async(changes_topic=True)
+        response.policy = self.name
+        return response
+
+    async def _replace_pnode_spaces(self, replacements):
+        """Clone mature P-Nodes and adapt them with candidate-domain data."""
+        replacement_aliases = {}
+        for replacement in replacements:
+            if not isinstance(replacement, dict):
+                self.get_logger().error(
+                    "Invalid knowledge reuse P-Node replacement."
+                )
+                continue
+            source = replacement.get("source")
+            candidate = replacement.get("candidate")
+            if not source or not candidate:
+                self.get_logger().error(
+                    "Incomplete knowledge reuse P-Node replacement."
+                )
+                continue
+            source_service = f"pnode/{candidate}/send_space"
+            try:
+                if source_service not in self.node_clients:
+                    self.node_clients[source_service] = ServiceClientAsync(
+                        self,
+                        SendSpace,
+                        source_service,
+                        self.cbgroup_client,
+                    )
+                duplicate_service = f"cognitive_node/{source}/duplicate_node"
+                if duplicate_service not in self.node_clients:
+                    self.node_clients[duplicate_service] = ServiceClientAsync(
+                        self,
+                        DuplicateNode,
+                        duplicate_service,
+                        self.cbgroup_client,
+                    )
+                source_response = await self.node_clients[
+                    source_service
+                ].send_request_async()
+                candidate_space = getattr(source_response, "space", None)
+                if candidate_space is None:
+                    raise ValueError(f"P-Node {candidate} returned no space.")
+                duplicate_response = await self.node_clients[
+                    duplicate_service
+                ].send_request_async(name="", include_neighbors=False)
+                if not getattr(duplicate_response, "duplicated", False):
+                    raise RuntimeError(
+                        f"Failed to duplicate mature P-Node {source}."
+                    )
+                duplicate = duplicate_response.duplicate_node_name
+                target_service = f"pnode/{duplicate}/load_space"
+                if target_service not in self.node_clients:
+                    self.node_clients[target_service] = ServiceClientAsync(
+                        self,
+                        LoadSpace,
+                        target_service,
+                        self.cbgroup_client,
+                    )
+                target_response = await self.node_clients[
+                    target_service
+                ].send_request_async(space=candidate_space)
+            except (RuntimeError, ValueError) as error:
+                self.get_logger().error(
+                    f"Failed to replace candidate P-Node {candidate} "
+                    f"with a clone of P-Node {source}: {error}"
+                )
+                continue
+            if not getattr(target_response, "loaded", False):
+                self.get_logger().error(
+                    f"Failed to adapt cloned P-Node {duplicate} "
+                    f"with data from P-Node {candidate}."
+                )
+                continue
+            replacement_aliases[candidate] = duplicate
+            await self._rewire_pnode(
+                candidate,
+                duplicate,
+                replacement.get("incoming", []),
+                replacement.get("outgoing", []),
+            )
+        return replacement_aliases
+
+    async def _rewire_pnode(self, candidate, replacement, incoming, outgoing):
+        """Move the candidate P-Node graph connections to its replacement."""
+        rewired = True
+        for neighbor in outgoing:
+            if not isinstance(neighbor, dict) or not neighbor.get("name"):
+                continue
+            if neighbor.get("node_type") == "Perception":
+                continue
+            result = await self.add_neighbor_client(
+                replacement, neighbor["name"]
+            )
+            if not result.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to copy neighbor {neighbor['name']} to "
+                    f"replacement P-Node {replacement}."
+                )
+        for neighbor in incoming:
+            if not isinstance(neighbor, dict) or not neighbor.get("name"):
+                continue
+            source = neighbor["name"]
+            removed = await self.delete_neighbor_client(source, candidate)
+            if not removed.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to remove {candidate} from neighbors of {source}."
+                )
+                continue
+            result = await self.add_neighbor_client(source, replacement)
+            if not result.success:
+                rewired = False
+                self.get_logger().error(
+                    f"Failed to add {replacement} to neighbors of {source}."
+                )
+        if not rewired:
+            self.get_logger().error(
+                f"Keeping candidate P-Node {candidate}: "
+                f"rewiring to {replacement} was incomplete."
+            )
+            return
+        delete_service = "commander/delete"
+        if delete_service not in self.node_clients:
+            self.node_clients[delete_service] = ServiceClientAsync(
+                self, DeleteNode, delete_service, self.cbgroup_client
+            )
+        deleted = await self.node_clients[delete_service].send_request_async(
+            name=candidate
+        )
+        if not getattr(deleted, "deleted", False):
+            self.get_logger().warning(
+                f"Replacement P-Node {replacement} is active, but candidate "
+                f"P-Node {candidate} could not be deleted."
+            )
+
+    async def _duplicate_nodes(self, instructions):
+        aliases = {}
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                if not source_name:
+                    self.get_logger().error(
+                        f"Knowledge reuse instruction for {node_type} has no name."
+                    )
+                    continue
+                duplicate_service = (
+                    f"cognitive_node/{source_name}/duplicate_node"
+                )
+                try:
+                    if duplicate_service not in self.node_clients:
+                        self.node_clients[duplicate_service] = ServiceClientAsync(
+                            self,
+                            DuplicateNode,
+                            duplicate_service,
+                            self.cbgroup_client,
+                        )
+                    result = await self.node_clients[duplicate_service].send_request_async(
+                        name="",
+                        include_neighbors=False,
+                    )
+                except (RuntimeError, ValueError) as error:
+                    self.get_logger().error(
+                        f"Failed to duplicate {node_type} {source_name}: {error}"
+                    )
+                    continue
+                if not result.duplicated:
+                    self.get_logger().error(
+                        f"Node duplication failed for {node_type} {source_name}."
+                    )
+                    continue
+                aliases[source_name] = result.duplicate_node_name
+        return aliases
+
+    async def _restore_neighbors(
+        self,
+        instructions,
+        aliases,
+        root_neighbors=(),
+        replacement_aliases=None,
+    ):
+        replacement_aliases = replacement_aliases or {}
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                duplicate_name = aliases.get(source_name)
+                if not duplicate_name:
+                    continue
+                parameters = instruction.get("parameters", {})
+                neighbors = parameters.get("neighbors", [])
+                for neighbor in neighbors:
+                    if not isinstance(neighbor, dict):
+                        self.get_logger().error(
+                            f"Invalid neighbor in instruction for {source_name}."
+                        )
+                        continue
+                    neighbor_name = neighbor.get("name")
+                    neighbor_type = neighbor.get("node_type")
+                    if not neighbor_name or not neighbor_type:
+                        self.get_logger().error(
+                            f"Incomplete neighbor in instruction for {source_name}."
+                        )
+                        continue
+                    if node_type == "PNode" and neighbor_type == "Perception":
+                        # P-Nodes receive perception inputs automatically when
+                        # created.
+                        continue
+                    aliased_neighbor = _resolve_alias(
+                        neighbor_name,
+                        aliases,
+                        replacement_aliases,
+                    )
+                    result = await self.add_neighbor_client(duplicate_name, aliased_neighbor)
+                    if not result.success:
+                        self.get_logger().error(
+                            f"Failed to link {duplicate_name} to "
+                            f"{aliased_neighbor}."
+                        )
+        for connection in root_neighbors:
+            if not isinstance(connection, dict):
+                self.get_logger().error("Invalid root neighbor connection.")
+                continue
+            source = connection.get("source", {})
+            neighbor = connection.get("neighbor", {})
+            source_name = source.get("name") if isinstance(source, dict) else None
+            neighbor_name = (
+                neighbor.get("name") if isinstance(neighbor, dict) else None
+            )
+            if not source_name or not neighbor_name:
+                self.get_logger().error(
+                    "Incomplete root neighbor connection."
+                )
+                continue
+            aliased_neighbor = _resolve_alias(
+                neighbor_name,
+                aliases,
+                replacement_aliases,
+            )
+            aliased_source = _resolve_alias(
+                source_name,
+                aliases,
+                replacement_aliases,
+            )
+            result = await self.add_neighbor_client(
+                aliased_source, aliased_neighbor
+            )
+            if not result.success:
+                self.get_logger().error(
+                    f"Failed to link {aliased_source} to {aliased_neighbor}."
+                )
+            reverse_result = await self.add_neighbor_client(
+                aliased_neighbor, aliased_source
+            )
+            if not reverse_result.success:
+                self.get_logger().error(
+                    f"Failed to link first subgoal {aliased_neighbor} "
+                    f"to replacement P-Node {aliased_source}."
+                )
+        for instruction in instructions.get("Policy", []):
+            source_name = instruction.get("name")
+            parameters = instruction.get("parameters", {})
+            neighbors = parameters.get("neighbors", [])
+            for neighbor in neighbors:
+                if not isinstance(neighbor, dict):
+                    self.get_logger().error(
+                        f"Invalid neighbor in instruction for {source_name}."
+                    )
+                    continue
+                neighbor_name = neighbor.get("name")
+                neighbor_type = neighbor.get("node_type")
+                if not neighbor_name or not neighbor_type:
+                    self.get_logger().error(
+                        f"Incomplete neighbor in instruction for {source_name}."
+                    )
+                    continue
+                if neighbor_type == "Perception":
+                    # Policies receive perception inputs automatically when
+                    # they are created.
+                    continue
+                aliased_neighbor = _resolve_alias(
+                    neighbor_name,
+                    aliases,
+                    replacement_aliases,
+                )
+                if aliased_neighbor:
+                    result = await self.add_neighbor_client(source_name, aliased_neighbor)
+                    if not result.success:
+                        self.get_logger().error(
+                            f"Failed to link {source_name} to "
+                            f"{aliased_neighbor}."
+                        )
+
+
+# ---------------------------------------------------------------------------
+# ROS-free debug harness
+# ---------------------------------------------------------------------------
+
+class DummyKnowledgeReuseNode:
+    """Small stand-in for the drive's LTM state handling."""
+
+    def __init__(self, ltm_dump, depth_threshold=CHAIN_DEPTH_THRESHOLD):
+        self.depth_threshold = depth_threshold
+        self.goal_chains = build_goal_chains(ltm_dump)
+        self.reuse_candidates = self._find_candidates()
+
+    def _find_candidates(self):
+        goals = {
+            goal
+            for chains in self.goal_chains.values()
+            for goal in chains["goals"]
+        }
+        return _find_candidates(
+            self.goal_chains,
+            goals,
+            self.depth_threshold,
+        )
+
+
+class DummyNode:
+    """Logger provider used when loading real spaces without ROS."""
+
+    def get_logger(self):
+        class Logger:
+            def debug(self, msg):
+                pass
+
+            def info(self, msg):
+                print(f"INFO: {msg}")
+
+            def warn(self, msg):
+                print(f"WARNING: {msg}")
+
+            warning = warn
+
+            def error(self, msg):
+                print(f"ERROR: {msg}")
+
+            def fatal(self, msg):
+                print(f"FATAL: {msg}")
+
+        return Logger()
+
+
+class KnowledgeReuseComparisonTest(DriveKnowledgeReuse):
+    """Run production knowledge-reuse logic against real P-Node models."""
+
+    def __init__(self, ltm_dump, pnode_spaces, mature_pnodes, min_points=4):
+        self._ltm_dump = ltm_dump
+        self._spaces = pnode_spaces
+        self._mature_pnodes = mature_pnodes
+        self.min_points = min_points
+        self.depth_threshold = CHAIN_DEPTH_THRESHOLD
+        self.goal_chains = build_goal_chains(ltm_dump)
+        self.get_logger = DummyNode().get_logger
+        self._space_data_cache = {}
+        self._score_cache = {}
+        self._pending_pnode_candidates = set()
+        self._pending_pnode_subscriptions = {}
+
+    async def _request_space_data(self, pnode_name):
+        return self._spaces[pnode_name]
+
+    async def _request_activations(self, pnode_name, space_data):
+        points = space_data
+        return self._mature_pnodes[pnode_name].get_probability(points).reshape(-1)
+
+    def _subscribe_pending_pnode(self, pnode_name):
+        """Keep the fixture harness independent of ROS subscriptions."""
+        self._pending_pnode_subscriptions[pnode_name] = None
+
+    def _unsubscribe_pending_pnode(self, pnode_name):
+        self._pending_pnode_subscriptions.pop(pnode_name, None)
+
+    async def compare(self, candidate_goals):
+        """Use the same candidate and selection methods as the live drive."""
+        candidates = [
+            candidate
+            for candidate in self._find_candidates(candidate_goals)
+            if candidate["candidate_pnode"] in self._spaces
+            and candidate["pnode"] in self._mature_pnodes
+        ]
+        return await self._select_reusable_knowledge(candidates)
+
+
+def _load_candidate_spaces(path, pnode_names, min_points, logger):
+    """Load only the first candidate rows needed from the TSV export."""
+    import pandas as pd
+    from core.container import Container
+    from cognitive_nodes.space import ANNSpace
+
+    header = pd.read_csv(path, sep="\t", nrows=0).columns.tolist()
+    usecols = [column for column in header if column not in {"Iteration"}]
+    rows_by_pnode = {}
+    for chunk in pd.read_csv(path, sep="\t", usecols=usecols, chunksize=10000):
+        for name in pnode_names - rows_by_pnode.keys():
+            rows = chunk[chunk["Ident"] == name].head(min_points)
+            if not rows.empty:
+                rows_by_pnode[name] = rows
+        if rows_by_pnode.keys() >= pnode_names:
+            break
+
+    spaces = {}
+    for name, rows in rows_by_pnode.items():
+        feature_labels = [
+            label for label in rows.columns if label not in {"Ident", "confidence"}
+        ]
+        values = rows[feature_labels + ["confidence"]].to_numpy(dtype=float)
+        data = Container(
+            name=f"{name}_data",
+            max_size=len(values),
+            container_type="space",
+            labels=feature_labels + ["confidence"],
+        )
+        data.push(values, timestamps=np.full(len(values), 0.0), src_labels=feature_labels + ["confidence"])
+        spaces[name] = data
+    return spaces
+
+
+def _load_mature_pnodes(fixture_dir, logger):
+    import tempfile
+    import torch
+    import pandas as pd
+    from cognitive_nodes.space import ANNSpace
+
+    models = {}
+    for model_file in fixture_dir.glob("pnode_*.pth"):
+        name = model_file.stem
+        models[name] = ANNSpace(
+            ident=name,
+            model_file=str(model_file),
+            logger=logger,
+            device="cpu",
+        )
+    return models
+
+
+async def comparison_main_async(fixture_dir, max_points=25, min_points=4):
+    """Run the ROS-free P-Node comparison and instruction-generation test."""
+    fixture_dir = Path(fixture_dir)
+    with (fixture_dir / "neighbors_full_test.yaml").open(encoding="utf-8") as fixture:
+        ltm_dump = yaml.safe_load(fixture)
+    logger = DummyNode().get_logger()
+    mature_pnodes = _load_mature_pnodes(fixture_dir, logger)
+    candidate_names = {
+        pnode
+        for chains in build_goal_chains(ltm_dump).values()
+        for pnode in chains["pnodes"]
+        if pnode
+    }
+    spaces = _load_candidate_spaces(
+        fixture_dir / "pnodes_content_test.txt",
+        candidate_names,
+        max_points,
+        logger,
+    )
+    test = KnowledgeReuseComparisonTest(
+        ltm_dump,
+        spaces,
+        mature_pnodes,
+        min_points=min_points,
+    )
+    candidate_goals = {
+        goal
+        for chains in test.goal_chains.values()
+        for goal in chains["goals"]
+    }
+    result = await test.compare(candidate_goals)
+    print(f"Loaded mature P-Nodes: {len(mature_pnodes)}")
+    print(f"Loaded candidate spaces: {len(spaces)}")
+    print(f"Selected candidates: {len(result['candidates'])}")
+    # Save test yaml instructions to a file for inspection if needed.
+    print(f"Saving reusable knowledge instructions to: {'reusable_knowledge_test.yaml'}")
+    with open("reusable_knowledge_test.yaml","w", encoding="utf-8") as output:
+        yaml.safe_dump(result, output, default_flow_style=False, sort_keys=False)
+
+
+def comparison_main():
+    parser = argparse.ArgumentParser(description="Run the ROS-free P-Node comparison test.")
+    parser.add_argument(
+        "fixture_dir",
+        nargs="?",
+        type=Path,
+        default=Path(__file__).parents[1] / "test" / "fixtures",
+    )
+    parser.add_argument("--max-points", type=int, default=25)
+    parser.add_argument("--min-points", type=int, default=4)
+    args = parser.parse_args()
+    asyncio.run(comparison_main_async(args.fixture_dir, args.max_points, args.min_points))
+
+
+async def policy_execution_dry_run_async(instructions_path, output_path=None):
+    """Dry-run knowledge-reuse neighbor restoration without ROS services."""
+    instructions_path = Path(instructions_path)
+    with instructions_path.open(encoding="utf-8") as source:
+        reusable_knowledge = yaml.safe_load(source)
+
+    entries = reusable_knowledge.get("instructions", [])
+    print(f"Loaded reusable knowledge: {instructions_path}")
+    print(f"Instruction entries: {len(entries)}")
+
+    final_operations = []
+    entry_results = []
+
+    class DryRunPolicy:
+        def __init__(self):
+            self.operations = []
+
+        async def add_neighbor_client(self, source, neighbor):
+            self.operations.append(
+                {"source": source, "neighbor": neighbor}
+            )
+
+            class Result:
+                success = True
+
+            return Result()
+
+    for entry_index, entry in enumerate(entries):
+        instructions = entry.get("nodes", {})
+        aliases = dict(entry.get("aliases", {}))
+
+        for node_type in ("Goal", "PNode", "CNode"):
+            for instruction in instructions.get(node_type, []):
+                source_name = instruction.get("name")
+                if source_name:
+                    aliases[source_name] = f"{source_name}_dup_{entry_index}"
+
+        replacement_aliases = {}
+        replacement_results = []
+        for replacement in entry.get("pnode_replacements", []):
+            candidate = replacement.get("candidate")
+            source = replacement.get("source")
+            if candidate and source:
+                replacement_name = f"{source}_dup_replaced_{entry_index}"
+                replacement_aliases[candidate] = replacement_name
+                replacement_results.append(
+                    {
+                        "candidate": candidate,
+                        "replacement": replacement_name,
+                        "incoming": replacement.get("incoming", []),
+                        "outgoing": replacement.get("outgoing", []),
+                    }
+                )
+
+        policy = DryRunPolicy()
+        await PolicyKnowledgeReuse._restore_neighbors(
+            policy,
+            instructions,
+            aliases,
+            entry.get("root_neighbors", []),
+            replacement_aliases,
+        )
+
+        root_neighbor_operations = []
+        root_neighbors = entry.get("root_neighbors", [])
+        for connection in root_neighbors:
+            if not isinstance(connection, dict):
+                continue
+            source = connection.get("source", {})
+            neighbor = connection.get("neighbor", {})
+            source_name = (
+                source.get("name") if isinstance(source, dict) else None
+            )
+            neighbor_name = (
+                neighbor.get("name") if isinstance(neighbor, dict) else None
+            )
+            if not source_name or not neighbor_name:
+                continue
+            resolved_source = _resolve_alias(
+                source_name,
+                aliases,
+                replacement_aliases,
+            )
+            resolved_neighbor = _resolve_alias(
+                neighbor_name,
+                aliases,
+                replacement_aliases,
+            )
+            root_neighbor_operations.append(
+                {
+                    "replacement_pnode": resolved_source,
+                    "first_subgoal": resolved_neighbor,
+                    "replacement_to_subgoal": (
+                        resolved_source,
+                        resolved_neighbor,
+                    ),
+                    "subgoal_to_replacement": (
+                        resolved_neighbor,
+                        resolved_source,
+                    ),
+                }
+            )
+
+        result = {
+            "source_goal": entry.get("source_goal"),
+            "target_goal": entry.get("target_goal"),
+            "duplicate_aliases": aliases,
+            "replacement_aliases": replacement_aliases,
+            "pnode_replacements": replacement_results,
+            "root_neighbor_results": root_neighbor_operations,
+            "neighbor_operations": policy.operations,
+        }
+        entry_results.append(result)
+        final_operations.extend(policy.operations)
+
+        print(
+            f"\nEntry {entry_index}: "
+            f"{entry.get('source_goal')} -> {entry.get('target_goal')}"
+        )
+        print("Replacement aliases:")
+        for candidate, replacement in replacement_aliases.items():
+            print(f"  {candidate} -> {replacement}")
+        print("Root/bidirectional links:")
+        for root_link in root_neighbor_operations:
+            print(
+                f"  {root_link['replacement_pnode']} -> "
+                f"{root_link['first_subgoal']}"
+            )
+            print(
+                f"  {root_link['first_subgoal']} -> "
+                f"{root_link['replacement_pnode']}"
+            )
+        print("Neighbor operations:")
+        for operation in policy.operations:
+            print(
+                f"  {operation['source']} -> "
+                f"{operation['neighbor']}"
+            )
+
+    report = {
+        "input": str(instructions_path),
+        "entries": entry_results,
+    }
+    output_path = (
+        Path(output_path)
+        if output_path
+        else instructions_path.with_name(
+            f"{instructions_path.stem}_dry_run.yaml"
+        )
+    )
+    with output_path.open("w", encoding="utf-8") as output:
+        yaml.safe_dump(report, output, default_flow_style=False, sort_keys=False)
+    print(f"\nDry-run report written to: {output_path}")
+    print(f"Neighbor operations: {len(final_operations)}")
+
+
+def policy_execution_main():
+    parser = argparse.ArgumentParser(
+        description="Dry-run applied knowledge-reuse instructions."
+    )
+    parser.add_argument("instructions")
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    asyncio.run(
+        policy_execution_dry_run_async(
+            args.instructions,
+            args.output,
+        )
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "fixture",
+        nargs="?",
+        type=Path,
+        default=Path(__file__).parents[1] / "test" / "fixtures" / "neighbors_full_0.yaml",
+        help="LTM-shaped YAML fixture",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Apply reusable-knowledge instructions without contacting ROS.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="YAML report destination for --dry-run.",
+    )
+    args = parser.parse_args()
+
+    if args.dry_run:
+        asyncio.run(
+            policy_execution_dry_run_async(
+                args.fixture,
+                args.output,
+            )
+        )
+        return
+
+    with args.fixture.open(encoding="utf-8") as fixture:
+        ltm_dump = yaml.safe_load(fixture)
+
+    node = DummyKnowledgeReuseNode(ltm_dump)
+    print(f"Loaded: {args.fixture}")
+    print(f"Drives with chains: {list(node.goal_chains)}")
+    for drive, chains in node.goal_chains.items():
+        print(f"\n{drive}: {len(chains['goals'])} chain entries")
+        for goal, domain, policy, pnode, depth in zip(
+            chains["goals"],
+            chains["domains"],
+            chains["policies"],
+            chains["pnodes"],
+            chains["depth"],
+        ):
+            print(
+                f"  goal={goal!r}, domain={domain!r}, "
+                f"policy={policy!r}, pnode={pnode!r}, depth={depth}"
+            )
+
+    print(f"\nReuse candidates: {len(node.reuse_candidates)}")
+    for candidate in node.reuse_candidates:
+        print(f"  {candidate}")
+
+
+if __name__ == "__main__":
+    main()

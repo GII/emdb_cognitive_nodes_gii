@@ -1,0 +1,5 @@
+string name
+bool include_neighbors
+---
+string duplicate_node_name
+bool duplicated

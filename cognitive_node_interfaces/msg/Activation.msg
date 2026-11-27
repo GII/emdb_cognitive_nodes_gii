@@ -2,3 +2,4 @@ string node_name
 string node_type
 float32 activation
 builtin_interfaces/Time timestamp
+MetacognitiveParameters metacognitive_params

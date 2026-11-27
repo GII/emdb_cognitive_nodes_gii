@@ -33,15 +33,18 @@ class DriveAlignment(Drive):
     
     """
     DriveAlignment Class, represents a drive to align the human porpuse to the robot's purpose (missions and drives).
+    Its evaluation is constant (1.0), so the drive is never satisfied.
     """    
     def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", **params):
         """
-        Constructor of the DriveLLMExploration class.
+        Constructor of the DriveAlignment class.
 
         :param name: The name of the Drive instance.
         :type name: str
         :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
         :type class_name: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
 
@@ -50,7 +53,7 @@ class DriveAlignment(Drive):
         Evaluation that always returns 1.0, as the drive is always active.
 
         :param perception: Unused perception, defaults to None.
-        :type perception: dict or NoneType
+        :type perception: core.container.Container or None
         :return: Evaluation of the Drive. It always returns 1.0.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
@@ -63,6 +66,12 @@ class PolicyAlignment(Policy):
     """
     Policy that executes the alignment interaction with the user and generates and initializes the missions and drives in the cognitive architecture. 
 
+    When it is executed, it opens a chat window (Tkinter) in which an LLM talks with the user to obtain a description of the purpose. From it, other LLM
+    calls generate missions (a tag and a weight) and one drive function for each mission. Then it creates, for each mission, a
+    :class:`cognitive_nodes.robot_purpose.AlignmentMission` and a :class:`cognitive_nodes.drive.DriveLLM` (the last mission is created as terminal).
+    When all of them were created, the activation of the Robot Purpose ``alignment_need`` is set to 0.0.
+    The window blocks the callback until it is closed, and a display and the LLM service are needed.
+
     This class inherits from the general Policy class.
     """  
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', prompts_file=None, **params):
@@ -73,8 +82,12 @@ class PolicyAlignment(Policy):
         :type name: str
         :param class_name: The name of the base Policy class, defaults to 'cognitive_nodes.policy.Policy'.
         :type class_name: str
-        :param prompts_file: YAML file containing the different prompts for the alignment process.
+        :param prompts_file: Name of the YAML file, in the ``config`` folder of the cognitive_nodes package, containing the prompts for the alignment process (``alignment_prompt``, ``drives_prompt``, ``missions_prompt``, ``internal_needs`` and ``perceptions``). It is required.
         :type prompts_file: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
+        :raises ValueError: If ``prompts_file`` is not provided.
+        :raises FileNotFoundError: If the file is not in the ``config`` folder.
         """        
         super().__init__(name, class_name, **params)
         self.config_dir = os.path.join(get_package_share_directory('cognitive_nodes'), 'config')
@@ -99,12 +112,13 @@ class PolicyAlignment(Policy):
 
     def find_folder(self, filename):
         """
-        Finds the config folder direction on the computer.
+        Finds a file in the config folder of the cognitive_nodes package.
 
         :param filename: Name of the file to find.
         :type filename: str
         :return: Full path to the file.
         :rtype: str
+        :raises FileNotFoundError: If the file is not in the config folder.
         """ 
         file_path = os.path.join(self.config_dir, filename)
         if not os.path.exists(file_path):
@@ -130,13 +144,14 @@ class PolicyAlignment(Policy):
 
     async def execute_callback(self, request, response):
         """
-        Callback that executes the policy.
+        Callback that executes the policy. This is a coroutine and must be awaited if called directly.
+        It runs the chat interface (:meth:`interface`), which blocks until the window is closed, and creates the missions and drives obtained.
 
         :param request: Execution request.
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: Execution response.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :return: Execution response.
+        :return: Execution response, with the name of the policy.
         :rtype: cognitive_node_interfaces.srv.Execute.Response
         """
         self.get_logger().info('Executing policy: ' + self.name + '...')
@@ -154,10 +169,11 @@ class PolicyAlignment(Policy):
     async def create_missions_drives(self, missions, drives):
         """
         Takes the missions and drives generated by the LLM and creates the corresponding Robot Purpose and Drive nodes in the cognitive architecture.
+        This is a coroutine and must be awaited. For each mission ``<tag>``, an AlignmentMission ``<tag>_mission`` and a DriveLLM ``<tag>_drive`` are created.
 
-        :param missions: List of missions generated by the LLM.
+        :param missions: List of missions generated by the LLM, each one as ``[tag, weight]``.
         :type missions: list
-        :param drives: List of drives generated by the LLM.
+        :param drives: List of drive functions generated by the LLM, one for each mission.
         :type drives: list
         """
         self.get_logger().info('Creating missions and drives...')
@@ -197,8 +213,9 @@ class PolicyAlignment(Policy):
     def interface(self):
         """
         Starts the interface that interacts with the user to align the human's purpose with the robot's purpose.
+        It opens the chat window and blocks until it is closed.
 
-        :return: final_answer, missions, drives
+        :return: The final answer of the drives LLM, the missions (``[tag, weight]``) and the drive functions extracted from it.
         :rtype: tuple[str, list, list]
         """
         path = init_conversation_file()
@@ -214,6 +231,9 @@ class PolicyAlignment(Policy):
 class LLMmodel():
     """
     LLMmodel class creates the LLM model instance and handles interactions.
+
+    The models ``phi4:14b`` and ``Qwen3:30b`` use an Ollama client on ``host``; any other model uses an OpenAI-compatible client
+    (the key is read from the ``OPENAI_API_KEY`` environment variable), and the requests are then sent to the model ``openai/gpt-4.1:floor``.
     """  
     """
     To correctly execute this code, you need to set the environment variable OPENAI_API_KEY with your OpenAI API key.
@@ -228,8 +248,8 @@ class LLMmodel():
         :type model: str
         :param host: API host URL
         :type host: str
-        :param initial_prompt: Prompt to initialize the LLM.
-        :type initial_prompt: str
+        :param initial_prompt: Prompt to initialize the LLM, as a message (``{'role': ..., 'content': ...}``).
+        :type initial_prompt: dict
         """        
         self.model = model
         self.host = host
@@ -245,11 +265,11 @@ class LLMmodel():
         """
         Extracts the response from the LLM based on the model used.
 
-        :param client: LLM client instance.
-        :type client: Client
+        :param client: LLM client instance (Ollama or OpenAI).
+        :type client: ollama.Client or openai.OpenAI
         :param model: Model used for the LLM.
         :type model: str
-        :param command: Command or messages to send to the LLM.
+        :param command: Messages to send to the LLM.
         :type command: list
         :return: Generated text from the LLM.
         :rtype: str
@@ -267,7 +287,7 @@ class LLMmodel():
 
         :param conversation: Conversation history.
         :type conversation: list
-        :param extra_context: Additional context to provide to the LLM.
+        :param extra_context: Additional context to provide to the LLM, as messages.
         :type extra_context: list
         :return: Generated text from the LLM.
         :rtype: str
@@ -282,6 +302,9 @@ class LLMmodel():
 class ChatInterface():
     """
     ChatInterface class creates a GUI with the different models for user interaction.
+
+    The user talks with the alignment LLM. When its reply contains "Final description", the missions are generated and then the drives; the
+    drives can be refined with the user's feedback. The result is kept in ``drives``.
     """
     def __init__(self, root, LLM, perceptions, needs, alignment_prompt, missions_prompt, drives_prompt, path):
         """
@@ -353,7 +376,7 @@ class ChatInterface():
 
     def send_message(self, event=None):
         """
-        Recieves the user input, to send it to the alignment LLM, and displays the response. Calls the generate missions and drives methods.
+        Recieves the user input, to send it to the alignment LLM, and displays the response. If the reply contains "Final description", it calls the methods that generate the missions and then the drives.
 
         :param event: Event that triggered the method, defaults to None.
         :type event: tk.Event or NoneType
@@ -409,6 +432,7 @@ class ChatInterface():
     def generate_drives(self, objects):
         """
         Sends the final purpose and the list of missions to the LLM model and generates the drives.
+        If the reply contains "Final drives", the window is closed; otherwise the interface waits for the feedback of the user (see :meth:`send_drive_feedback`).
 
         :param objects: Description of objects to provide to the LLM.
         :type objects: str
@@ -440,7 +464,7 @@ class ChatInterface():
 
     def send_drive_feedback(self, objects):
         """
-        Recieves the feedback from the user to refine the drives if needed and finishes the interaction when the final drives are accepted.
+        Recieves the feedback from the user to refine the drives if needed and finishes the interaction when the reply of the LLM contains "Final answer".
 
         :param objects: Description of objects to provide to the LLM.
         :type objects: str
@@ -480,7 +504,7 @@ class ChatInterface():
             
 def init_conversation_file():
     """
-    It finds the first available filename and saves it in a global variable.
+    It finds the first available filename (``conversation_<n>.yaml`` in the current directory) and returns its path. The file is not created.
 
     :return: Path to the conversation file.
     :rtype: str
@@ -516,10 +540,10 @@ def load_configuration(config_prompt):
     """
     Extracts the model, host, and initial prompt from the configuration dictionary.
 
-    :param config_prompt: Configuration dictionary.
+    :param config_prompt: Configuration dictionary, with the keys ``model``, ``host`` and ``initial_prompt``.
     :type config_prompt: dict
     :return: model, host, initial_prompt
-    :rtype: tuple[str, str, str]
+    :rtype: tuple[str, str, dict]
     """
     model = config_prompt["model"]
     host = config_prompt["host"]

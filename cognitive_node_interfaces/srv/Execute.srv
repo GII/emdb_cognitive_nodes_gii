@@ -1,4 +1,4 @@
-Perception perception
+core_interfaces/Container perception
 ---
 string policy
-Episode episode
+core_interfaces/Container episode

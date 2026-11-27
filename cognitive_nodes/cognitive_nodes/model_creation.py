@@ -5,21 +5,39 @@ from copy import deepcopy
 from rclpy.time import Time
 
 from core.service_client import ServiceClientAsync
-from core.utils import perception_dict_to_msg
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_obj_to_msg, episode_obj_list_to_msg_list
+from core.container import Container
+from core.utils import class_from_classname
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from cognitive_nodes.drive import Drive
-from cognitive_nodes.policy import Policy
+from cognitive_nodes.policy import Policy, PolicyLearned
 from cognitive_nodes.utils import LTMSubscription, EpisodeSubscription
 
 from cognitive_node_interfaces.srv import AddPoints, AddTrace
 
 
 class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
+    """
+    Mixin with the common behavior of the nodes that create models (World Models, Goals, Utility Models and the nodes linked to them).
+
+    It follows the LTM and the episodes: it keeps a cache of the LTM (``LTM_cache``, with the nodes, their neighbors and activations),
+    the Drives that are not linked to any Goal (``unlinked_drives``) and whether there is an active World Model
+    (``missing_world_model``). The nodes that use it must define ``LTM_id`` and may have a ``Connectors`` configuration
+    that gives the default class and parameters of each type of node to create.
+    """
     def configure_model_creation(self, episode_topic, episode_msg):
+        """
+        Configures the node to create models: initializes the caches, subscribes to the LTM and to the episodes, and reads the default classes and parameters of the connectors.
+
+        :param episode_topic: Topic of the episodes.
+        :type episode_topic: str
+        :param episode_msg: Class name of the message type of the episodes.
+        :type episode_msg: str
+        """
         self.missing_world_model = False
         self.LTM_cache = {}
         self.unlinked_drives = []
+        self.generated_names = set()  # Names of the nodes created that may not be in the LTM cache yet
         self.configure_ltm_subscription(self.LTM_id, self.cbgroup_server)
         self.configure_episode_subscription(episode_topic=episode_topic, episode_msg=episode_msg, callback_group=self.cbgroup_server)
         self.default_class = {}
@@ -29,6 +47,9 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
     def read_ltm(self, ltm_dump):
         """
         Reads the Long-Term Memory (LTM) and populates the LTM cache.
+        New nodes are added to the cache (with activation 0.0 and, for World Models, an activation input), existing ones are updated
+        (except their activations) and nodes that are no longer in the LTM are removed. Then the unlinked Drives are updated, and
+        ``missing_world_model`` is set if the LTM has no World Model.
 
         :param ltm_dump: LTM dump to be used.
         :type ltm_dump: dict
@@ -51,10 +72,10 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
         
         #Remove elements in LTM Cache that were removed from LTM.
         for node_type in self.LTM_cache.keys():
-            for node in self.LTM_cache[node_type]:
-                if ltm_dump[node_type].get(node, None) is None:
+            for node in list(self.LTM_cache[node_type]):
+                if ltm_dump.get(node_type, {}).get(node, None) is None:
                     del self.LTM_cache[node_type][node]
-                    self.delete_activation_input({node: node_type})
+                    self.delete_activation_input({"name": node, "node_type": node_type})
 
         # Check if there are any drives not linked to goals
         self.unlinked_drives = self.get_unlinked_drives()
@@ -67,6 +88,7 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
     def get_unlinked_drives(self):
             """
             This method retrieves the drives that are not linked to any goal in the LTM cache.
+            A Drive is linked when it is a neighbor of a Goal.
 
             :return: List of unlinked drives. If there are no unlinked drives, it returns an empty list.
             :rtype: list
@@ -85,6 +107,14 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
                 return []
             
     def linked_cnode(self, goal):
+        """
+        Checks if a Goal is a neighbor of any C-Node in the LTM cache.
+
+        :param goal: Name of the Goal. None means that the Goal does not exist yet.
+        :type goal: str or None
+        :return: True if the Goal is linked to a C-Node, False otherwise (always False for None).
+        :rtype: bool
+        """
         if goal is None:
             return False
         for node in self.LTM_cache.get("CNode", {}).values():
@@ -95,7 +125,8 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
     
     def setup_connectors(self):
         """
-        Configures the default classes for the cognitive nodes.
+        Configures the default classes and parameters for the cognitive nodes to create, from the ``Connectors`` of the configuration of the node (if any).
+        Each connector gives, for the type of node in its ``data`` field, its ``default_class`` and ``parameters``.
         """
         if hasattr(self, "Connectors"):
             for connector in self.Connectors:
@@ -103,14 +134,31 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
                 self.default_params[connector["data"]] = connector.get("parameters", {})
 
     def generate_node_name(self, node_type):
+        """
+        Generates a name for a new node, ``<node_type>_<index>``, with the lowest index not used in the LTM cache or by a node generated before.
+
+        :param node_type: Type of the node.
+        :type node_type: str
+        :return: The name.
+        :rtype: str
+        """
         index = 0
         while True:
             name = f"{node_type}_{index}"
-            if name not in self.LTM_cache.get(node_type, {}):
+            if name not in self.LTM_cache.get(node_type, {}) and name not in self.generated_names:
+                self.generated_names.add(name)
                 return name
             index += 1
 
     def get_max_activation_node(self, node_type):
+        """
+        Gets the node of a type with the highest activation among the activation inputs.
+
+        :param node_type: Type of the node.
+        :type node_type: str
+        :return: Name of the node, or None if there is no node of that type.
+        :rtype: str or None
+        """
         nodes = [{node: self.activation_inputs[node]["data"].activation} for node in self.activation_inputs if self.activation_inputs[node]["node_type"] == node_type]
         if not nodes:
             return None
@@ -119,7 +167,34 @@ class ModelCreationMixin(LTMSubscription, EpisodeSubscription):
 
 
 class ModelCreationDrive(Drive, ModelCreationMixin):
+    """
+    Drive that is not satisfied while some model is missing. Its evaluation is 1.0 if a World Model, a Goal (for a rewarded Drive that has none)
+    or a Utility Model (for a rewarded Goal that is not linked to a C-Node) has to be created, and 0.0 otherwise.
+
+    The needs are detected from the episodes without a parent policy (the rewards that are not zero) and from the activations of the World Models
+    (no active World Model). The flags are cleared when the model creation policy (``model_creation_policy``) appears as the parent policy of an episode.
+    Its activation is the maximum of the activations of its neighbors except World Models, multiplied by the evaluation.
+    """
     def __init__(self, name="model_creation_drive", class_name="cognitive_nodes.drive.Drive", max_iterations=20, episodes_topic=None, episodes_msg=None, model_creation_policy=None, **params):
+        """
+        Constructor of the ModelCreationDrive class.
+
+        :param name: The name of the Drive.
+        :type name: str
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
+        :type class_name: str
+        :param max_iterations: Not used.
+        :type max_iterations: int
+        :param episodes_topic: Topic of the episodes.
+        :type episodes_topic: str
+        :param episodes_msg: Class name of the message type of the episodes.
+        :type episodes_msg: str
+        :param model_creation_policy: Name of the :class:`ModelCreationPolicy` that satisfies this Drive. It is required.
+        :type model_creation_policy: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`. They must include ``LTM_id``.
+        :type params: dict
+        :raises ValueError: If ``model_creation_policy`` is not provided.
+        """
         super().__init__(name, class_name, **params)
         #self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception", "reward_list"], main_size=max_iterations)
         if model_creation_policy is None:
@@ -132,10 +207,18 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
 
 
     def episode_callback(self, msg):
-        episode = episode_msg_to_obj(msg)
+        """
+        Processes an episode. If it has no parent policy, each reward that is not zero marks a missing Goal (if the rewarded node is a Drive without Goal) or
+        a missing Utility Model (if it is a Goal not linked to a C-Node). If its parent policy is the model creation policy, the flags of missing models are cleared.
+
+        :param msg: Flattened episode.
+        :type msg: core_interfaces.msg.Container
+        """
+        episode = container_msg_to_episode(msg)
         self.get_logger().debug(f"Received episode with parent policy: {episode.parent_policy} and rewards: {episode.reward_list}")
         if not episode.parent_policy: # Parent policy is empty if no specific Utility Model/Policy is being executed
-            for goal, reward in episode.reward_list.items():
+            reward_list = episode.reward_list
+            for goal, reward in reward_list.items():
                 if not isclose(reward, 0.0):
                     if goal in self.unlinked_drives:
                         self.get_logger().info(f"Unlinked drive found: {goal}. Goal node to be created.")
@@ -150,6 +233,14 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
             self.missing_utility_model = False
     
     def evaluate(self, perception=None):
+        """
+        Evaluates the Drive: 1.0 if any model is missing (World Model, Goal or Utility Model), 0.0 otherwise.
+
+        :param perception: Not used.
+        :type perception: core.container.Container or None
+        :return: The evaluation and its timestamp.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """
         if self.missing_goal or self.missing_utility_model or self.missing_world_model:
             self.evaluation.evaluation = 1.0
         else:
@@ -159,10 +250,12 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
     
     def calculate_activation(self, perception=None, activation_list=None):
         """
-        Returns the the activation value of the Drive.
+        Returns the the activation value of the Drive: the maximum of the activations in ``activation_list``, excluding World Models, multiplied by the evaluation.
 
-        :param perception: The given perception.
-        :type perception: dict
+        :param perception: Not used.
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighbors, as kept in ``activation_inputs``. It is required.
+        :type activation_list: dict
         :return: The activation of the instance and its timestamp.
         :rtype: cognitive_node_interfaces.msg.Activation
         """
@@ -177,6 +270,13 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
         return self.activation     
     
     def read_activation_callback(self, msg):
+        """
+        Reads the activation of a neighbor (see the base class). When all the activation inputs are updated, ``missing_world_model`` is set
+        if no World Model is active, and cleared otherwise.
+
+        :param msg: Activation message.
+        :type msg: cognitive_node_interfaces.msg.Activation
+        """
         super().read_activation_callback(msg)
         # Process world model activations
         updated_activations = all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs)) 
@@ -192,14 +292,58 @@ class ModelCreationDrive(Drive, ModelCreationMixin):
 
 
 class ModelCreationPolicy(Policy, ModelCreationMixin):
-    def __init__(self, name="model_creation", class_name="cognitive_nodes.drive.Policy", max_iterations=20, episodes_topic=None, episodes_msg=None, **params):
+    """
+    Policy that creates the models that are missing: World Models, Goals for Drives without Goal, and, for each rewarded Goal that is not linked to a C-Node,
+    a Utility Model with its P-Node, C-Node and a learned Policy (see :meth:`create_utility_model`).
+
+    While it is not executed, it collects the episodes: each rewarded Drive or Goal that needs models is recorded in ``node_data``, with the trace of
+    episodes that led to the reward. When it is executed, :meth:`execute_callback` creates the nodes with the services of the LTM-managing node
+    (``create_node_client``), using the default classes and parameters of the ``Connectors`` of its configuration, and then publishes an episode
+    with this policy as parent so that a :class:`ModelCreationDrive` is reset.
+    Its activation is the maximum of the activations of its neighbors except World Models.
+    """
+    def __init__(self, name="model_creation", class_name="cognitive_nodes.drive.Policy", max_iterations=20, episodes_topic=None, episodes_msg=None, spawn_utility_model=True, spawn_policy=True, **params):
+        """
+        Constructor of the ModelCreationPolicy class.
+
+        :param name: The name of the Policy.
+        :type name: str
+        :param class_name: The name of the class registered in the LTM. Its default, "cognitive_nodes.drive.Policy", is not an existing class, so the class name should always be given.
+        :type class_name: str
+        :param max_iterations: Maximum number of episodes kept in the episodic buffer, i.e. the maximum length of the trace used to create a Utility Model, defaults to 20.
+        :type max_iterations: int
+        :param episodes_topic: Topic of the episodes.
+        :type episodes_topic: str
+        :param episodes_msg: Class name of the message type of the episodes.
+        :type episodes_msg: str
+        :param spawn_utility_model: Whether a Utility Model is created for each new Goal (ablation switch), defaults to True.
+        :type spawn_utility_model: bool
+        :param spawn_policy: Whether a learned Policy is created for each new Goal (ablation switch), defaults to True.
+        :type spawn_policy: bool
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`. They must include ``LTM_id``.
+        :type params: dict
+        :raises ValueError: If both spawn_utility_model and spawn_policy are False.
+        """
         super().__init__(name, class_name, **params)
-        self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception"], main_size=max_iterations, secondary_size=0)
+        if not (spawn_utility_model or spawn_policy):
+            raise ValueError("At least one of spawn_utility_model or spawn_policy must be True.")
+        self.spawn_utility_model = spawn_utility_model
+        self.spawn_policy = spawn_policy
+        self.episodic_buffer = EpisodicBuffer(self, inputs=["old_perception", "action", "perception"], main_size=max_iterations, secondary_size=0, random_seed=getattr(self, "random_seed", 0))
         self.node_data = []
         self.configure_model_creation(episodes_topic, episodes_msg)
         self.last_episode = Episode()
 
     def calculate_activation(self, perception=None, activation_list=None):
+        """
+        Calculates the activation of the policy: the maximum of the activations in ``activation_list``, excluding World Models, or 0.0 if there are none.
+        The result is stored in ``self.activation``; nothing is returned.
+
+        :param perception: Not used.
+        :type perception: core.container.Container or None
+        :param activation_list: Activations of the neighbors, as kept in ``activation_inputs``. It is required.
+        :type activation_list: dict
+        """
         filtered_activation_list = {node:activation for node, activation in activation_list.items() if activation["node_type"] != "WorldModel"}
         if filtered_activation_list:
             self.calculate_activation_max(filtered_activation_list)
@@ -208,50 +352,81 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             self.activation.timestamp=self.get_clock().now().to_msg()
 
     def episode_callback(self, msg):
-        episode = episode_msg_to_obj(msg)
+        """
+        Processes an episode. A reset of the world clears the episodic buffer. Episodes not generated by this policy are added to the buffer, and each
+        reward that is not zero records in ``node_data`` the nodes to create: a Goal for a Drive without Goal, and a Utility Model (with the trace
+        of the buffer, which is then cleared) for a Goal not linked to a C-Node. Each Drive or Goal is recorded only once.
+
+        :param msg: Flattened episode.
+        :type msg: core_interfaces.msg.Container
+        """
+        episode = container_msg_to_episode(msg)
         self.last_episode = episode
-        if msg.parent_policy == "reset_world":
+        if self.last_episode.parent_policy == "reset_world":
             self.get_logger().info("World reset detected, clearing buffer")
             self.episodic_buffer.clear()
         elif episode.parent_policy != self.name: 
             self.episodic_buffer.add_episode(episode)
-            for goal, reward in episode.reward_list.items():
+            reward_list = episode.reward_list
+            for goal, reward in reward_list.items():
                 if not isclose(reward, 0.0):
+                    # Each drive or goal needs its models only once, however many rewarded episodes arrive before the policy runs
                     if goal in self.unlinked_drives:
                         drive = goal
                         goal = None
+                        if any(node.get("drive") == drive for node in self.node_data):
+                            continue
                         self.node_data.append(dict(node_type="Goal", drive=drive))
                         self.get_logger().info(f"Unlinked drive found: {drive}. Goal node to be created.")
+                    elif any(node.get("goal") == goal for node in self.node_data):
+                        continue
                     if not self.linked_cnode(goal):
-                        self.node_data.append(dict(node_type="UtilityModel", goal=goal, trace=deepcopy(self.episodic_buffer.main_buffer)))
+                        trace = self.episodic_buffer.main_buffer.read()
+                        self.node_data.append(dict(node_type="UtilityModel", goal=goal, trace=trace))
                         self.episodic_buffer.clear()
                         self.get_logger().info(f"Goal {goal} not linked to any CNode. Utility Model to be created.")
 
     async def execute_callback(self, request, response):
         """
-        Callback that executes the policy.
+        Callback that executes the policy. This is a coroutine and must be awaited if called directly.
+        It creates the missing models (see :meth:`create_models`) and then publishes an episode with the last perception and action, with the
+        action and rewards set to zero and this policy as parent policy.
 
         :param request: Execution request.
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: Execution response.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :return: Execution response.
+        :return: Execution response, with the name of the policy.
         :rtype: cognitive_node_interfaces.srv.Execute.Response
         """        
         self.get_logger().info('Executing policy: ' + self.name + '...')
         await self.create_models()
-        self.last_episode.parent_policy = self.name
-        self.last_episode.old_perception = self.last_episode.perception
-        self.last_episode.action = Action()
-        self.last_episode.reward_list = {goal:0.0 for goal in self.last_episode.reward_list}
-        self.episode_publisher.publish(episode_obj_to_msg(self.last_episode))
+        # The published episode will keep the last perception and action, but with rewards set to 0
+        if self.last_episode.perception is not None and self.last_episode.old_perception is not None:
+            self.last_episode.old_perception.push(self.last_episode.perception)
+            episode = Episode(old_perception=self.last_episode.old_perception, perception=self.last_episode.perception, parent_policy=self.name)
+            if self.last_episode.action is not None:
+                # Rewards are not read: this policy's own episode (the last one if it runs twice in a row) has none
+                last_action = self.last_episode.action.read()
+                last_action.data = np.zeros_like(last_action.data)
+                episode.action = Container.from_dataarray(last_action, container_type="action", name="action")
+            episode_msg = episode_obj_to_msg(episode)
+            self.episode_publisher.publish(episode_msg)
         response.policy=self.name
         return response
     
     async def create_models(self):
+        """
+        Creates the models that are missing. This is a coroutine and must be awaited.
+        If there is no active World Model, a new one is created. Then, for each entry of ``node_data``, a Goal is created for a Drive and a
+        Utility Model (with its P-Node, C-Node and Policy) for a Goal (the one just created if the entry has none). The Utility Model is linked to
+        the World Model just created or, if there is none, to the active one with the highest activation. Finally ``node_data`` is cleared.
+
+        :raises ValueError: If a Utility Model has to be created and there is no Goal for it.
+        """
         created_world_model = None
         created_goal = None
-        drive = None
+        created_goal_drive = None
         if self.missing_world_model:
             self.get_logger().info("Missing World Model. Creating new World Model...")
             created_world_model = await self.create_world_model()
@@ -260,13 +435,15 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             for node in self.node_data:
                 node_type = node["node_type"]
                 if node_type == "Goal":
-                    drive = node["drive"]
-                    self.get_logger().info("Creating Goal: " + drive)
-                    created_goal = await self.create_goal(drive)
+                    created_goal_drive = node["drive"]
+                    self.get_logger().info("Creating Goal: " + created_goal_drive)
+                    created_goal = await self.create_goal(created_goal_drive)
                 elif node_type == "UtilityModel":
                     goal = node.get("goal", None)
+                    drive = None # Only the goal just created has a drive here; it names the policy of the model
                     if not goal and created_goal:
                         goal = created_goal
+                        drive = created_goal_drive
                     elif goal is None:
                         raise ValueError("Goal is required for UtilityModel creation.")
                     if created_world_model:
@@ -281,6 +458,12 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         self.node_data = []  # Clear node data after processing
 
     async def create_world_model(self):
+        """
+        Creates a World Model with the default class and parameters of the connectors. This is a coroutine and must be awaited.
+
+        :return: Name of the World Model, or None if it could not be created.
+        :rtype: str or None
+        """
         name = self.generate_node_name("WorldModel")
         classname = self.default_class.get("WorldModel", "cognitive_nodes.world_model.WorldModel") 
         creation_response = await self.create_node_client(name=name, class_name=classname, parameters=self.default_params.get("WorldModel", {}))
@@ -292,6 +475,14 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             return None
         
     async def create_goal(self, drive):
+        """
+        Creates a Goal linked to a Drive, with the default class and parameters of the connectors. This is a coroutine and must be awaited.
+
+        :param drive: Name of the Drive.
+        :type drive: str
+        :return: Name of the Goal, or None if it could not be created.
+        :rtype: str or None
+        """
         name = self.generate_node_name("Goal")
         classname = self.default_class.get("Goal", "cognitive_nodes.goal.Goal")
         parameters = self.default_params.get("Goal", {})
@@ -305,6 +496,22 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             return None
     
     async def create_utility_model(self, goal, drive, world_model, trace):
+        """
+        Creates the nodes needed to model a Goal. This is a coroutine and must be awaited.
+
+        In order: a P-Node, to which the old perceptions of the trace are added as points; a C-Node that links the World Model, the P-Node and the
+        Goal; a Utility Model linked to the C-Node, to which the trace is added with reward 1.0 (service ``add_trace``); and a learned Policy (see :meth:`create_policy`).
+        Failures are logged, but the creation goes on.
+
+        :param goal: Name of the Goal.
+        :type goal: str
+        :param drive: Name of the Drive of the Goal, used to name the Policy (the Goal is used if it is None).
+        :type drive: str or None
+        :param world_model: Name of the World Model.
+        :type world_model: str
+        :param trace: Trace of episodes (as read from the episodic buffer) that led to the reward.
+        :type trace: xarray.DataArray
+        """
         utility_model_name = self.generate_node_name("UtilityModel")
         ident = f"{world_model}__{goal}__{utility_model_name}"
         space_class = self.default_class.get("Space")
@@ -314,6 +521,9 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         pnode_parameters = self.default_params.get("PNode", {})
         cnode_parameters = self.default_params.get("CNode", {})
         utility_model_parameters = self.default_params.get("UtilityModel", {})
+        trace = container_to_episode_obj(trace)
+        perception_points = trace.old_perception
+        trace_msg = episode_obj_to_msg(trace)
 
         # Create P-Node
         pnode_name = f"pnode_{ident}"
@@ -324,9 +534,8 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
         pnode_points_service = f"pnode/{pnode_name}/add_points"
         if pnode_points_service not in self.node_clients:
             self.node_clients[pnode_points_service] = ServiceClientAsync(self, AddPoints, pnode_points_service, self.cbgroup_client)
-        points = [perception_dict_to_msg(episode.old_perception) for episode in trace]
-        confidences = list(np.ones(len(points)))
-        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=points, confidences=confidences)
+        confidences = list(np.ones(len(trace)))
+        pnode_points_response = await self.node_clients[pnode_points_service].send_request_async(points=perception_points.to_msg(), confidences=confidences)
         if not pnode_points_response.added:
             self.get_logger().error(f"Failed to add points to P-Node: {pnode_name}")
 
@@ -341,23 +550,67 @@ class ModelCreationPolicy(Policy, ModelCreationMixin):
             self.get_logger().error(f"Failed to create C-Node: {cnode_name}")
 
         # Create Utility Model
-        neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
-        creation_response = await self.create_node_client(name=utility_model_name, class_name=utility_model_class, parameters={**utility_model_parameters, **neighbors})
-        if not creation_response.created:
-            self.get_logger().error(f"Failed to create UtilityModel: {utility_model_name}")
-        utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
-        if utility_model_trace_service not in self.node_clients:
-            self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
-        if drive:
-            reward_node = drive
+        if self.spawn_utility_model:
+            neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
+            creation_response = await self.create_node_client(name=utility_model_name, class_name=utility_model_class, parameters={**utility_model_parameters, **neighbors})
+            if not creation_response.created:
+                self.get_logger().error(f"Failed to create UtilityModel: {utility_model_name}")
+            utility_model_trace_service = f"utility_model/{utility_model_name}/add_trace"
+            if utility_model_trace_service not in self.node_clients:
+                self.node_clients[utility_model_trace_service] = ServiceClientAsync(self, AddTrace, utility_model_trace_service, self.cbgroup_client)
+            trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=trace_msg, reward=1.0)
+            if not trace_success.added:
+                self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
         else:
-            reward_node = goal
-        rewards = [episode.reward_list.get(reward_node, 0.0) for episode in trace]
-        trace_success = await self.node_clients[utility_model_trace_service].send_request_async(episodes=episode_obj_list_to_msg_list(trace), rewards=rewards)
-        if not trace_success.added:
-            self.get_logger().error(f"Failed to add trace to UtilityModel: {utility_model_name}")
+            self.get_logger().info(f"spawn_utility_model=False: skipping UtilityModel for goal {goal}")
+
+        # Create a specialised PolicyLearned for this goal/drive.
+        if self.spawn_policy:
+            await self.create_policy(goal, drive, cnode_name)
+        else:
+            self.get_logger().info(f"spawn_policy=False: skipping PolicyLearned for goal {goal}")
+
+    async def create_policy(self, goal, drive, cnode_name):
+        """
+        Creates a Policy linked to a C-Node. This is a coroutine and must be awaited.
+        Only a learned policy (:class:`cognitive_nodes.policy.PolicyLearned` or a subclass) is created; the default class is the one of the
+        ``Policy`` connector, or PolicyLearned. The Goal is its ``target_reward``.
+
+        :param goal: Name of the Goal.
+        :type goal: str
+        :param drive: Name of the Drive of the Goal, used to name the Policy (the Goal is used if it is None).
+        :type drive: str or None
+        :param cnode_name: Name of the C-Node.
+        :type cnode_name: str
+        :return: Name of the Policy, or None if it was not created because the default class is not a learned policy.
+        :rtype: str or None
+        """
+        policy_name = f"policy_{drive if drive else goal}"
+        policy_class = self.default_class.get("Policy", "cognitive_nodes.policy.PolicyLearned")
+        # Only a policy that learns can be created for a goal: other classes need parameters of their own (e.g. PolicyBlocking)
+        if not issubclass(class_from_classname(policy_class), PolicyLearned):
+            self.get_logger().info(f"{policy_class} is not a learned policy, not creating a policy for {drive if drive else goal}.")
+            return None
+        policy_parameters = self.default_params.get("Policy", {})
+        neighbors = {"neighbors": [{"name": cnode_name, "node_type": "CNode"}]}
+        params = {**policy_parameters, **neighbors, "target_reward": goal}
+        creation_response = await self.create_node_client(
+            name=policy_name, class_name=policy_class, parameters=params
+        )
+        if creation_response.created:
+            self.get_logger().info(f"{policy_class}: {policy_name} created successfully.")
+        else:
+            self.get_logger().error(f"Failed to create Policy: {policy_name}")
+        return policy_name
 
     def read_activation_callback(self, msg):
+        """
+        Reads the activation of a neighbor (see the base class). When all the activation inputs are updated, ``missing_world_model`` is set
+        if no World Model is active, and cleared otherwise.
+
+        :param msg: Activation message.
+        :type msg: cognitive_node_interfaces.msg.Activation
+        """
         super().read_activation_callback(msg)
         # Process world model activations
         updated_activations = all((self.activation_inputs[node_name]['updated'] for node_name in self.activation_inputs)) 

@@ -1,0 +1,2608 @@
+CNode:
+  client_present_cnode:
+    neighbors:
+    - name: client_present_goal
+      node_type: Goal
+    - name: BARTENDER
+      node_type: WorldModel
+    - name: client_present_pnode
+      node_type: PNode
+  cnode_client_0_33__goal_2__place_glass:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__goal_2__place_glass
+      node_type: PNode
+    - name: goal_2
+      node_type: Goal
+  cnode_client_0_33__goal_5__place_glass:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__goal_5__place_glass
+      node_type: PNode
+    - name: goal_5
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_11__pick_glass:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_11__pick_glass
+      node_type: PNode
+    - name: reach_pnode_11
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_15__change_position:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_15__change_position
+      node_type: PNode
+    - name: reach_pnode_15
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_17__pick_glass:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_17__pick_glass
+      node_type: PNode
+    - name: reach_pnode_17
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_17_dup_0__prepare_drink:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_17_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_17_dup_0
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_25__pick_bottle:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_25__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_25
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_25_dup_0__pick_glass:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_25_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_25_dup_0
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_3__change_position:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_3__change_position
+      node_type: PNode
+    - name: reach_pnode_3
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_9__change_position:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_9__change_position
+      node_type: PNode
+    - name: reach_pnode_9
+      node_type: Goal
+  cnode_client_0_33__reach_pnode_9_dup_0__prepare_drink:
+    neighbors:
+    - name: client_0_33
+      node_type: WorldModel
+    - name: pnode_client_0_33__reach_pnode_9_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_9_dup_0
+      node_type: Goal
+  cnode_client_0_67__goal_0__place_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__goal_0__place_glass
+      node_type: PNode
+    - name: goal_0
+      node_type: Goal
+  cnode_client_0_67__goal_1__place_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__goal_1__place_glass
+      node_type: PNode
+    - name: goal_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_0__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_0__change_position
+      node_type: PNode
+    - name: reach_pnode_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_14__prepare_drink:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_14__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_14
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_14_dup_0__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_14_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_14_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_14_dup_1__place_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_14_dup_1__place_bottle
+      node_type: PNode
+    - name: reach_pnode_14_dup_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_14_dup_2__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_14_dup_2__change_position
+      node_type: PNode
+    - name: reach_pnode_14_dup_2
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_18__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_18__change_position
+      node_type: PNode
+    - name: reach_pnode_18
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_18_dup_0__pick_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_18_dup_0__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_18_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_18_dup_1__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_18_dup_1__pick_glass
+      node_type: PNode
+    - name: reach_pnode_18_dup_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_1__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_1__change_position
+      node_type: PNode
+    - name: reach_pnode_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_1_dup_0__shake_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_1_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_20__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_20__pick_glass
+      node_type: PNode
+    - name: reach_pnode_20
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_20_dup_0__prepare_drink:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_20_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_20_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_21__pick_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_21__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_21
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_21_dup_0__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_21_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_21_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_24__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_24__pick_glass
+      node_type: PNode
+    - name: reach_pnode_24
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_24_dup_0__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_24_dup_0__change_position
+      node_type: PNode
+    - name: reach_pnode_24_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_24_dup_1__place_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_24_dup_1__place_bottle
+      node_type: PNode
+    - name: reach_pnode_24_dup_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_26__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_26__change_position
+      node_type: PNode
+    - name: reach_pnode_26
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_27__pick_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_27__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_27
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_27_dup_0__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_27_dup_0__change_position
+      node_type: PNode
+    - name: reach_pnode_27_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_27_dup_1__place_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_27_dup_1__place_glass
+      node_type: PNode
+    - name: reach_pnode_27_dup_1
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_29__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_29__change_position
+      node_type: PNode
+    - name: reach_pnode_29
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_29_dup_0__place_bottle:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_29_dup_0__place_bottle
+      node_type: PNode
+    - name: reach_pnode_29_dup_0
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_4__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_4__pick_glass
+      node_type: PNode
+    - name: reach_pnode_4
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_6__change_position:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_6__change_position
+      node_type: PNode
+    - name: reach_pnode_6
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_8__pick_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_8__pick_glass
+      node_type: PNode
+    - name: reach_pnode_8
+      node_type: Goal
+  cnode_client_0_67__reach_pnode_8_dup_0__shake_glass:
+    neighbors:
+    - name: client_0_67
+      node_type: WorldModel
+    - name: pnode_client_0_67__reach_pnode_8_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_8_dup_0
+      node_type: Goal
+  cnode_client_0_98__goal_3__place_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__goal_3__place_glass
+      node_type: PNode
+    - name: goal_3
+      node_type: Goal
+  cnode_client_0_98__goal_4__place_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__goal_4__place_glass
+      node_type: PNode
+    - name: goal_4
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_10__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_10__change_position
+      node_type: PNode
+    - name: reach_pnode_10
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_12__pick_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_12__pick_glass
+      node_type: PNode
+    - name: reach_pnode_12
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_12_dup_0__prepare_drink:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_12_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_12_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_13__pick_bottle:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_13__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_13
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_13_dup_0__pick_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_13_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_13_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_13_dup_1__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_13_dup_1__change_position
+      node_type: PNode
+    - name: reach_pnode_13_dup_1
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_16__pick_bottle:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_16__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_16
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_16_dup_0__pick_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_16_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_16_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_19__pick_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_19__pick_glass
+      node_type: PNode
+    - name: reach_pnode_19
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_19_dup_0__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_19_dup_0__change_position
+      node_type: PNode
+    - name: reach_pnode_19_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_19_dup_1__place_bottle:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_19_dup_1__place_bottle
+      node_type: PNode
+    - name: reach_pnode_19_dup_1
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_22__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_22__change_position
+      node_type: PNode
+    - name: reach_pnode_22
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_22_dup_0__place_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_22_dup_0__place_glass
+      node_type: PNode
+    - name: reach_pnode_22_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_22_dup_1__pick_bottle:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_22_dup_1__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_22_dup_1
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_23__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_23__change_position
+      node_type: PNode
+    - name: reach_pnode_23
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_23_dup_0__place_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_23_dup_0__place_glass
+      node_type: PNode
+    - name: reach_pnode_23_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_23_dup_1__place_bottle:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_23_dup_1__place_bottle
+      node_type: PNode
+    - name: reach_pnode_23_dup_1
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_28__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_28__change_position
+      node_type: PNode
+    - name: reach_pnode_28
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_2__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_2__change_position
+      node_type: PNode
+    - name: reach_pnode_2
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_30__place_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_30__place_glass
+      node_type: PNode
+    - name: reach_pnode_30
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_30_dup_0__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_30_dup_0__change_position
+      node_type: PNode
+    - name: reach_pnode_30_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_5__change_position:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_5__change_position
+      node_type: PNode
+    - name: reach_pnode_5
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_5_dup_0__prepare_drink:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_5_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_5_dup_0
+      node_type: Goal
+  cnode_client_0_98__reach_pnode_7__pick_glass:
+    neighbors:
+    - name: client_0_98
+      node_type: WorldModel
+    - name: pnode_client_0_98__reach_pnode_7__pick_glass
+      node_type: PNode
+    - name: reach_pnode_7
+      node_type: Goal
+  effectance_cnode:
+    neighbors:
+    - name: effectance_goal
+      node_type: Goal
+    - name: effectance_pnode
+      node_type: PNode
+  get_response_cnode:
+    neighbors:
+    - name: get_response_goal
+      node_type: Goal
+    - name: BARTENDER
+      node_type: WorldModel
+    - name: get_response_pnode
+      node_type: PNode
+  novelty_cnode:
+    neighbors:
+    - name: novelty_goal
+      node_type: Goal
+    - name: novelty_pnode
+      node_type: PNode
+  prospection_cnode:
+    neighbors:
+    - name: prospection_goal
+      node_type: Goal
+    - name: prospection_pnode
+      node_type: PNode
+Drive:
+  client_present_drive:
+    neighbors:
+    - name: client_present_need
+      node_type: RobotPurpose
+  effectance_drive:
+    neighbors:
+    - name: effectance_need
+      node_type: RobotPurpose
+  get_response_drive:
+    neighbors:
+    - name: get_response_need
+      node_type: RobotPurpose
+  novelty_drive:
+    neighbors:
+    - name: novelty_need
+      node_type: RobotPurpose
+  prospection_drive:
+    neighbors:
+    - name: prospection_need
+      node_type: RobotPurpose
+  return_the_glass_drive:
+    neighbors:
+    - name: return_the_glass_mission
+      node_type: RobotPurpose
+  serve_the_drink_drive:
+    neighbors:
+    - name: serve_the_drink_mission
+      node_type: RobotPurpose
+Goal:
+  client_present_goal:
+    neighbors:
+    - name: client_present_drive
+      node_type: Drive
+  effectance_goal:
+    neighbors:
+    - name: effectance_drive
+      node_type: Drive
+  get_response_goal:
+    neighbors:
+    - name: get_response_drive
+      node_type: Drive
+  goal_0:
+    neighbors:
+    - name: serve_the_drink_drive
+      node_type: Drive
+    - name: client_0_67
+      node_type: WorldModel
+  goal_1:
+    neighbors:
+    - name: return_the_glass_drive
+      node_type: Drive
+    - name: client_0_67
+      node_type: WorldModel
+  goal_2:
+    neighbors:
+    - name: return_the_glass_drive
+      node_type: Drive
+    - name: client_0_33
+      node_type: WorldModel
+  goal_3:
+    neighbors:
+    - name: serve_the_drink_drive
+      node_type: Drive
+    - name: client_0_98
+      node_type: WorldModel
+  goal_4:
+    neighbors:
+    - name: return_the_glass_drive
+      node_type: Drive
+    - name: client_0_98
+      node_type: WorldModel
+  goal_5:
+    neighbors:
+    - name: serve_the_drink_drive
+      node_type: Drive
+    - name: client_0_33
+      node_type: WorldModel
+  novelty_goal:
+    neighbors:
+    - name: novelty_drive
+      node_type: Drive
+  prospection_goal:
+    neighbors:
+    - name: prospection_drive
+      node_type: Drive
+  reach_pnode_0:
+    neighbors:
+    - name: pnode_client_0_67__goal_1__place_glass
+      node_type: PNode
+    - name: goal_1
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_1:
+    neighbors:
+    - name: pnode_client_0_67__goal_0__place_glass
+      node_type: PNode
+    - name: goal_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  # reach_pnode_10:
+  #   neighbors:
+  #   - name: pnode_client_0_98__reach_pnode_7__pick_glass
+  #     node_type: PNode
+  #   - name: reach_pnode_7
+  #     node_type: Goal
+  #   - name: client_0_98
+  #     node_type: WorldModel
+  reach_pnode_11:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_3__change_position
+      node_type: PNode
+    - name: reach_pnode_3
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_12:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_5__change_position
+      node_type: PNode
+    - name: reach_pnode_5
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_12_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_5__change_position
+      node_type: PNode
+    - name: reach_pnode_5
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_13:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_5_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_5_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_13_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_5_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_5_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_13_dup_1:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_5_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_5_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_14:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_1_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_14_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_1_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_14_dup_1:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_1_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_14_dup_2:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_1_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_15:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_11__pick_glass
+      node_type: PNode
+    - name: reach_pnode_11
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_16:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_12_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_12_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_16_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_12_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_12_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_17:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_9__change_position
+      node_type: PNode
+    - name: reach_pnode_9
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_17_dup_0:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_9__change_position
+      node_type: PNode
+    - name: reach_pnode_9
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_18:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_14__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_14
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_18_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_14__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_14
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_18_dup_1:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_14__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_14
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_19:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_16
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_19_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_16
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_19_dup_1:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_16
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_1_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__goal_0__place_glass
+      node_type: PNode
+    - name: goal_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  # reach_pnode_2:
+  #   neighbors:
+  #   - name: pnode_client_0_98__goal_4__place_glass
+  #     node_type: PNode
+  #   - name: goal_4
+  #     node_type: Goal
+  #   - name: client_0_98
+  #     node_type: WorldModel
+  reach_pnode_20:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_8_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_8_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_20_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_8_dup_0__shake_glass
+      node_type: PNode
+    - name: reach_pnode_8_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_21:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_18__change_position
+      node_type: PNode
+    - name: reach_pnode_18
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_21_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_18__change_position
+      node_type: PNode
+    - name: reach_pnode_18
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_22:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_16_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_22_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_16_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_22_dup_1:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_16_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_16_dup_0
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_23:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_19__pick_glass
+      node_type: PNode
+    - name: reach_pnode_19
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_23_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_19__pick_glass
+      node_type: PNode
+    - name: reach_pnode_19
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_23_dup_1:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_19__pick_glass
+      node_type: PNode
+    - name: reach_pnode_19
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_24:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_21
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_24_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_21
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_24_dup_1:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_21
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_25:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_17_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_17_dup_0
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_25_dup_0:
+    neighbors:
+    - name: pnode_client_0_33__reach_pnode_17_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_17_dup_0
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_26:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_8__pick_glass
+      node_type: PNode
+    - name: reach_pnode_8
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_27:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_21_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_27_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_21_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_27_dup_1:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_21_dup_0__pick_glass
+      node_type: PNode
+    - name: reach_pnode_21_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_28:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_12__pick_glass
+      node_type: PNode
+    - name: reach_pnode_12
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_29:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_24__pick_glass
+      node_type: PNode
+    - name: reach_pnode_24
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_29_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_24__pick_glass
+      node_type: PNode
+    - name: reach_pnode_24
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_3:
+    neighbors:
+    - name: pnode_client_0_33__goal_2__place_glass
+      node_type: PNode
+    - name: goal_2
+      node_type: Goal
+    - name: client_0_33
+      node_type: WorldModel
+  reach_pnode_30:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_22_dup_1__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_22_dup_1
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_30_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__reach_pnode_22_dup_1__pick_bottle
+      node_type: PNode
+    - name: reach_pnode_22_dup_1
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_31:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_20_dup_0__prepare_drink
+      node_type: PNode
+    - name: reach_pnode_20_dup_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_4:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_0__change_position
+      node_type: PNode
+    - name: reach_pnode_0
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_5:
+    neighbors:
+    - name: pnode_client_0_98__goal_3__place_glass
+      node_type: PNode
+    - name: goal_3
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_5_dup_0:
+    neighbors:
+    - name: pnode_client_0_98__goal_3__place_glass
+      node_type: PNode
+    - name: goal_3
+      node_type: Goal
+    - name: client_0_98
+      node_type: WorldModel
+  reach_pnode_6:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_4__pick_glass
+      node_type: PNode
+    - name: reach_pnode_4
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  # reach_pnode_7:
+  #   neighbors:
+  #   - name: pnode_client_0_98__reach_pnode_2__change_position
+  #     node_type: PNode
+  #   - name: reach_pnode_2
+  #     node_type: Goal
+  #   - name: client_0_98
+  #     node_type: WorldModel
+  reach_pnode_8:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1__change_position
+      node_type: PNode
+    - name: reach_pnode_1
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  reach_pnode_8_dup_0:
+    neighbors:
+    - name: pnode_client_0_67__reach_pnode_1__change_position
+      node_type: PNode
+    - name: reach_pnode_1
+      node_type: Goal
+    - name: client_0_67
+      node_type: WorldModel
+  # reach_pnode_9:
+  #   neighbors:
+  #   - name: pnode_client_0_33__goal_5__place_glass
+  #     node_type: PNode
+  #   - name: goal_5
+  #     node_type: Goal
+  #   - name: client_0_33
+  #     node_type: WorldModel
+  # reach_pnode_9_dup_0:
+  #   neighbors:
+  #   - name: pnode_client_0_33__goal_5__place_glass
+  #     node_type: PNode
+  #   - name: goal_5
+  #     node_type: Goal
+  #   - name: client_0_33
+  #     node_type: WorldModel
+PNode:
+  client_present_pnode:
+    neighbors:
+    - name: client
+      node_type: Perception
+  effectance_pnode:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  get_response_pnode:
+    neighbors:
+    - name: client
+      node_type: Perception
+  novelty_pnode:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_33__goal_2__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_3
+      node_type: Goal
+  pnode_client_0_33__goal_5__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_9
+      node_type: Goal
+  pnode_client_0_33__reach_pnode_11__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_15
+      node_type: Goal
+  pnode_client_0_33__reach_pnode_15__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_33__reach_pnode_17__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_33__reach_pnode_17_dup_0__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_25
+      node_type: Goal
+  pnode_client_0_33__reach_pnode_25__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_33__reach_pnode_25_dup_0__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_33__reach_pnode_3__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_11
+      node_type: Goal
+  pnode_client_0_33__reach_pnode_9__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_17
+      node_type: Goal
+  pnode_client_0_33__reach_pnode_9_dup_0__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__goal_0__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_1
+      node_type: Goal
+  pnode_client_0_67__goal_1__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_0
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_0__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_4
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_14__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_18
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_14_dup_0__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_14_dup_1__place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_14_dup_2__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_18__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_21
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_18_dup_0__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_18_dup_1__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_1__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_8
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_1_dup_0__shake_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_14
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_20__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_20_dup_0__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_31
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_21__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_24
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_21_dup_0__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_27
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_24__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_29
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_24_dup_0__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_24_dup_1__place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_26__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_27__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_27_dup_0__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_27_dup_1__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_29__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_29_dup_0__place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_4__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_6
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_6__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_67__reach_pnode_8__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_26
+      node_type: Goal
+  pnode_client_0_67__reach_pnode_8_dup_0__shake_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_20
+      node_type: Goal
+  pnode_client_0_98__goal_3__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_5
+      node_type: Goal
+  pnode_client_0_98__goal_4__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_2
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_10__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_12__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_28
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_12_dup_0__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_16
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_13__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_13_dup_0__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_13_dup_1__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_16__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_19
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_16_dup_0__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_22
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_19__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_23
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_19_dup_0__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_19_dup_1__place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_22__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_22_dup_0__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_22_dup_1__pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_30
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_23__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_23_dup_0__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_23_dup_1__place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_28__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_2__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_7
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_30__place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_30_dup_0__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  pnode_client_0_98__reach_pnode_5__change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_12
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_5_dup_0__prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_13
+      node_type: Goal
+  pnode_client_0_98__reach_pnode_7__pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: reach_pnode_10
+      node_type: Goal
+  prospection_pnode:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+Perception:
+  bottle_in_right_hand:
+    neighbors:
+    - name: ''
+      node_type: ''
+  bottles:
+    neighbors:
+    - name: ''
+      node_type: ''
+  client:
+    neighbors:
+    - name: ''
+      node_type: ''
+  glass:
+    neighbors:
+    - name: ''
+      node_type: ''
+  glass_in_left_hand:
+    neighbors:
+    - name: ''
+      node_type: ''
+  robot_position:
+    neighbors:
+    - name: ''
+      node_type: ''
+Policy:
+  ask_nicely:
+    neighbors:
+    - name: client_present_cnode
+      node_type: CNode
+  change_position:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_67__reach_pnode_0__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_1__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_2__change_position
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_3__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_5__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_6__change_position
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_9__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_10__change_position
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_15__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_13_dup_1__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_18__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_19_dup_0__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_22__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_23__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_24_dup_0__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_26__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_27_dup_0__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_14_dup_2__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_28__change_position
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_29__change_position
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_30_dup_0__change_position
+      node_type: CNode
+  effectance_policy:
+    neighbors:
+    - name: effectance_cnode
+      node_type: CNode
+  novelty_policy:
+    neighbors:
+    - name: novelty_cnode
+      node_type: CNode
+  pick_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_98__reach_pnode_13__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_16__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_18_dup_0__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_21__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_22_dup_1__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_25__pick_bottle
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_27__pick_bottle
+      node_type: CNode
+  pick_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_67__reach_pnode_4__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_7__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_8__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_11__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_12__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_14_dup_0__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_13_dup_0__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_16_dup_0__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_17__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_18_dup_1__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_19__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_20__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_21_dup_0__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_24__pick_glass
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_25_dup_0__pick_glass
+      node_type: CNode
+  place_bottle:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_67__reach_pnode_14_dup_1__place_bottle
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_19_dup_1__place_bottle
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_23_dup_1__place_bottle
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_24_dup_1__place_bottle
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_29_dup_0__place_bottle
+      node_type: CNode
+  place_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_67__goal_0__place_glass
+      node_type: CNode
+    - name: cnode_client_0_67__goal_1__place_glass
+      node_type: CNode
+    - name: cnode_client_0_33__goal_2__place_glass
+      node_type: CNode
+    - name: cnode_client_0_98__goal_3__place_glass
+      node_type: CNode
+    - name: cnode_client_0_98__goal_4__place_glass
+      node_type: CNode
+    - name: cnode_client_0_33__goal_5__place_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_22_dup_0__place_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_23_dup_0__place_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_27_dup_1__place_glass
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_30__place_glass
+      node_type: CNode
+  prepare_drink:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_98__reach_pnode_5_dup_0__prepare_drink
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_9_dup_0__prepare_drink
+      node_type: CNode
+    - name: cnode_client_0_98__reach_pnode_12_dup_0__prepare_drink
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_14__prepare_drink
+      node_type: CNode
+    - name: cnode_client_0_33__reach_pnode_17_dup_0__prepare_drink
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_20_dup_0__prepare_drink
+      node_type: CNode
+  prospection_policy:
+    neighbors:
+    - name: prospection_cnode
+      node_type: CNode
+  save_preference:
+    neighbors:
+    - name: get_response_cnode
+      node_type: CNode
+  shake_glass:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+    - name: cnode_client_0_67__reach_pnode_1_dup_0__shake_glass
+      node_type: CNode
+    - name: cnode_client_0_67__reach_pnode_8_dup_0__shake_glass
+      node_type: CNode
+RobotPurpose:
+  client_present_need:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  effectance_need:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  get_response_need:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  novelty_need:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  prospection_need:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  return_the_glass_mission:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  serve_the_drink_mission:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+WorldModel:
+  BARTENDER:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  client_0_33:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  client_0_67:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception
+  client_0_98:
+    neighbors:
+    - name: client
+      node_type: Perception
+    - name: robot_position
+      node_type: Perception
+    - name: glass
+      node_type: Perception
+    - name: bottles
+      node_type: Perception
+    - name: glass_in_left_hand
+      node_type: Perception
+    - name: bottle_in_right_hand
+      node_type: Perception

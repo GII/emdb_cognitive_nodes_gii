@@ -12,7 +12,7 @@ Novelty
 Python script which implements components for exploration intrinsic motivation, based on novelty, which enables
 robots to explore their environment.
 
-For the moment, only a random exploration is implemented.
+This module implements the random exploration (PolicyNovelty). The novelty-based exploration is implemented by NoveltyUtilityModel, in the Utility Model module.
 
 .. automodule:: cognitive_nodes.novelty
     :members:
@@ -25,9 +25,9 @@ LLM Exploration
 Python script which implements components for exploration intrinsic motivation, guided by a Large Language Model (LLM),
 which enables robots to explore their environment with the help of an LLM.
 
-.. automodule:: cognitive_nodes.llm_exploration
-    :members:
-    :show-inheritance:
+.. note::
+
+    The API of this module is not available in this version of the documentation.
 
 +++++++++++++++
 Effectance
@@ -65,5 +65,26 @@ Python module that implements components for autonomous model creation, allowing
 dynamically generate and integrate new world and utility models based on its interactions with the environment.
 
 .. automodule:: cognitive_nodes.model_creation
+    :members:
+    :show-inheritance:
+
++++++++++++++++
+Knowledge reuse
++++++++++++++++
+
+Python module that implements components for knowledge reuse intrinsic motivation, which reuses chains of nodes learned in other situations for a newly observed goal.
+The drive finds the chains that can be reused, and the policy duplicates and reconnects their nodes.
+
+.. automodule:: cognitive_nodes.knowledge_reuse
+    :members: DriveKnowledgeReuse, PolicyKnowledgeReuse
+    :show-inheritance:
+
+++++++++++
+Competence
+++++++++++
+
+Python module that implements the competence intrinsic motivation, which tracks the competence of the robot in achieving its goals and drives it to improve them.
+
+.. automodule:: cognitive_nodes.competence
     :members:
     :show-inheritance:

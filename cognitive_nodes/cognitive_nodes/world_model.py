@@ -2,24 +2,28 @@ import rclpy
 import numpy as np
 from copy import deepcopy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
-
+from cognitive_nodes.episode import Episode, container_msg_to_episode
 from cognitive_nodes.deliberative_model import DeliberativeModel, Learner, ANNLearner, Evaluator
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
 from simulators.scenarios_2D import SimpleScenario, EntityType
-from cognitive_node_interfaces.msg import Perception, Actuation, SuccessRate
-from core.utils import actuation_dict_to_msg, actuation_msg_to_dict, perception_dict_to_msg, perception_msg_to_dict
-from rclpy.impl.rcutils_logger import RcutilsLogger
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list 
+from core.utils import class_from_classname
 
-from cognitive_node_interfaces.msg import Episode as EpisodeMsg
+
+from cognitive_node_interfaces.msg import SuccessRate, Perception
+
+
 
 
 class WorldModel(DeliberativeModel):
     """
-    World Model class: A static world model that is always active
+    World Model class: A static world model that is always active (activation 1.0, confidence 1.0).
+
+    This base class does not predict anything: :meth:`predict` returns the old perception of the episodes as the prediction.
+    Services are published with the prefix ``world_model/<name>/`` (see :class:`cognitive_nodes.deliberative_model.DeliberativeModel`).
     """
-    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', episodes_topic=None, prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
+    def __init__(self, name='world_model', class_name = 'cognitive_nodes.world_model.WorldModel', node_type="WorldModel", service_prefix="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params):
         """
         Constructor of the World Model class.
 
@@ -29,31 +33,49 @@ class WorldModel(DeliberativeModel):
         :type name: str
         :param class_name: The name of the World Model class.
         :type class_name: str
+        :param node_type: The type of the node, defaults to "WorldModel".
+        :type node_type: str
+        :param service_prefix: Prefix of the services of the node, defaults to "world_model".
+        :type service_prefix: str
+        :param prediction_srv_type: Class name of the type of the prediction service, defaults to "cognitive_node_interfaces.srv.Predict".
+        :type prediction_srv_type: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.deliberative_model.DeliberativeModel`.
+        :type params: dict
         """
-        super().__init__(name, class_name, node_type="world_model", prediction_srv_type="cognitive_node_interfaces.srv.Predict", **params)
+        super().__init__(name, class_name, node_type=node_type, service_prefix=service_prefix, prediction_srv_type=prediction_srv_type, **params)
         self.episodic_buffer=None
         self.learner=None
         self.confidence_evaluator=None
         self.activation.activation = 1.0
+        self.metacognitive_params["confidence"] = 1.0
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
+    def predict(self, input_episodes: Episode) -> Episode:
         """Predict output episodes from input episodes using the world model.
+        The base class does not implement any prediction: it logs a warning and returns the old perceptions as the predicted perceptions.
 
-        :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
-        :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        :param input_episodes: Episode with the old perceptions and actions. It can have several rows (one per sample).
+        :type input_episodes: Episode
+        :return: Episode whose ``perception`` is the ``old_perception`` of the input.
+        :rtype: Episode
         """        
-        self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the input episodes.")
-        output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
-        return output_episodes
+        self.get_logger().warning("The base WorldModel class does not implement any prediction. Returning the old perceptions.")
+        return Episode(perception=input_episodes.old_perception)
+    
 
 
 class WorldModelLearned(WorldModel):
     """
     WorldModelLearned class: A world model that uses episodes to learn the dynamics of the world.
+
+    The node subscribes to a topic of episodes (flattened episodes in a :class:`core_interfaces.msg.Container`) and stores them in an
+    episodic buffer with two parts: a main buffer to train the learner and a secondary one to evaluate it. The inputs of the
+    model are ``old_perception`` and ``action`` and the output is ``perception``. The learner (an
+    :class:`cognitive_nodes.deliberative_model.ANNLearner`) is trained when the main buffer is full and at least ``train_sample``
+    new samples have arrived, and evaluated when the secondary buffer is filled with new samples. The evaluation updates
+    the confidence of the node (see :class:`EvaluatorWorldModel`) and publishes the prediction error.
+    Episodes with ``parent_policy`` equal to ``reset_world`` are not stored.
     """
-    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
+    def __init__(self, name='world_model', class_name='cognitive_nodes.world_model.WorldModel', episodes_msg='core_interfaces.msg.Container', episodes_topic=None,  main_size=2000, secondary_size=50, train_sample=200, train_split=0.80, validation_split=0.1, retrain=True, learner_params={}, **params):
         """
         Constructor of the WorldModelLearned class.
 
@@ -61,8 +83,27 @@ class WorldModelLearned(WorldModel):
         :type name: str
         :param class_name: The name of the World Model class.
         :type class_name: str
-        :param episodes_topic: The topic to subscribe to for episodes.
+        :param episodes_msg: Class name of the message type of the episodes topic, defaults to 'core_interfaces.msg.Container'.
+        :type episodes_msg: str
+        :param episodes_topic: The topic to subscribe to for episodes. It is required.
         :type episodes_topic: str
+        :param main_size: Maximum size of the main buffer (training samples), defaults to 2000.
+        :type main_size: int
+        :param secondary_size: Maximum size of the secondary buffer (test samples), defaults to 50.
+        :type secondary_size: int
+        :param train_sample: Number of new samples in the main buffer needed to train the learner, defaults to 200.
+        :type train_sample: int
+        :param train_split: Fraction of the new episodes that go to the main buffer; the rest go to the secondary one, defaults to 0.80.
+        :type train_split: float
+        :param validation_split: Fraction of the training samples used for validation in each training, defaults to 0.1.
+        :type validation_split: float
+        :param retrain: If True, the learner is trained again every time there are enough new samples; if False it is trained only once, defaults to True.
+        :type retrain: bool
+        :param learner_params: Parameters passed to the :class:`cognitive_nodes.deliberative_model.ANNLearner`.
+        :type learner_params: dict
+        :param params: Additional parameters passed to :class:`WorldModel`.
+        :type params: dict
+        :raises ValueError: If ``episodes_topic`` is not provided.
         """
         super().__init__(name, class_name, **params)
         self.cbgroup_episodes = MutuallyExclusiveCallbackGroup()
@@ -72,7 +113,7 @@ class WorldModelLearned(WorldModel):
             raise ValueError("episodes_topic must be provided for WorldModelLearned")
 
         self.episode_subscription = self.create_subscription(
-            EpisodeMsg,
+            class_from_classname(episodes_msg),
             self.episodes_topic,
             self.episode_callback,
             10,
@@ -96,43 +137,51 @@ class WorldModelLearned(WorldModel):
         self.train_sample = train_sample
         self.validation_split = validation_split
 
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
-        """Predict output episodes from input episodes using the world model.
+    def predict(self, input_episodes: Episode) -> Episode:
+        """Predict output episodes from input episodes using the learner.
 
-        :param input_episodes: List of episodes containing old perceptions and actions.
-        :type input_episodes: list[Episode]
-        :return: List of predicted episodes with updated perceptions.
-        :rtype: list[Episode]
+        The inputs of the learner are built from the ``old_perception`` and ``action`` of the episode. If the labels of the
+        buffer are not defined yet, or the learner is not configured (it has not been trained), the
+        old perceptions are returned as the predicted perceptions.
+
+        :param input_episodes: Episode with the old perceptions and actions. It can have several rows (one per sample).
+        :type input_episodes: Episode
+        :return: Episode with the predicted perceptions (one row per input row).
+        :rtype: Episode
         """  
         if not self.episodic_buffer.input_labels or not self.episodic_buffer.output_labels:
-            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the input episodes.")
-            output_episodes = [Episode(perception=deepcopy(episode.old_perception), action=deepcopy(episode.action)) for episode in input_episodes]
-            return output_episodes
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+            self.get_logger().warning("Episodic buffer input or output labels are not defined. Returning the old perceptions.")
+            return Episode(perception=input_episodes.old_perception)  # If the model is not configured, the perception is not expected to change
+        input_data = self.episodic_buffer.input_episodes_to_matrix(input_episodes)
         self.get_logger().info(f"Data for prediction: {input_data.shape} samples. Ex: {input_data[:2]}")
         predictions = self.learner.call(input_data)
         if predictions is None:
             self.get_logger().warning("No predictions were made by the learner. Returning the old perceptions.")
-            for episode in input_episodes:
-                episode.perception = episode.old_perception  # If the model is not configured, return the old perception
-            predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
+            predicted_episodes = Episode(perception=input_episodes.old_perception)  # If the model is not configured, return the input episodes with updated perceptions
         else:
             self.get_logger().debug(f"Predictions: {predictions}")
             self.get_logger().debug(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+            predicted_episodes = self.episodic_buffer.matrix_to_output_episodes(predictions)
         self.get_logger().info(f"Prediction made: {len(predicted_episodes)} episodes")
         return predicted_episodes
     
 
-    def episode_callback(self, msg: EpisodeMsg):
+    def episode_callback(self, msg):
             """
-            Callback for the episode subscription. It receives an episode message and adds it to the episodic buffer.
+            Callback for the episode subscription. It receives an episode message and adds it to the episodic buffer
+            (episodes with ``parent_policy`` equal to ``reset_world`` are ignored). Then it trains the learner and/or evaluates it if
+            there are enough new samples (see the class documentation).
 
             :param msg: The episode message received.
-            :type msg: cognitive_node_interfaces.msg.Episode
+            :type msg: core_interfaces.msg.Container
             """
-            episode = episode_msg_to_obj(msg)
-            if episode.parent_policy != "reset_world":
+            episode = container_msg_to_episode(msg)
+            if episode.old_perception is None or episode.action is None or episode.perception is None:
+                # Not a transition (e.g. ModelCreationPolicy's episode when the last episode had no
+                # action): add_episode would raise "Missing source labels" in this subscription
+                # callback, which stops the executor and destroys every node of this execution node.
+                self.get_logger().debug(f"Incomplete episode from [{episode.parent_policy}] not added to buffer.")
+            elif episode.parent_policy != "reset_world":
                 self.episodic_buffer.add_episode(episode)
                 self.get_logger().info(f"Episode added to buffer \n New train samples: {self.episodic_buffer.new_sample_count_main}, New test samples: {self.episodic_buffer.new_sample_count_secondary}")
 
@@ -160,38 +209,57 @@ class WorldModelLearned(WorldModel):
     
 class EvaluatorWorldModel(Evaluator):
     """
-    EvaluatorWorldModel class: Evaluates the success rate of the world model based on its predictions.
+    EvaluatorWorldModel class: Evaluates the world model based on its predictions on the test samples of the episodic buffer.
+
+    The prediction error is the one returned by ``learner.evaluate``, i.e. the mean absolute error (MAE), and the confidence of the
+    node is calculated from it. The error is published on ``world_model/<name>/prediction_error``
+    (:class:`cognitive_node_interfaces.msg.SuccessRate`). The confidence starts at 0.0.
     """
     def __init__(self, node:WorldModelLearned, learner:ANNLearner,  buffer:EpisodicBuffer, **params) -> None:
         """
         Constructor of the EvaluatorWorldModel class.
 
+        :param node: The World Model that uses this evaluator.
+        :type node: WorldModelLearned
         :param learner: The learner to evaluate.
-        :type learner: Learner
+        :type learner: cognitive_nodes.deliberative_model.ANNLearner
         :param buffer: Episodic buffer to use.
         :type buffer: EpisodicBuffer
+        :param params: Additional keyword parameters passed to :class:`cognitive_nodes.deliberative_model.Evaluator`.
+        :type params: dict
         """        
         super().__init__(node, learner, buffer, **params)
         self.prediction_error = 0.0
+        self.node.metacognitive_params["confidence"] = 0.0
         self.prediction_error_publisher = self.node.create_publisher(SuccessRate, f"world_model/{self.node.name}/prediction_error", 0)
 
     def evaluate(self):
         """
-        Obtain the MSE error of the World Model according to the test samples in the episodic buffer.
+        Obtain the prediction error of the World Model according to the test samples in the episodic buffer.
+        The error is the mean absolute error (MAE) returned by the learner, and it is used to update the confidence of the node.
         """        
         x_test, y_test = self.buffer.get_test_samples()
         self.prediction_error = self.learner.evaluate(x_test, y_test)
+        self.calculate_metacognitive_parameters()
         self.node.get_logger().info(f"World Model Prediction Error: {self.prediction_error}")
 
     def publish_prediction_error(self):
         """
-        Publishes the prediction error of the world model.
+        Publishes the prediction error of the world model (as the ``success_rate`` field of a ``SuccessRate`` message).
         """
         prediction_error_msg = SuccessRate()
         prediction_error_msg.node_name = self.node.name
         prediction_error_msg.node_type = self.node.node_type
         prediction_error_msg.success_rate = self.prediction_error
         self.prediction_error_publisher.publish(prediction_error_msg)
+
+    def calculate_metacognitive_parameters(self):
+        """
+        Calculate the confidence of the world model based on its prediction error: ``1 / (1 + prediction_error)``, stored in the metacognitive parameters of the node.
+        """
+        self.node.get_logger().info(f"Calculating confidence for World Model {self.node.name} with prediction error {self.prediction_error}")
+        # The prediction error (MSE) is 0 or more: the lower it is, the higher the confidence, between 0 and 1
+        self.node.metacognitive_params["confidence"] = 1.0 / (1.0 + self.prediction_error)
 
 
 
@@ -200,7 +268,7 @@ class EvaluatorWorldModel(Evaluator):
 
 class Sim2DWorldModel(WorldModel):
     """
-    Sim2DWorldModel class: A fixed world model of a 2D simulator. It uses the SimpleScenario simulator to predict the next perception.
+    Sim2DWorldModel class: A fixed world model of a 2D simulator. Its learner (:class:`Sim2D`) uses the SimpleScenario simulator to predict the next perception.
     """    
     def __init__(self, name='world_model', wm_actuation_config=None, wm_perception_config=None, class_name='cognitive_nodes.world_model.WorldModel', **params):
         """
@@ -208,36 +276,39 @@ class Sim2DWorldModel(WorldModel):
 
         :param name: The name of the World Model instance.
         :type name: str
-        :param actuation_config: Dictionary with the parameters of the actuation.
-        :type actuation_config: dict
-        :param perception_config: Dictionary with the parameters of the perception.
-        :type perception_config: dict
+        :param wm_actuation_config: Dictionary with the parameters of the actuation.
+        :type wm_actuation_config: dict
+        :param wm_perception_config: Dictionary with the parameters of the perception.
+        :type wm_perception_config: dict
         :param class_name: Name of the base WorldModel class, defaults to 'cognitive_nodes.world_model.WorldModel'.
         :type class_name: str
+        :param params: Additional parameters passed to :class:`WorldModel`.
+        :type params: dict
         """        
         super().__init__(name, class_name, **params)
         self.learner=Sim2D(self, wm_actuation_config, wm_perception_config, self.get_logger())
-
-    def predict(self, input_episodes: list[Episode]) -> list[Episode]:
-        predicted_episodes = [Episode(perception=self.learner.call(episode.old_perception, episode.action.actuation)) for episode in input_episodes]
-        return predicted_episodes
 
     
 class Sim2D(Learner):
     """
     Sim2D class: A class that mimics a model that learned the dynamics of a 2D simulator.
     Actually it uses the same simulator as the environment to predict the next perception.
+    It uses perceptions and actions in dictionary format (``{sensor: [{attribute: value}]}``).
     """    
     def __init__(self, node, actuation_config, perception_config, logger:RcutilsLogger, **params):
         """
         Constructor of the Sim2D class.
 
+        :param node: The node that uses this learner.
+        :type node: Sim2DWorldModel
         :param actuation_config: Dictionary with the parameters of the actuation.
         :type actuation_config: dict
         :param perception_config: Dictionary with the parameters of the perception.
         :type perception_config: dict
         :param logger: Logger object from the parent node.
         :type logger: RcutilsLogger
+        :param params: Additional keyword parameters passed to :class:`cognitive_nodes.deliberative_model.Learner`.
+        :type params: dict
         """        
         super().__init__(node, None, **params)
         self.model=SimpleScenario(visualize=False)
@@ -251,13 +322,14 @@ class Sim2D(Learner):
     def call(self, perception, action) -> Perception:  
         """
         Predicts the next perception according to a perception and an action.
+        Unlike the :meth:`cognitive_nodes.deliberative_model.Learner.call` of the base class, it takes two arguments.
 
-        :param perception: The start perception.
-        :type perception: cognitive_node_interfaces.msg.Perception
-        :param action: The action performed.
-        :type action: cognitive_node_interfaces.msg.Actuation
-        :return: The predicted perception.
-        :rtype: cognitive_node_interfaces.msg.Perception
+        :param perception: The start perception, normalized, as a dictionary ``{sensor: [{attribute: value}]}``.
+        :type perception: dict
+        :param action: The action performed, normalized, as a dictionary of the same form.
+        :type action: dict
+        :return: The predicted perception, normalized, in the same dictionary format.
+        :rtype: dict
         """        
         """"""
         self.logger.debug(f"DEBUG SIM2D: Perception: {perception} --- Action: {action}")

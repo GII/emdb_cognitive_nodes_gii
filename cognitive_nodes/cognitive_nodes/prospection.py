@@ -1,7 +1,7 @@
 
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.policy import Policy
-from core.service_client import ServiceClient, ServiceClientAsync
+from core.service_client import ServiceClientAsync
 from cognitive_nodes.utils import LTMSubscription
 
 from cognitive_node_interfaces.msg import SuccessRate
@@ -13,8 +13,19 @@ from cognitive_node_interfaces.srv import ContainsSpace, SendSpace, GetKnowledge
 class ProspectionDrive(Drive, LTMSubscription):
     """
     ProspectionDrive class. Represents a drive that searches for new knowledge using forward prospection on the LTM nodes.
+
+    The node follows the LTM and the success rates of the P-Nodes (``/pnode/<name>/success_rate``) and the Goals
+    (``/goal/<name>/confidence``). Each time a P-Node or a Goal exceeds its minimum rate, it is considered learned and a prospection
+    round is run: for each pair (learned Goal, learned P-Node) of the same domain (World Model), the spaces of both are requested
+    and compared with the ``contains_space`` services. If the space of the P-Node contains the space of the Goal (``goal_in_pnode``)
+    or the space of the Goal contains the space of the P-Node (``pnode_in_goal``), the Goal is considered to be a precondition of the
+    Goals linked to the P-Node, unless that would create a loop. Each round records at most one new relation, so that the
+    links can be created one by one.
+    The relations found are served by the ``drive/<name>/get_knowledge`` service
+    (:class:`cognitive_node_interfaces.srv.GetKnowledge`). The evaluation of the drive is 1.0 while there is knowledge
+    that has not been requested and 0.0 otherwise.
     """    
-    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_pnode_rate=0.84, min_goal_rate=0.84,**params):
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", ltm_id=None, min_pnode_rate=0.84, min_goal_rate=0.84, goal_in_pnode=True, pnode_in_goal=True, **params):
         """
         Constructor of the ProspectionDrive class.
 
@@ -28,6 +39,12 @@ class ProspectionDrive(Drive, LTMSubscription):
         :type min_pnode_rate: float
         :param min_goal_rate: Minimum confidence rate of Goals to be considered.
         :type min_goal_rate: float
+        :param goal_in_pnode: If True, a relation is accepted when the space of the P-Node contains the space of the Goal. Defaults to True.
+        :type goal_in_pnode: bool
+        :param pnode_in_goal: If True, a relation is accepted when the space of the Goal contains the space of the P-Node. Defaults to True.
+        :type pnode_in_goal: bool
+        :param params: Additional parameters passed to :class:`cognitive_nodes.drive.Drive`.
+        :type params: dict
         :raises Exception: Raises an exception if no LTM name is provided.
         """        
         super().__init__(name, class_name, **params)
@@ -38,6 +55,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.goals_info=None
         self.min_pnode_rate=min_pnode_rate
         self.min_goal_rate=min_goal_rate
+        self.goal_in_pnode=goal_in_pnode
+        self.pnode_in_goal=pnode_in_goal
         self.configure_prospection_suscriptor(self.LTM_id, self.cbgroup_client)
         self.get_knowledge_service = self.create_service(GetKnowledge, 'drive/' + str(
             name) + '/get_knowledge', self.get_knowledge_callback, callback_group=self.cbgroup_server)
@@ -48,6 +67,8 @@ class ProspectionDrive(Drive, LTMSubscription):
 
         :param ltm: ID of the LTM to subscribe to.
         :type ltm: str
+        :param callback_group: Callback group of the LTM subscription.
+        :type callback_group: rclpy.callback_groups.CallbackGroup
         """
         self.configure_ltm_subscription(ltm, callback_group)
         self.pnode_subscriptions = {}
@@ -55,6 +76,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.learned_pnodes=[]
         self.learned_goals=[]
         self.pnode_goals_dict={} #Dictionary of the goals linked to each pnode {'pnode0': ['goal0' ... ], ..., 'pnodeN': ['goal', ... ]}
+        self.pnode_domain_dict={} #Dictionary of the domain linked to each pnode {'pnode0': 'domain0', ..., 'pnodeN': 'domainN'}
+        self.goal_domain_dict={} #Dictionary of the domain linked to each goal {'goal0': 'domain0', ..., 'goalN': 'domainN'}
         self.found_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
         self.discarded_knowledge={} #Dictionary of upstream goal relationship found {'goal0': ['goal1', 'goal2',....], ..., 'goalN': {...}}
         self.new_knowledge=False
@@ -80,11 +103,14 @@ class ProspectionDrive(Drive, LTMSubscription):
         changes = self.changes_in_pnodes(ltm_dump)
         if changes:
             self.pnode_goals_dict = self.find_goals(ltm_dump)
+            self.pnode_domain_dict = self.find_pnode_domains(ltm_dump)
+            self.goal_domain_dict = self.find_goal_domains(ltm_dump)
 
 
     def find_goals(self, ltm_dump): #TODO refactor with find_goals in effectance.py
         """
         Creates a dictionary with the P-Nodes as keys and a list of the upstream goals as values.
+        The goals of a P-Node are the Goals that are neighbors of the C-Node that includes the P-Node.
 
         :param ltm_dump: The LTM dump to read.
         :type ltm_dump: dict
@@ -109,6 +135,51 @@ class ProspectionDrive(Drive, LTMSubscription):
         self.get_logger().info(f"DEBUG: {goals}")
         return goals
 
+    def find_pnode_domains(self, ltm_dump):
+        """
+        Creates a dictionary with the P-Nodes as keys and the corresponding domain as value.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        :return: P-Node-Domain dictionary.
+        :rtype: dict
+        """
+        cnode_list = ltm_dump["CNode"]
+        cnodes = {}
+        domains = {}
+
+        #Get the C-Node that corresponds to each P-Node
+        for cnode in cnode_list:
+            cnode_neighbors = cnode_list[cnode]['neighbors']
+            pnode= next((node["name"] for node in cnode_neighbors if node["node_type"] == "PNode"), None)
+            if pnode is not None:
+                cnodes[pnode] = cnode
+
+        for pnode, cnode in cnodes.items(): 
+            cnode_neighbors = ltm_dump["CNode"][cnode]["neighbors"]
+            domains[pnode] = next((node["name"] for node in cnode_neighbors if node["node_type"] == "WorldModel"), None)
+        self.get_logger().debug(f"DEBUG: {domains}")
+        return domains
+
+    def find_goal_domains(self, ltm_dump):
+        """
+        Creates a dictionary with the Goals as keys and the corresponding domain as value.
+
+        :param ltm_dump: Dictionary with the data from the LTM.
+        :type ltm_dump: dict
+        :return: Goal-Domain dictionary.
+        :rtype: dict
+        """
+        goal_list = ltm_dump["Goal"]
+        goals = {}
+        for goal in goal_list:
+            goal_neighbors = goal_list[goal]['neighbors']
+            domain= next((node["name"] for node in goal_neighbors if node["node_type"] == "WorldModel"), None)
+            if domain is not None:
+                goals[goal] = domain
+        self.get_logger().debug(f"DEBUG: {goals}")
+        return goals
+
     def changes_in_pnodes(self, ltm_dump): #TODO refactor with changes_in_pnodes in effectance.py
         """
         Returns True if a P-Node has been added or deleted.
@@ -123,7 +194,8 @@ class ProspectionDrive(Drive, LTMSubscription):
     
     async def success_callback(self, msg: SuccessRate):
         """
-        Callback that reads the success rate of a P-Node or a Goal.
+        Callback that reads the success rate of a P-Node or a Goal. If it exceeds the minimum rate for its type and was not learned before,
+        the node is marked as learned and a prospection round is run. This is a coroutine and must be awaited if called directly.
 
         :param msg: Message from P-Node or Goal.
         :type msg: cognitive_node_interfaces.msg.SuccessRate
@@ -142,12 +214,15 @@ class ProspectionDrive(Drive, LTMSubscription):
             raise RuntimeError("Expected node type 'P-Node' or 'Goal'")
         if success_rate>threshold and node_name not in learned_list:
             learned_list.append(node_name)
+            self.get_logger().info(f"DEBUG - {node_type} {node_name} learned with success rate {success_rate}")
             await self.do_prospection()
 
     async def do_prospection(self):
         """
-        This method executes the prospection process. 
-        It iterates over the learned goals and P-Nodes to find relationships between them.
+        This method executes the prospection process. This is a coroutine and must be awaited if called directly.
+        It iterates over the learned goals and P-Nodes to find relationships between them, as described in the class documentation.
+        Pairs already found or discarded, and pairs of different domains, are skipped. The search stops after the first new relation
+        is found; the result is stored in ``found_knowledge`` and ``new_knowledge`` is set to True.
         """        
         self.get_logger().info(f"DEBUG - Performing prospection...")
         for goal in self.learned_goals:
@@ -155,7 +230,11 @@ class ProspectionDrive(Drive, LTMSubscription):
                 #If a relationship has not been found before
                 discovered = any(element in self.pnode_goals_dict[pnode] for element in self.found_knowledge.get(goal, []))
                 discarded = any(element in self.pnode_goals_dict[pnode] for element in self.discarded_knowledge.get(goal, []))
-                if not (discovered or discarded): 
+                # Check if the goal and pnode belong to the same domain
+                goal_domain = self.goal_domain_dict.get(goal, "")
+                pnode_domain = self.pnode_domain_dict.get(pnode, "")
+                self.get_logger().info(f"DEBUG - Goal: {goal}, P-Node: {pnode}, Goal Domain: {goal_domain}, P-Node Domain: {pnode_domain}, Discovered: {discovered}, Discarded: {discarded}")
+                if not (discovered or discarded) and goal_domain == pnode_domain:
                     self.get_logger().info(f"DEBUG - Searching relation between {goal} and {pnode}")
                     #Get goal space:
                     service_name = f"goal/{goal}/send_space"
@@ -167,20 +246,22 @@ class ProspectionDrive(Drive, LTMSubscription):
                     if service_name not in self.node_clients:
                         self.node_clients[service_name] = ServiceClientAsync(self, SendSpace, service_name, self.cbgroup_client)
                     pnode_space = await self.node_clients[service_name].send_request_async()
-                    #Goal contains PNode
-                    service_name = f"goal/{goal}/contains_space"
-                    if service_name not in self.node_clients:
-                        self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    pnode_in_goal = (await self.node_clients[service_name].send_request_async(
-                        labels=pnode_space.labels, data=pnode_space.data, confidences=pnode_space.confidences
-                        )).contained
-                    #PNode contains Goal
-                    service_name = f"pnode/{pnode}/contains_space"
-                    if service_name not in self.node_clients:
-                        self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
-                    goal_in_pnode = (await self.node_clients[service_name].send_request_async(
-                        labels=goal_space.labels, data=goal_space.data, confidences=goal_space.confidences
-                        )).contained
+                    if self.pnode_in_goal:
+                        #Goal contains PNode
+                        service_name = f"goal/{goal}/contains_space"
+                        if service_name not in self.node_clients:
+                            self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
+                        pnode_in_goal = (await self.node_clients[service_name].send_request_async(space=pnode_space.space)).contained
+                    else:
+                        pnode_in_goal=False
+                    if self.goal_in_pnode:
+                        #PNode contains Goal
+                        service_name = f"pnode/{pnode}/contains_space"
+                        if service_name not in self.node_clients:
+                            self.node_clients[service_name] = ServiceClientAsync(self, ContainsSpace, service_name, self.cbgroup_client)
+                        goal_in_pnode = (await self.node_clients[service_name].send_request_async(space=goal_space.space)).contained
+                    else:
+                        goal_in_pnode=False
                     #TODO THIS IS TESTING BOTH THAT THE GOAL IS INSIDE THE PNODE OR THE PNODE INSIDE THE GOAL. WE HAVE TO DECIDE THE 
                     #MOST APPROPRIATE METHOD TO DECIDE WHEN TO CHAIN OR NOT TO CHAIN GOALS.
                     #IF THE GOAL IS CONTAINED IN THE PNODE WE ARE SURE THAT THE GOALS MUST BE CHAINED.
@@ -216,7 +297,12 @@ class ProspectionDrive(Drive, LTMSubscription):
                         self.discarded_knowledge[goal].extend(self.pnode_goals_dict[pnode])
 
                 else:
-                    self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} found before.")
+                    if discovered:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} found before.")
+                    if discarded:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} discarded before.")
+                    if goal_domain != pnode_domain:
+                        self.get_logger().info(f"DEBUG - Relationship between {goal} and {pnode} not found because they belong to different domains.")
 
     def traverse_neighbors(self, goal_name, downstream_goal, visited):
         """
@@ -271,6 +357,8 @@ class ProspectionDrive(Drive, LTMSubscription):
         :return: True if a loop would be created, False otherwise.
         :rtype: bool
         """
+        if upstream_goal == downstream_goal:
+            return True  # Direct loop
         visited = set()
         return self.traverse_neighbors(upstream_goal, downstream_goal, visited)
     
@@ -295,7 +383,9 @@ class ProspectionDrive(Drive, LTMSubscription):
 
     async def get_knowledge_callback(self, request, response):
         """
-        Callback that returns the knowledge found.
+        Callback that returns the knowledge found. This is a coroutine and must be awaited if called directly.
+        It returns the relations found until that moment as two parallel lists (``downstream_goals[i]`` receives ``upstream_goals[i]`` as neighbor),
+        clears ``new_knowledge`` and then runs a prospection round, whose results are returned in the next call.
 
         :param request: Empty request.
         :type request: cognitive_node_interfaces.srv.GetKnowledge.Request
@@ -321,10 +411,11 @@ class ProspectionDrive(Drive, LTMSubscription):
             
     def evaluate(self, perception=None):
         """
-        Evaluates the drive depending if there is newly discovered knowledge.
+        Evaluates the drive depending if there is newly discovered knowledge: 1.0 if there is, 0.0 otherwise.
 
         :param perception: Unused perception
-        :type perception: dict or NoneType
+        :type perception: core.container.Container or None
+        :return: None. The result is stored in ``self.evaluation``.
         """
         self.evaluation.evaluation=float(self.new_knowledge)
         self.evaluation.timestamp=self.get_clock().now().to_msg()
@@ -332,6 +423,7 @@ class ProspectionDrive(Drive, LTMSubscription):
 class PolicyProspection(Policy):
     """
     PolicyProspection class. Implements a policy that links goals to P-Nodes based on prospection.
+    Each execution requests the knowledge found by a :class:`ProspectionDrive` and, for each new relation, adds the upstream Goal as a neighbor of the downstream Goal.
     """    
     def __init__(self, name='policy', class_name='cognitive_nodes.policy.Policy', ltm_id=None, drive_name=None, **params):
         """
@@ -345,6 +437,8 @@ class PolicyProspection(Policy):
         :type ltm_id: str
         :param drive_name: Name of the prospection drive to use.
         :type drive_name: str
+        :param params: Additional parameters passed to :class:`cognitive_nodes.policy.Policy`.
+        :type params: dict
         :raises RuntimeError: Raises an exception if no LTM or prospection Drive name are provided.
         """        
         super().__init__(name, class_name, **params)
@@ -361,7 +455,7 @@ class PolicyProspection(Policy):
 
     async def execute_callback(self, request, response):
         """
-        Callback that executes the policy.
+        Callback that executes the policy. This is a coroutine and must be awaited if called directly.
         It sends a request to the prospection drive to get the knowledge found. Then, it links goals of the relations found.
 
         :param request: Empty request.

@@ -9,16 +9,28 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 from core.cognitive_node import CognitiveNode
-from core.utils import class_from_classname, msg_to_dict
-from cognitive_node_interfaces.srv import SetActivation, Predict, GetSuccessRate, IsCompatible, SaveModel
+from core.container import Container
+from core.utils import class_from_classname
+from cognitive_node_interfaces.srv import SetActivation, GetSuccessRate, IsCompatible, SaveModel
 from cognitive_nodes.episodic_buffer import EpisodicBuffer
-from cognitive_nodes.episode import Episode, Action, episode_msg_to_obj, episode_msg_list_to_obj_list, episode_obj_list_to_msg_list
+from cognitive_nodes.episode import Episode, container_msg_to_episode, container_to_episode_obj, episode_obj_to_msg
+from cognitive_nodes.random_utils import set_global_seeds
 
 class DeliberativeModel(CognitiveNode):
     """
-    Deliberative Model class, this class is a generic model that can be used to implement different types of deliberative models. 
+    Deliberative Model class, this class is a generic model that can be used to implement different types of deliberative models.
+
+    A Deliberative Model predicts the outcome of episodes. It uses an episodic buffer, a learner and a confidence evaluator,
+    which are ``None`` in this class and are created by the subclasses (World Models and Utility Models).
+    The services are created with the prefix ``service_prefix`` (``<service_prefix>/<name>/...``):
+
+    - ``set_activation``: :class:`cognitive_node_interfaces.srv.SetActivation`.
+    - ``predict``: the service type given by ``prediction_srv_type``, typically :class:`cognitive_node_interfaces.srv.Predict`.
+    - ``get_success_rate``: :class:`cognitive_node_interfaces.srv.GetSuccessRate`. Not implemented yet.
+    - ``is_compatible``: :class:`cognitive_node_interfaces.srv.IsCompatible`. Not implemented yet.
+    - ``save_model``: :class:`cognitive_node_interfaces.srv.SaveModel`.
     """
-    def __init__(self, name='model', class_name = 'cognitive_nodes.deliberative_model.DeliberativeModel', node_type="deliberative_model", prediction_srv_type=None, **params):
+    def __init__(self, name='model', class_name = 'cognitive_nodes.deliberative_model.DeliberativeModel', node_type="DeliberativeModel", service_prefix="deliberative_model", prediction_srv_type=None, **params):
         """
         Constructor of the Deliberative Model class.
 
@@ -28,12 +40,17 @@ class DeliberativeModel(CognitiveNode):
         :type name: str
         :param class_name: The name of the DeliberativeModel class.
         :type class_name: str
-        :param node_type: The type of the node, defaults to "deliberative_model".
+        :param service_prefix: The prefix for the services.
+        :type service_prefix: str
+        :param prediction_srv_type: Class name of the type of the prediction service (e.g. ``cognitive_node_interfaces.srv.Predict``).
+        :type prediction_srv_type: str
+        :param node_type: The type of the node, defaults to "DeliberativeModel".
         :type node_type: str
-        :param params: Additional keyword parameters reserved for future use.
+        :param params: Additional parameters passed to :class:`core.cognitive_node.CognitiveNode`.
         :type params: dict
+        :raises ValueError: If ``prediction_srv_type`` is not provided.
         """
-        super().__init__(name, class_name, **params)
+        super().__init__(name, class_name, node_type=node_type, **params)
 
         self.episodic_buffer=None
         self.learner=None
@@ -42,7 +59,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Set Activation Service
         self.set_activation_service = self.create_service(
             SetActivation,
-            node_type+ "/" + str(name) + '/set_activation',
+            service_prefix+ "/" + str(name) + '/set_activation',
             self.set_activation_callback,
             callback_group=self.cbgroup_server
         )
@@ -54,7 +71,7 @@ class DeliberativeModel(CognitiveNode):
             raise ValueError("prediction_srv_type must be provided and be a valid class name.")
         self.predict_service = self.create_service(
             prediction_srv_type,
-            node_type+ "/" + str(name) + '/predict',
+            service_prefix+ "/" + str(name) + '/predict',
             self.predict_callback,
             callback_group=self.cbgroup_server
         )
@@ -62,7 +79,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Get Success Rate Service
         self.get_success_rate_service = self.create_service(
             GetSuccessRate,
-            node_type+ "/" + str(name) + '/get_success_rate',
+            service_prefix+ "/" + str(name) + '/get_success_rate',
             self.get_success_rate_callback,
             callback_group=self.cbgroup_server
         )
@@ -70,7 +87,7 @@ class DeliberativeModel(CognitiveNode):
         # N: Is Compatible Service
         self.is_compatible_service = self.create_service(
             IsCompatible,
-            node_type+ "/" + str(name) + '/is_compatible',
+            service_prefix+ "/" + str(name) + '/is_compatible',
             self.is_compatible_callback,
             callback_group=self.cbgroup_server
         )
@@ -78,13 +95,10 @@ class DeliberativeModel(CognitiveNode):
         # N: Save Model Service
         self.save_model_service = self.create_service(
             SaveModel,
-            node_type+ "/" + str(name) + '/save_model',
+            service_prefix+ "/" + str(name) + '/save_model',
             self.save_model_callback,
             callback_group=self.cbgroup_server
         )
-
-        #TODO: Set activation from main_loop
-        #self.activation.activation = 1.0
 
     def set_activation_callback(self, request, response):
         """
@@ -106,26 +120,30 @@ class DeliberativeModel(CognitiveNode):
     
     def predict_callback(self, request, response):
         """
-        Get predicted perception values for the last perceptions not newer than a given
-        timestamp and for a given policy.
+        Predict the outcome of a set of episodes.
 
-        :param request: The request that contains the timestamp and the policy.
+        The ``input_episodes`` of the request (a :class:`core_interfaces.msg.Container` with a flattened episode, which
+        can have several rows) are converted into an episode and passed to :meth:`predict`. The
+        episodes obtained are returned in ``output_episodes``, also as a flattened episode.
+
+        :param request: The request that contains the input episodes (``input_episodes``).
         :type request: cognitive_node_interfaces.srv.Predict.Request
-        :param response: The response that included the obtained perception.
+        :param response: The response that includes the predicted episodes (``output_episodes``).
         :type response: cognitive_node_interfaces.srv.Predict.Response
-        :return: The response that included the obtained perception.
+        :return: The response that includes the predicted episodes.
         :rtype: cognitive_node_interfaces.srv.Predict.Response
         """
         self.get_logger().info('Predicting ...') 
-        input_episodes = episode_msg_list_to_obj_list(request.input_episodes)
+        input_episodes = container_msg_to_episode(request.input_episodes)
         output_episodes = self.predict(input_episodes)
-        response.output_episodes = episode_obj_list_to_msg_list(output_episodes)
+        response.output_episodes = episode_obj_to_msg(output_episodes, "output_episodes")
         self.get_logger().info(f"Prediction made... ")
         return response
     
     def get_success_rate_callback(self, request, response): # TODO: implement
         """
         Get a prediction success rate based on a historic of previous predictions.
+        Not implemented yet.
 
         :param request: Empty request.
         :type request: cognitive_node_interfaces.srv.GetSuccessRate.Request
@@ -133,6 +151,7 @@ class DeliberativeModel(CognitiveNode):
         :type response: cognitive_node_interfaces.srv.GetSuccessRate.Response
         :return: The response that contains the predicted success rate.
         :rtype: cognitive_node_interfaces.srv.GetSuccessRate.Response
+        :raises NotImplementedError: Always: the service is not implemented yet.
         """
         self.get_logger().info('Getting success rate..')
         raise NotImplementedError
@@ -142,6 +161,7 @@ class DeliberativeModel(CognitiveNode):
     def is_compatible_callback(self, request, response): # TODO: implement
         """
         Check if the Model is compatible with the current available perceptions.
+        Not implemented yet.
 
         :param request: The request that contains the current available perceptions.
         :type request: cognitive_node_interfaces.srv.IsCompatible.Request
@@ -149,6 +169,7 @@ class DeliberativeModel(CognitiveNode):
         :type response: cognitive_node_interfaces.srv.IsCompatible.Response
         :return: The response indicating if the Model is compatible or not.
         :rtype: cognitive_node_interfaces.srv.IsCompatible.Response
+        :raises NotImplementedError: Always: the service is not implemented yet.
         """
         self.get_logger().info('Checking if compatible..')
         raise NotImplementedError
@@ -157,7 +178,8 @@ class DeliberativeModel(CognitiveNode):
 
     def save_model_callback(self, request, response):
         """
-        Save the current model to a file.
+        Save the current model to a file. The file name is ``<prefix><name><suffix>`` and the saving is done by the ``save_model`` method of the learner.
+        If the learner does not exist or cannot save models, ``success`` is False.
 
         :param request: The request that contains the prefix and suffix for the file name.
         :type request: cognitive_node_interfaces.srv.SaveModel.Request
@@ -192,7 +214,7 @@ class DeliberativeModel(CognitiveNode):
         Returns the activation value of the Model.
 
         :param perception: Perception does not influence the activation.
-        :type perception: dict
+        :type perception: core.container.Container or None
         :param activation_list: List of activation values from other sources, defaults to None.
         :type activation_list: list
         :return: The activation of the instance and its timestamp.
@@ -201,15 +223,29 @@ class DeliberativeModel(CognitiveNode):
         self.activation.timestamp = self.get_clock().now().to_msg()
         return self.activation
 
-    def predict(self, input_episodes: list[Episode]) -> list:
-        input_data = self.episodic_buffer.buffer_to_matrix(input_episodes, self.episodic_buffer.input_labels)
+    def predict(self, input_episodes: Episode) -> Episode:
+        """
+        Predict the outcome of the episodes with the learner.
+
+        The input episodes are flattened and the inputs of the model are extracted from them with the episodic buffer;
+        the learner makes the prediction. If the learner is not configured yet (it returns None), the input
+        episodes are returned unchanged.
+
+        :param input_episodes: Episode (possibly with several rows) to predict.
+        :type input_episodes: cognitive_nodes.episode.Episode
+        :return: The predicted episodes.
+        :rtype: cognitive_nodes.episode.Episode
+        """
+        buffer = input_episodes.obtain_flattened_episode()
+        input_data = self.episodic_buffer.get_samples_from_buffer(buffer, n_samples=None)
         predictions = self.learner.call(input_data)
         if predictions is None:
             predicted_episodes = input_episodes  # If the model is not configured, return the input episodes
         else:
             self.get_logger().info(f"Predictions: {predictions}")
             self.get_logger().info(f"Output labels: {self.episodic_buffer.output_labels}")
-            predicted_episodes = self.episodic_buffer.matrix_to_buffer(predictions, self.episodic_buffer.output_labels)
+            prediction_container = self.episodic_buffer.matrix_to_container(predictions, self.episodic_buffer.output_labels, name= "predicted_episodes")
+            predicted_episodes = container_to_episode_obj(prediction_container)
         self.get_logger().info(f"Prediction made: {predicted_episodes}")
         return predicted_episodes
     
@@ -223,8 +259,12 @@ class Learner:
         """
         Constructor of the Learner class.
 
+        :param node: Cognitive node that uses this learner.
+        :type node: core.cognitive_node.CognitiveNode
         :param buffer: Episodic buffer to use.
         :type buffer: cognitive_nodes.episodic_buffer.EpisodicBuffer
+        :param params: Additional keyword parameters reserved for future use.
+        :type params: dict
         """        
         self.node = node
         self.model=None
@@ -241,12 +281,10 @@ class Learner:
     
     def call(self, x):
         """
-        Placeholder method for predicting an outcome.
+        Placeholder method for predicting an outcome. Subclasses return the prediction, or None if the model is not configured.
 
-        :param perception: Perception dictionary.
-        :type perception: dict
-        :param action: Candidate action dictionary.
-        :type action: dict
+        :param x: The inputs of the model.
+        :type x: numpy.ndarray
         :raises NotImplementedError: Not implemented yet.
         """        
         raise NotImplementedError
@@ -255,12 +293,15 @@ class Learner:
 class ANNLearner(Learner):
     """
     Class that implements a Neural Network-based learner using PyTorch.
+
+    The network (:class:`ANNModel`) is created the first time it is trained (or loaded from ``model_file``), once the dimensions
+    of the data are known. It is trained with Adam, a learning rate scheduler and, when validation data is available, early stopping.
     """    
 
 
     def __init__(self, node, buffer, batch_size=32, epochs=50, output_activation='sigmoid', 
                  hidden_activation='relu', hidden_layers=[128], learning_rate=0.001, loss_function=nn.MSELoss, val_function=nn.L1Loss, 
-                 model_file=None, device='cpu', **params):
+                 model_file=None, device='auto', **params):
         """Initialize the ANNLearner with PyTorch-based neural network configuration.
 
         :param node: The cognitive node that uses this learner.
@@ -285,15 +326,23 @@ class ANNLearner(Learner):
         :type val_function: type, optional
         :param model_file: Path to pre-trained model file to load, defaults to None
         :type model_file: str, optional
-        :param device: Device to use for training ('cpu' or 'cuda'), defaults to 'cpu'
+        :param device: Device to use for training ('auto', 'cpu' or 'cuda'); 'auto' uses CUDA when
+            available and the CPU otherwise, defaults to 'auto'
         :type device: str, optional
         :param params: Additional keyword parameters reserved for future use.
         :type params: dict
+        :raises ValueError: If the device is not 'auto', 'cpu' or 'cuda', or if 'cuda' is requested but not available.
         """
         super().__init__(node, buffer, **params)
         
-        # PyTorch specific setup
-        self.device = torch.device(device if torch.cuda.is_available() and device == 'cuda' else 'cpu')
+        # Device configuration: "auto" uses CUDA when available and the CPU otherwise.
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device not in ["cpu", "cuda"]:
+            raise ValueError("Invalid device specified. Use 'auto', 'cpu' or 'cuda'.")
+        elif device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA is not available. Use 'cpu' or ensure CUDA is properly installed.")
+        self.device = device
 
         self.batch_size = batch_size
         self.epochs = epochs
@@ -322,6 +371,9 @@ class ANNLearner(Learner):
         :param output_length: Number of output features/predictions from the neural network.
         :type output_length: int
         """
+        # Seed torch (and python/numpy globals) so weight initialisation and
+        # DataLoader shuffling are reproducible when a seed is configured.
+        set_global_seeds(getattr(self.node, 'random_seed', None))
         self.model = ANNModel(
             input_size=input_length,
             output_size=output_length,
@@ -338,7 +390,8 @@ class ANNLearner(Learner):
         self.node.get_logger().info(f"Model configured with input: {input_length}, output: {output_length}")
 
     def load_model(self):
-        """Loads model from file."""
+        """Loads the model from ``model_file``: the architecture, the weights and the state of the optimizer are restored from the checkpoint.
+        If the file does not exist, a warning is logged and nothing is loaded."""
         if os.path.exists(self.model_file):
             checkpoint = torch.load(self.model_file, map_location=self.device)
             
@@ -396,7 +449,7 @@ class ANNLearner(Learner):
         return True, filepath
 
     def reset_model_state(self):
-        """Reset optimizer state while keeping model weights."""
+        """Reset optimizer state while keeping model weights. Does nothing if the model is not configured."""
         if self.configured:
             # Save current weights
             weights = self.model.state_dict().copy()
@@ -410,6 +463,11 @@ class ANNLearner(Learner):
     def train(self, x_train, y_train, epochs=None, batch_size=None, validation_split=0.0, 
               x_val=None, y_val=None, verbose=1, reset_optimizer=True):
         """Train the neural network model using PyTorch with optional validation and early stopping.
+
+        If the model is not configured yet, it is configured with the dimensions of the data. Early stopping and
+        learning rate scheduling only apply when validation data is available (``x_val`` and ``y_val``, or ``validation_split`` greater than 0);
+        with validation, training stops after ``epochs // 5`` epochs without improvement and the best weights are restored.
+        The training loss is the ``loss_function`` of the constructor and the validation loss is ``val_function``.
 
         :param x_train: Training input data (features).
         :type x_train: np.ndarray or torch.Tensor
@@ -627,7 +685,11 @@ class ANNLearner(Learner):
         return mae.cpu().item()
 
     def get_weights(self):
-        """Get the current model , uses the state dictionary."""
+        """Get the current weights of the model.
+
+        :return: The state dictionary of the model, or None if the model is not configured.
+        :rtype: dict or None
+        """
         if not self.configured:
             self.node.get_logger().warning("Model not configured. Cannot get weights.")
             return None
@@ -655,7 +717,7 @@ class ANNLearner(Learner):
 
 
 class ANNModel(nn.Module):
-    """PyTorch neural network model."""
+    """PyTorch neural network model: a multilayer perceptron whose hidden layers are linear layers followed by layer normalization, an activation and dropout (0.1)."""
     
     def __init__(self, input_size, output_size, hidden_layers=[128], 
                  hidden_activation='relu', output_activation='sigmoid'):
@@ -667,9 +729,9 @@ class ANNModel(nn.Module):
         :type output_size: int
         :param hidden_layers: List of integers specifying the size of each hidden layer, defaults to [128]
         :type hidden_layers: list, optional
-        :param hidden_activation: Activation function for hidden layers ('relu', 'tanh', 'sigmoid'), defaults to 'relu'
+        :param hidden_activation: Activation function for hidden layers ('relu', 'tanh', 'sigmoid'; any other value is replaced by 'relu'), defaults to 'relu'
         :type hidden_activation: str, optional
-        :param output_activation: Activation function for output layer ('sigmoid', 'tanh', 'relu', 'linear'), defaults to 'sigmoid'
+        :param output_activation: Activation function for output layer ('sigmoid', 'tanh', 'relu'; any other value, e.g. 'linear', means no activation), defaults to 'sigmoid'
         :type output_activation: str, optional
         """        
         super(ANNModel, self).__init__()
@@ -728,7 +790,6 @@ class ANNModel(nn.Module):
             x = layer(x)
         return x
 
-
 class AsymmetricMSELoss(nn.Module):
     """Asymmetric Mean Squared Error Loss that penalizes underestimations and overestimations differently."""
     
@@ -772,6 +833,8 @@ class Evaluator:
         :type learner: Learner
         :param buffer: Episodic buffer to use.
         :type buffer: cognitive_nodes.episodic_buffer.EpisodicBuffer
+        :param params: Additional keyword parameters reserved for future use.
+        :type params: dict
         """
         self.node = node
         self.learner = learner

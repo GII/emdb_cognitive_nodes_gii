@@ -1,0 +1,8 @@
+# GetDreamingSelection.srv
+
+# Request dont need any input parameters, as the service is designed to retrieve the current dreaming selection.
+---
+
+string world_model
+string utility_model
+bool   active

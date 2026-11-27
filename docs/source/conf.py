@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.abspath("../../cognitive_nodes"))
 project = "e-MDB Cognitive Nodes implemented by the GII"
 copyright = "2025, GII"
 author = "GII"
-release = "Apache-2.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -24,16 +23,18 @@ extensions = [
     # "sphinx.ext.autosummary",
     "sphinx.ext.todo",
     "sphinx.ext.viewcode",
+    "sphinx.ext.napoleon",
     "myst_parser",
 ]
+
+# The constructors document their parameters: show them with the class
+autoclass_content = "both"
 
 templates_path = ["_templates"]
 exclude_patterns = []
 
 autodoc_mock_imports = [
     "rclpy",
-    "tensorflow",
-    "tf",
     "std_msgs",
     "core",
     "core_interfaces",
@@ -50,11 +51,18 @@ autodoc_mock_imports = [
     "geometry_msgs",  
     "sensor_msgs",    
     "nav_msgs",      
-    "builtin_interfaces"
+    "builtin_interfaces",
+    "xarray",
+    "ollama",
+    "openai",
+    "yamlloader",
+    "tkinter",
+    "gymnasium",
+    "stable_baselines3",
+    "ament_index_python",
 ]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]

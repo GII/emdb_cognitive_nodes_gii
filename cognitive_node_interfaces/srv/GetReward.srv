@@ -1,6 +1,7 @@
 builtin_interfaces/Time timestamp
-Perception old_perception
-Perception perception
+core_interfaces/Container old_perception
+core_interfaces/Container perception
+bool update_space
 ---
 float32 reward
 bool updated
